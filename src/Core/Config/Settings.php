@@ -50,6 +50,9 @@ final class Settings {
 			'cache_sie'                => 3 * DAY_IN_SECONDS,
 			'cache_nonce_refresh'      => true,
 			'cache_warm'               => true,
+			'woo_count_selectors'      => [],
+			'woo_total_selectors'      => [],
+			'woo_recently_viewed'      => true,
 		];
 	}
 
@@ -206,7 +209,12 @@ final class Settings {
 				$out[ $key ] = (int) max( $min, min( $max, (int) $input[ $key ] ) );
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm' ] as $key ) {
+		foreach ( [ 'woo_count_selectors', 'woo_total_selectors' ] as $key ) {
+			if ( isset( $input[ $key ] ) && is_array( $input[ $key ] ) ) {
+				$out[ $key ] = self::selectors( $input[ $key ] );
+			}
+		}
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
@@ -218,6 +226,27 @@ final class Settings {
 	/**
 	 * URL del hub: https obligatorio salvo en localhost (pruebas). Inválida → vacía (hub apagado).
 	 */
+	/**
+	 * Selectores CSS del mini-carrito: sin caracteres que permitan salir del contexto (no se imprimen en
+	 * HTML, pero sí en el JSON de configuración y en querySelectorAll).
+	 *
+	 * @param array<mixed> $list Selectores.
+	 * @return list<string>
+	 */
+	public static function selectors( array $list ): array {
+		$out = [];
+		foreach ( $list as $selector ) {
+			if ( ! is_string( $selector ) ) {
+				continue;
+			}
+			$selector = trim( preg_replace( '/\s+/', ' ', $selector ) ?? '' );
+			if ( 1 === preg_match( '/^[A-Za-z0-9_\-.#\[\]="\' :>()*+~^$|]{1,200}$/', $selector ) ) {
+				$out[ $selector ] = true;
+			}
+		}
+		return array_slice( array_keys( $out ), 0, 20 );
+	}
+
 	public static function sanitizeHubUrl( string $url ): string {
 		$url = trim( $url );
 		if ( '' === $url || strlen( $url ) > 200 ) {

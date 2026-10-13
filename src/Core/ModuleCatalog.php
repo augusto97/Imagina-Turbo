@@ -26,6 +26,7 @@ final class ModuleCatalog {
 			'profiler'          => \ImaginaTurbo\Modules\Profiler\ProfilerModule::class,
 			'cache_coordinator' => \ImaginaTurbo\Modules\CacheCoordinator\CacheModule::class,
 			'cloudflare'        => \ImaginaTurbo\Modules\Cloudflare\CloudflareModule::class,
+			'woo_cart'          => \ImaginaTurbo\Modules\WooCart\WooCartModule::class,
 		];
 	}
 

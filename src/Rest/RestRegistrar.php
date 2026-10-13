@@ -35,6 +35,7 @@ final class RestRegistrar {
 			new HubController( $this->container ),
 			new CacheController( $this->container ),
 			new CloudflareController( $this->container ),
+			new WooController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

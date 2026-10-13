@@ -176,6 +176,16 @@ Verificado en el código de WooCommerce 11.2.1 y de los temas Astra, Kadence, Bl
 - **Combinaciones de filtros de Woo:** detectar URLs con más de N parámetros `filter_*`/`query_type_*`/`min_price`/`max_price`; agregar `noindex, nofollow` vía cabecera `X-Robots-Tag` y alimentar la regla de rate limit de Cloudflare.
 - **Aceptación:** un 404 de imagen se resuelve en < 5 ms de PHP sin cargar plugins ni tema; XML-RPC bloqueado no afecta a Jetpack cuando está instalado.
 
+### Implementación (fase 4)
+
+- **`EarlyGuard`** corre en el loader MU, sin autoloader ni base de datos. Solo se carga para requests candidatos (asset inexistente, XML-RPC, `?author=` o REST con `/users` o `rest_route`): en una página normal cuesta unas comparaciones. Responde con la cabecera `X-ITB-Shield: <motivo>` y termina el request.
+- **Credenciales HTTP**: el `.htaccess` de WordPress copia la cabecera `Authorization` a `HTTP_AUTHORIZATION` aunque venga vacía. Solo cuenta si tiene valor; si no, el bloqueo de `/wp/v2/users` nunca se aplicaría (pasó en OpenLiteSpeed).
+- **XML-RPC y usuarios**: la config compilada los apaga si un plugin activo los requiere según la matriz (`requires.xmlrpc`, `requires.rest_users`). Comprobado con Jetpack: con él activo, XML-RPC responde 200; sin él, 403.
+- **Heartbeat**: se quita del frontend solo para visitantes sin sesión (con sesión, un LMS o un chat puede usarlo, y quitar el script quita también los que dependen de él). En el admin, `heartbeat_settings` fija el intervalo: 60 s, 15 s en el editor.
+- **Filtros de Woo**: con más de N parámetros de filtro, `X-Robots-Tag: noindex, nofollow` en `send_headers`.
+- **Cron**: la pantalla muestra si `DISABLE_WP_CRON` está activo y los comandos listos para copiar (WP-CLI y curl). No se edita `wp-config.php`.
+- **Medido en el sitio de pruebas** (OpenLiteSpeed, contenedor lento): un asset inexistente pasa de 250 ms a 10 ms. Esos 10 ms son el arranque del core de WordPress hasta los MU plugins (medido con un MU plugin que corre antes que el loader); la guardia añade < 0,3 ms. En un servidor normal ese arranque son unos pocos ms. Bajar de ahí exige cortar antes de PHP (reglas del servidor), que es lo que hace la capa del edge.
+
 ---
 
 ## 7. Ajustes rápidos (`Tweaks`) — reemplazo de Perfmatters
@@ -183,6 +193,22 @@ Verificado en el código de WooCommerce 11.2.1 y de los temas Astra, Kadence, Bl
 - **Riesgo:** seguro, salvo los marcados. **Por defecto:** los seguros activos.
 - Lista: desactivar emojis; desactivar embeds (oEmbed discovery y `wp-embed`); quitar RSD, wlwmanifest, shortlink, generator, enlaces REST en `<head>`; dashicons solo para logueados; desactivar self-pingbacks; limitar revisiones (configurable); intervalo de autosave; quitar `wc-password-strength-meter` fuera de cuenta/checkout; desactivar el Marketing Hub, el panel de análisis y los avisos de WooCommerce Admin si no se usan (moderado); desactivar feeds RSS (opcional); desactivar comentarios globalmente (opcional); quitar jQuery Migrate (**invasivo**, solo con verificación); desactivar Google Fonts de temas conocidos (moderado).
 - **Aceptación:** cada ajuste tiene su propio interruptor, descripción en español y nivel de riesgo visible.
+
+### Implementación (fase 4)
+
+Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
+
+- **Emojis**: `print_emoji_detection_script` (`wp_head` y `admin_print_scripts`), `wp_enqueue_emoji_styles`, `print_emoji_styles`, `wp_staticize_emoji` (feeds y correo) y el filtro `emoji_svg_url`.
+- **Limpieza del `<head>`**: `rsd_link`, `wp_generator`, `wp_shortlink_wp_head` y `wp_shortlink_header`. `wlwmanifest_link` ya no está enganchado en el core.
+- **Enlaces REST**: `rest_output_link_wp_head` y `rest_output_link_header`.
+- **Embeds**: `wp_oembed_add_discovery_links` (prioridad por defecto), `wp_oembed_add_host_js` y el script `wp-embed`.
+- **Autoguardado**: `AUTOSAVE_INTERVAL` se define después de `plugins_loaded`, así que la constante se define antes que el core.
+- **WooCommerce Admin**: el filtro `woocommerce_admin_features` (quita `marketing`, `analytics`, `remote-inbox-notifications`). `woocommerce_admin_disabled_features` no existe.
+- **Medidor de contraseña**: WooCommerce ya lo limita a carrito, checkout y cuenta. El ajuste lo quita en cualquier otra página donde lo encole un plugin.
+- **Perfmatters encendido**: el módulo se apaga entero por solapamiento. La migración lee `perfmatters_options` (claves verificadas en 2.5.0 y 2.6.6: las casillas se guardan como `'1'`), propone los equivalentes y lista lo que no tiene, con dónde vive (WooCart, plugin de caché, fases 6 y 7).
+- Los ajustes no seguros exigen confirmación en la REST (428) y en la pantalla.
+
+---
 
 ---
 

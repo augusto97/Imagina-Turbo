@@ -176,6 +176,16 @@ Notas:
 - **Modo de prueba**: la acción `log` en reglas personalizadas es exclusiva de planes Enterprise. En Free/Pro/Business, las reglas nuevas entran con `managed_challenge` durante 7 días (un humano pasa, un bot no) y luego pasan a `block`. Las rutas de API/webhooks ya quedaron excluidas por la regla 1.
 - Antes de reutilizar patrones del 8G, revisar su licencia y dar crédito a su autor (Jeff Starr, Perishable Press) en el código y el README.
 
+**Implementado en la fase 4** (verificado en la documentación de Cloudflare el 2026-10-13):
+
+- Reglas personalizadas: Free 5, Pro 20, Business 100. Sin regex por debajo de Business: solo `contains`, `starts_with`, `ends_with`, `in`, `lower()` y `url_decode()`. Ninguna regla propia lleva `matches`.
+- **No se usa la regla `skip`**: saltaría también las reglas del cliente que vienen después. Cada regla propia lleva `and not (<webhooks>)`: `/wc-api/`, `?wc-api=` y los `requires.webhook_paths` de la matriz (validados con un patrón de ruta; los inválidos se descartan).
+- Tres reglas: `itb-fw-exploits`, `itb-fw-surface` (XML-RPC solo si ningún plugin lo requiere) e `itb-fw-bots`. Todas con el host del sitio, riesgo moderado y fuera de la selección por defecto.
+- **Desafío → bloqueo**: entran con `managed_challenge`. `itb_cf_challenge` guarda cuándo se vio cada una en desafío en la zona; a los 7 días el plan propone pasarla a `block` (cambio normal, con snapshot). Si el módulo se apaga, el plan propone eliminarlas.
+- El token necesita **Zone WAF: Edit**. Al conectar se comprueba la lectura de la fase del firewall (`waf_read`).
+- Eventos: `firewallEventsAdaptive` (24 h, hasta 1000), agrupados por descripción de regla y acción, con la ruta y el país más frecuentes. Se renuevan cada hora con las analíticas.
+- **Pendiente de la zona real**: que `url_decode()` coincide con `%2e%2e` y `+`, el comportamiento de `dry_run` en estas fases y que los eventos llegan con la descripción de la regla.
+
 ### Rate limiting (`http_ratelimit`)
 
 En Free hay una sola regla, con características y periodos limitados (típicamente por IP, ventanas cortas y condiciones restringidas a la ruta; verificar). Plantilla por defecto:
@@ -184,6 +194,8 @@ En Free hay una sola regla, con características y periodos limitados (típicame
 - **Limitación del plan Free:** la expresión solo puede usar la ruta *(verificar)*. El checkout clásico va a `/?wc-ajax=checkout` (ruta `/`) y **no se puede cubrir** en Free. En Free, el panel lo dice explícitamente y la protección del checkout clásico queda en: Turnstile/reCAPTCHA de la pasarela, CrowdSec y la guardia PHP (límite por IP con APCu/Redis si están disponibles, fase 4). En Pro o superior, agregar regla con `any(http.request.uri.args["wc-ajax"][*] eq "checkout")`.
 - Umbral inicial: 5 peticiones / 10 s por IP → bloqueo por el tiempo que permita el plan.
 - En planes superiores agregar reglas para búsquedas (`?s=`), combinaciones de filtros y `?add-to-cart=`.
+
+**Implementado en la fase 4**: una regla `itb-rl-login`, objeto `ratelimit` en la regla (no en `action_parameters`), `characteristics: [cf.colo.id, ip.src]` (`cf.colo.id` es obligatorio), 5 peticiones en 10 s. Free: expresión solo con ruta y bloqueo de 10 s; Pro o superior: host, checkout clásico (`?wc-ajax=checkout`) y bloqueo de 10 minutos. El login personalizado (WPS Hide Login y otros) se toma de las rutas detectadas.
 
 ### Capa 2 — Cerrar el origen
 
@@ -194,11 +206,15 @@ En Free hay una sola regla, con características y periodos limitados (típicame
 - Guía en el admin: permitir 80/443 solo desde los rangos de IP de Cloudflare (lista oficial publicada por Cloudflare) en el firewall del VPS (ServerAvatar/UFW/Plesk), o usar Authenticated Origin Pulls si el servidor lo soporta.
 - Verificar que OpenLiteSpeed use la IP real (`CF-Connecting-IP`) solo desde IPs de Cloudflare de confianza, para que CrowdSec y los logs vean al visitante real.
 
+**Implementado en la fase 4** (`OriginLock`): el perfilador ya guarda en cada muestra por dónde llegó el request, sin coste extra. `via_cf`: 0 directo desde IP pública, 1 Cloudflare con la IP real en `REMOTE_ADDR`, 2 local (CLI, loopback, red privada), 3 Cloudflare con la IP del proxy en `REMOTE_ADDR` (el servidor no restaura la IP real: CrowdSec y los límites por IP ven a Cloudflare). Con 20 muestras o más de los últimos 7 días (sin cron), la pantalla dice si el origen está abierto, cerrado o si el tráfico no pasa por Cloudflare. Las muestras anteriores a la 0.6 no distinguían local y se ignoran. La comprobación desde fuera (pedir la IP del servidor con el `Host` del sitio) queda para el verificador.
+
 ### Capa 3 — Servidor
 
 - **CrowdSec** (ya instalado): reputación de IPs y bloqueo por comportamiento. El plugin no lo duplica; solo verifica que reciba la IP real.
 - **`HtaccessWriter`** (sitios Apache/Plesk): subconjunto de reglas 8G entre marcadores `# BEGIN Imagina Turbo Firewall` / `# END Imagina Turbo Firewall`. Antes de escribir: respaldo. Después: pedir la home, una página de producto y `/wp-json/`; si alguna no responde 200, restaurar el respaldo automáticamente.
 - **OpenLiteSpeed**: solo interpreta parte del `.htaccess` y puede requerir recarga del servidor. Ofrecer las reglas como opcionales y avisar que dependen de la configuración del servidor. La protección principal en OLS es Cloudflare + CrowdSec.
+
+**Implementado en la fase 4** (`HtaccessWriter`): el bloque va **al principio** del archivo (detrás del de WordPress, la regla `[L]` de `index.php` terminaría antes). Cubre métodos TRACE/TRACK/DEBUG, recorrido de directorios, `base64_`, `union select`, `<script`, `GLOBALS`/`_REQUEST` como parámetro, `/etc/passwd` y `eval(` en el query (salvo `/wc-api/` y `?wc-api=`), archivos sensibles, PHP en uploads, `readme.html` y `license.txt`. Respaldo completo en `itb_htaccess_backup`, autoprueba de portada, un producto y `/wp-json/` con un parámetro único, y restauración automática si alguna no responde 200. Probado en OpenLiteSpeed: lee las reglas después de reiniciar el servidor; quitar el bloque deja el archivo idéntico al original.
 
 ### Capa 4 — Guardia PHP mínima
 

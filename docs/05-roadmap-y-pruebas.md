@@ -44,7 +44,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - `WooCart` (Store API, fragments fuera, cookies neutralizadas, geolocalización).
 - **Aceptación:** criterios del módulo 3 en `docs/02-modulos.md`, probados en Astra, Flatsome y Woodmart (o los temas reales de los clientes).
 
-### Fase 4 — Escudo, ajustes y firewall
+### Fase 4 — Escudo, ajustes y firewall ✅ (ver "Estado de la fase 4" al final; eventos reales, `url_decode` y la autoprueba en Apache quedan para las pruebas reales)
 - `Shield`, `Tweaks` (reemplazo de Perfmatters), firewall edge (plantillas, modo desafío → bloqueo), rate limiting, verificación de origen cerrado, `HtaccessWriter` para Apache.
 - Migración desde Perfmatters (detección, mapeo de sus ajustes equivalentes, aviso).
 - **Aceptación:** requests de basura (404 de assets, XML-RPC, escáneres) no cargan plugins ni tema; ningún webhook de pasarela de pago bloqueado en pruebas; el firewall en desafío no afecta navegación ni checkout de usuarios reales.
@@ -246,4 +246,31 @@ Pendiente para las pruebas reales:
 - `cf-cache-status: HIT` con un producto en el carrito.
 - Flatsome, Woodmart y el widget de carrito de Elementor Pro (selectores marcados como no verificados).
 - Pasarelas reales de LATAM.
+
+## Estado de la fase 4
+
+Completada el 2026-10-13 (versión 0.6.0). Probada en OpenLiteSpeed + LSCache + WooCommerce 11.2.1 (tema Astra) y con el simulador de Cloudflare (`tests/e2e/mock-cloudflare.php`, que ahora devuelve eventos del firewall y valida los paréntesis fuera de las cadenas).
+
+| Criterio | Resultado |
+|---|---|
+| La basura no carga plugins ni tema | Asset inexistente: 404 en 10 ms (antes 250 ms), con `X-ITB-Shield: static_miss` y `Cache-Control: public, max-age=600`. `?author=1` 404, XML-RPC 403, `/wp-json/wp/v2/users` y `?rest_route=/wp/v2/users` 401. Con sesión, `/wp/v2/users` sigue en 200 |
+| 404 de imagen en < 5 ms de PHP | La guardia añade < 0,3 ms. Los 10 ms medidos son el arranque del core hasta los MU plugins en este contenedor (medido con un MU plugin previo al loader) |
+| XML-RPC bloqueado no afecta a Jetpack | Con Jetpack activo, la config deja XML-RPC abierto (200); al desactivarlo vuelve a 403 |
+| Ningún webhook bloqueado | Las reglas del edge excluyen `/wc-api/`, `?wc-api=` y las rutas de la matriz; las del `.htaccess`, `/wc-api/` y `?wc-api=` (comprobado con `../` en el query) |
+| El desafío no afecta a la navegación | Las reglas entran en `managed_challenge` y pasan a `block` a los 7 días (plan probado adelantando la fecha). **El efecto sobre visitantes reales queda para la zona real** |
+| Firewall en la zona | Crear, pasar a bloqueo y eliminar al apagar el módulo, con snapshot. Rate limit en Free: solo ruta, 10 s |
+| `.htaccess` | Bloque al principio, autoprueba (portada, producto, REST), quitar deja el archivo idéntico. En OLS bloquea `.env`, `readme.html`, PHP en uploads, `../`, `<script>` y TRACE tras reiniciar el servidor |
+| Ajustes rápidos | Seguros activos por defecto; el HTML sale sin emojis, RSD, generator, shortlink ni enlaces REST. Moderados e invasivos piden confirmación (428). Feeds → 301, jQuery Migrate fuera, oEmbed fuera, Heartbeat 60 s / 15 s en el editor |
+| Migración de Perfmatters | Equivalencias y no equivalencias mostradas; importación con confirmación y registrada |
+
+Hallazgo corregido: OpenLiteSpeed (con el `.htaccess` de WordPress) define `HTTP_AUTHORIZATION` vacío en todos los requests y el bloqueo de usuarios no se aplicaba.
+
+Calidad: 203 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, E2E del admin con las pantallas Ajustes rápidos y Firewall (escritorio y móvil), benchmark de la etapa temprana 0,08 ms.
+
+Pendiente para las pruebas reales:
+
+- Eventos reales del firewall (`firewallEventsAdaptive` en Free) y que lleven la descripción de la regla.
+- `url_decode()` con `%2e%2e` y `+` en el query, y `dry_run` en las fases WAF y rate limit.
+- Autoprueba del `.htaccess` en Apache (Plesk).
+- Origen cerrado con tráfico directo real.
 

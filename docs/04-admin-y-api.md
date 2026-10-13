@@ -12,11 +12,11 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Carga condicional** | Reglas por tipo de request/endpoint. Candidatos sugeridos con su ahorro estimado. Experimentos en curso y su evidencia. Botón "probar regla" (lanza el verificador). |
 | **Caché** | Adaptador activo, TTL, tags, mapa de purga, cola de purgas, recalentado (fuentes, progreso, pausa por carga), purga manual por URL/tag/todo. |
 | **Cloudflare** | Conexión del token (asistente), zona y plan, ajustes de zona, reglas propias y de terceros (solo lectura), **diff** de cambios propuestos, aplicar, historial de snapshots con revertir, deriva detectada. |
-| **Firewall** | Reglas por capa (edge, servidor, PHP), modo de cada regla (desafío/bloqueo), eventos recientes, excepciones (webhooks, IPs), verificación de origen cerrado. |
+| **Firewall** | Reglas del edge que se proponen (ataques en la URL, superficie de WordPress, escáneres) y límite de peticiones a login y checkout; sus cambios pendientes en la zona con el mismo ciclo de aplicar y snapshot que Cloudflare; eventos de las últimas 24 h por regla; verificación de origen cerrado e IP real; reglas en `.htaccess` con respaldo y autoprueba. |
 | **WooCommerce** | Carrito por Store API (selectores del mini-carrito, prueba en vivo), cookies neutralizadas, páginas excluidas, geolocalización. |
 | **Navegación instantánea** | Modo y eagerness, exclusiones, prefetch predictivo (top transiciones), View Transitions, métricas de prerender. |
 | **Assets** | Gestor por ruta (vista tipo script manager con previsualización). |
-| **Ajustes rápidos** | Lista de tweaks con interruptor individual. |
+| **Ajustes rápidos** | Escudo del servidor (interruptores, intervalos de Heartbeat, límite de filtros, prueba como visitante), guía de cron del sistema, ajustes con interruptor y riesgo (confirmación para moderados e invasivos) y migración desde Perfmatters. |
 | **Base de datos** | Auditoría, acciones con respaldo, programación. |
 | **Compatibilidad** | Plugins/tema detectados, reglas de la matriz aplicadas, conflictos y solapamientos, versión de la matriz y firma. |
 | **Registro** | Todos los eventos: cambios, aplicaciones, reversiones, modo seguro, errores de API. Filtros y exportación. |
@@ -54,8 +54,14 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/cloudflare/apply` | `{ids, confirm}`: valida con `dry_run`, guarda snapshot, aplica y restaura solo si algo falla. Exige módulo activo y dominio permitido (409) y `confirm` (428) |
 | GET / POST | `/cloudflare/snapshots` · `/cloudflare/snapshots/{id}/restore` | Historial (50 por zona) · restaurar (`confirm`), guardando antes un snapshot del estado actual |
 | GET | `/cloudflare/analytics` | Peticiones de las últimas 24 h por estado de caché y rutas que más llegan al origen (se renueva cada hora) |
-| GET / PUT | `/firewall/rules` | Reglas y modo |
-| GET | `/firewall/origin-check` | Estado del cierre del origen |
+| GET | `/firewall/status` | Reglas elegidas, cambios pendientes del firewall en la zona (fases WAF y rate limit), notas del plan, eventos guardados, origen cerrado (muestras de 7 días), IP real, estado del `.htaccess` y su bloque |
+| PUT | `/firewall/settings` | `{rules: {exploits, surface, bots}, ratelimit}` (recompila; se aplican desde `/cloudflare/apply`) |
+| GET | `/firewall/events` | Eventos del firewall de las últimas 24 h agrupados por regla y acción (`firewallEventsAdaptive`, se renueva cada hora) |
+| POST | `/firewall/htaccess` | `{action: apply\|remove, confirm}`: respaldo, escritura del bloque al principio, autoprueba (portada, un producto, `/wp-json/`) y restauración si alguna no responde 200. 428 sin `confirm`, 409 en nginx |
+| GET / PUT | `/shield/status` · `/shield/settings` | Escudo: interruptores, intervalos de Heartbeat, límite de filtros, qué requieren los plugins activos (XML-RPC, usuarios), guía de cron |
+| POST | `/shield/test` | Pide como anónimo un asset inexistente, `?author=1`, `xmlrpc.php` y `/wp/v2/users`: estado, cabecera `X-ITB-Shield` y tiempo |
+| GET / PUT | `/tweaks/status` · `/tweaks/settings` | Ajustes rápidos con su riesgo · cambiarlos (encender uno no seguro exige `confirm`, 428), revisiones y autoguardado |
+| GET / POST | `/tweaks/perfmatters` · `/tweaks/perfmatters/import` | Equivalencias de `perfmatters_options` (lo que se mapea y lo que no, con dónde vive) · importarlas (`confirm`) |
 | GET / PUT | `/woo/status` · `/woo/settings` | Carrito por Store API: tema y selectores en uso (verificados o no), selectores propios, productos vistos, geolocalización · guardar selectores propios y productos vistos (recompila la config) |
 | POST | `/woo/inspect` | Pide la portada sin carrito y con carrito: cabecera del edge, script del carrito, cart-fragments original y Set-Cookie |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
@@ -74,7 +80,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed` |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit` |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
@@ -85,6 +91,10 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_warm_state` | Estado del recalentado (contadores, última pausa por carga) |
 | `itb_cf_analytics` | Últimas analíticas del edge (24 h) |
 | `itb_cf_drift` | Reglas propias detectadas como modificadas a mano (para avisar una sola vez) |
+| `itb_cf_firewall` | Últimos eventos del firewall (24 h) |
+| `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
+| `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |
+| `itb_htaccess_backup` | Copia completa del `.htaccess` antes del último cambio |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)

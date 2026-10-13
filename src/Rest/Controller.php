@@ -35,11 +35,23 @@ abstract class Controller {
 			$route,
 			[
 				'methods'             => $methods,
-				'callback'            => $callback,
+				'callback'            => static function ( \WP_REST_Request $request ) use ( $callback ): mixed {
+					self::noCache();
+					return $callback( $request );
+				},
 				'permission_callback' => [ RestRegistrar::class, 'canManage' ],
 				'args'                => $args,
 			]
 		);
+	}
+
+	/**
+	 * Las respuestas del admin nunca se cachean. LSCache, con sus valores por defecto, guarda en caché
+	 * privada los GET de la REST API de usuarios logueados e ignora Cache-Control: hay que decírselo
+	 * con su propio hook (sin LSCache no hace nada).
+	 */
+	public static function noCache(): void {
+		do_action( 'litespeed_control_set_nocache', 'imagina-turbo admin' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.
 	}
 
 	/**

@@ -24,6 +24,15 @@ final class Jobs {
 
 	public const DAILY_AUDIT = 'itb_daily_audit';
 
+	/** Vaciado de la cola de purga (puntual, tras la ventana de agrupación). */
+	public const PURGE_FLUSH = 'itb_purge_flush';
+
+	/** Lote de recalentado (puntual, se reprograma mientras queden URLs). */
+	public const WARM = 'itb_warm';
+
+	/** Siembra del recalentado completo desde el sitemap. */
+	public const WARM_SEED = 'itb_warm_seed';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -70,7 +79,7 @@ final class Jobs {
 		if ( function_exists( 'as_unschedule_all_actions' ) && self::actionSchedulerReady() ) {
 			as_unschedule_all_actions( '', [], self::GROUP );
 		}
-		foreach ( array_keys( self::recurring() ) as $hook ) {
+		foreach ( array_merge( array_keys( self::recurring() ), [ self::PURGE_FLUSH, self::WARM, self::WARM_SEED ] ) as $hook ) {
 			wp_clear_scheduled_hook( $hook );
 		}
 	}

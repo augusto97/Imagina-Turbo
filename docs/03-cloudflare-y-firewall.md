@@ -44,6 +44,13 @@
 
 ## 4. Plantillas de caché
 
+> **Verificado en la documentación de Cloudflare (2026-10), antes de la fase 2b:**
+> - `Cloudflare-CDN-Cache-Control` solo lo lee el edge de Cloudflare, tiene prioridad sobre `CDN-Cache-Control` y `Cache-Control`, y no se reenvía al visitante. `Cache-Tag` (máx. 16 KB) también se quita.
+> - Con `edge_ttl: override_origin`, Cloudflare **quita el `Set-Cookie` y guarda la respuesta**. Por eso la plantilla del HTML usa siempre `respect_origin` (regla 9).
+> - La llave de caché con `query_string.exclude` es solo Enterprise; el operador `matches` (regex), Business o superior. Hay que elegir la alternativa del punto 4.3 según el plan.
+> - Límites de reglas de caché: Free 10, Pro 25, Business 50, Enterprise 300; expresión de hasta 4.096 caracteres.
+> - Pendiente de confirmar en la zona de pruebas (fase 2b): `http.request.uri.args.names` en reglas de caché de request.
+
 ### 4.1 `itb-cache-html` — hacer elegible el HTML anónimo
 
 - **Acción:** `set_cache_settings`.
@@ -108,8 +115,8 @@ Endpoint general: `GET/PATCH /zones/{zone_id}/settings/{setting}` (verificar nom
 ## 5. Purga
 
 - `POST /zones/{zone_id}/purge_cache` con uno de: `{"tags": [...]}`, `{"files": [...]}`, `{"prefixes": [...]}`, `{"hosts": [...]}`, `{"purge_everything": true}`.
-- Preferir tags. Verificar en la zona si la purga por tag está disponible (en 2025 Cloudflare la extendió a todos los planes; confirmar). Si falla con error de permisos/plan, pasar a purga por URL resolviendo las URLs de cada tag.
-- Lotes según el límite de elementos por llamada (verificar; usar 30 si no se puede confirmar). Límite de llamadas por minuto: respetar con la cola.
+- Preferir tags. La purga por tag está disponible en todos los planes desde el 2025-04-03 (verificado en la documentación de Cloudflare en 2026-10). Si falla con error de permisos/plan, pasar a purga por URL resolviendo las URLs de cada tag. Solo se purga por tag cuando la caché de origen reproduce `Cache-Tag` en sus aciertos (LSCache); con WP Rocket, por URL (ver `docs/02`, módulo 2).
+- Lotes de hasta 100 elementos por llamada. En Free, 5 peticiones de purga por minuto por cuenta (ráfaga de 25): la cola agrupa 30 s; si la purga del edge falla, se reencola y se reintenta a los 5 min (el cliente de la API de la fase 2b añade el respeto de `retry-after`).
 - `purge_everything` solo con confirmación del usuario o en eventos de "todo" (cambio de tema, Elementor CSS global) **y** seguido de recalentado.
 - Sincronizar siempre con el adaptador del plugin de caché (purgar ambos niveles).
 

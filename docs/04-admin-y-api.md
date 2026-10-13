@@ -42,8 +42,11 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/hub/register` · `/hub/send` | Registrar el sitio · enviar telemetría ahora |
 | GET / POST / DELETE | `/plugin-filter/rules` | Reglas de carga condicional |
 | POST | `/plugin-filter/experiments` | Lanzar experimento de una regla |
-| POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`) |
-| POST | `/cache/warmup` | Iniciar/pausar recalentado |
+| GET | `/cache/status` | Adaptador detectado, ajustes, cola, última sincronización, recalentado |
+| PUT | `/cache/settings` | Modo (`sync` / `headers`), TTL, SWR, SIE, refresco de nonces, recalentado. Pasar a `headers` exige `confirm: true` (428 sin ella) |
+| POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`; `all` exige `confirm: true`) |
+| POST | `/cache/warm` | `seed` (recalentar el sitemap) / `stop` (vaciar la cola de recalentado) |
+| POST | `/cache/inspect` | Pide una URL del sitio como anónimo y devuelve sus cabeceras de caché |
 | POST | `/cloudflare/connect` | Guardar y verificar token |
 | GET | `/cloudflare/zone` | Plan, ajustes, reglas |
 | GET | `/cloudflare/plan` | Diff de cambios propuestos |
@@ -58,7 +61,9 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/diag-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
 
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
-- `GET /imagina-turbo/v1/nonce?action=...` — refresco de nonces para formularios en páginas cacheadas. Solo acciones en lista blanca (formularios detectados). Respuesta `Cache-Control: private, no-store`. Ojo: con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint debe inicializar la sesión de Woo antes de generar el nonce.
+- `GET /imagina-turbo/v1/nonce?a[]=...&t=...&s=...` — refresco de nonces para formularios en páginas cacheadas (implementado en la fase 2a). Solo las acciones que la página imprimió firmadas con HMAC (`a` = acciones, `t` = momento de la página, `s` = firma; máximo 20 acciones y 8 días). 30 peticiones por minuto e IP (con APCu o caché de objetos persistente). Respuesta `Cache-Control: private, no-store` y `Cloudflare-CDN-Cache-Control: no-store`; LSCache recibe `no-cache`. Con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint inicializa la sesión de Woo para las acciones `woocommerce*`. Solo se registra con el módulo de caché activo y el refresco encendido.
+
+Todas las rutas del admin envían `litespeed_control_set_nocache`: LSCache, con sus valores por defecto, guardaría en caché privada sus GET.
 
 ## Datos
 
@@ -73,6 +78,8 @@ Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
 | `itb_hub` | Estado del hub: site_id, última hora enviada, fallos, próximo intento, último error |
 | `itb_profiler_rollup` | Última hora agregada en `metrics_hourly` |
 | `itb_audit_last` | Último resultado de la auditoría de cacheabilidad |
+| `itb_purge_state` | Última sincronización de purgas (hora, qué, resultado) |
+| `itb_warm_state` | Estado del recalentado (contadores, última pausa por carga) |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)
@@ -120,6 +127,15 @@ rum_hourly (                          -- si no hay hub
   n INT UNSIGNED, lcp_p75 SMALLINT, inp_p75 SMALLINT, cls_p75 DECIMAL(5,3), ttfb_p75 SMALLINT,
   prerendered INT UNSIGNED, bfcache INT UNSIGNED,
   PRIMARY KEY (hour, template, device)
+)
+
+purge_queue (                         -- fase 2a, esquema v3
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  kind CHAR(1) NOT NULL,              -- t tag, u URL, a todo, w recalentar
+  item_hash CHAR(32) NOT NULL,        -- md5(kind|item): repetidos se ignoran (INSERT IGNORE)
+  item TEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  UNIQUE KEY item_hash (item_hash), KEY kind (kind, id)
 )
 
 cf_snapshots (

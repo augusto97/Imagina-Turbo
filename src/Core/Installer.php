@@ -25,15 +25,15 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 2;
+	public const DB_VERSION        = 3;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last' ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state' ];
 
 	/** Tablas propias sin prefijo. */
-	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly' ];
+	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue' ];
 
 	public function __construct(
 		private readonly Settings $settings,
@@ -95,6 +95,8 @@ final class Installer {
 	public static function maybeUpgrade(): void {
 		if ( (int) get_option( self::DB_VERSION_OPTION, 0 ) !== self::DB_VERSION ) {
 			self::createTables();
+			// Hasta la 0.3 LSCache podía guardar en caché privada las respuestas del admin: se descartan.
+			do_action( 'litespeed_purge_private_all' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.
 		}
 	}
 
@@ -162,6 +164,21 @@ final class Installer {
   mem_p95 int(10) unsigned NOT NULL DEFAULT 0,
   queries_avg smallint(5) unsigned NOT NULL DEFAULT 0,
   PRIMARY KEY  (hour,request_type,route_key)
+) {$charset};"
+		);
+
+		// Cola de purga y recalentado: un elemento por (tipo, valor), sin repetidos.
+		$queue = $wpdb->prefix . 'itb_purge_queue';
+		dbDelta(
+			"CREATE TABLE {$queue} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  kind char(1) NOT NULL,
+  item_hash char(32) NOT NULL,
+  item text NOT NULL,
+  created_at datetime NOT NULL,
+  PRIMARY KEY  (id),
+  UNIQUE KEY item_hash (item_hash),
+  KEY kind (kind,id)
 ) {$charset};"
 		);
 

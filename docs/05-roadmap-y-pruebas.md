@@ -32,7 +32,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Hub: registro y telemetría básica.
 - **Aceptación:** ranking de plugins coherente con Query Monitor (±15 %); overhead dentro del presupuesto; telemetría llega al hub y el sitio no se afecta si el hub está caído.
 
-### Fase 2 — Caché y Cloudflare
+### Fase 2 — Caché y Cloudflare (2a ✅ caché y nonces, ver "Estado de la fase 2a" al final · 2b Cloudflare pendiente)
 - `CacheCoordinator` completo (cabeceras, tags, mapa de purga, cola, adaptadores LSCache/WP Rocket/Null, recalentado).
 - Módulo Cloudflare: token, inspector, plantillas de caché, ajustes de zona, purga, diff, aplicar, snapshots, revertir, deriva.
 - Pantallas Caché y Cloudflare.
@@ -155,3 +155,35 @@ Decisiones que cambian los documentos de arquitectura (anotadas en `docs/01` y `
 Calidad: 142 pruebas unitarias, PHPStan nivel 8 sin errores, PHPCS sin errores, TypeScript estricto, E2E del admin en Chromium (escritorio y móvil sin desbordes).
 
 Pendiente fuera del alcance: el hub real (servicio aparte; el cliente está probado contra el simulado), causas de bfcache del lado del navegador (RUM, fase 6) y las pruebas en OpenLiteSpeed/LSPHP reales.
+
+## Estado de la fase 2a
+
+Fase 2 dividida en dos entregas: **2a** (coordinador de caché y refresco de nonces, sin Cloudflare) y **2b** (módulo Cloudflare, con una zona de pruebas real). 2a completada el 2026-10-13 (versión 0.3.0, esquema de base de datos v3). Probada en **OpenLiteSpeed 1.9.3 + LiteSpeed Cache 7.9.1** con WordPress 7.1.3, WooCommerce 11.2.1, PHP 8.3 (OPcache) y MariaDB 10.11, y con **WP Rocket 3.23** (código fuente, sin licencia) para el adaptador.
+
+| Criterio | Resultado |
+|---|---|
+| LSCache reproduce nuestras cabeceras en los aciertos | Sí: `Cloudflare-CDN-Cache-Control` y `Cache-Tag` en el fallo y en el acierto (`x-litespeed-cache: hit`) |
+| Lo no cacheable no se guarda en el edge | Carrito, checkout, cuenta, login, 404, búsqueda, logueados y respuestas con `Set-Cookie` (también uno añadido durante el render) salen con `no-store` para el edge |
+| Purga por tag propio en LSCache | Purgar `p-2` deja esa página en `miss`; las demás siguen en `hit` |
+| Edición de producto reflejada en < 60 s | Cambio de stock por HTTP: producto, categoría, tienda y portada purgados en el origen al instante; tras el vaciado de la cola y el recalentado, todas otra vez en `hit` a los 47 s |
+| Purga diferida de LSCache en cron | Validada: el worker hace un request a `admin-ajax.php` y la purga pendiente llega al servidor antes de recalentar |
+| Nonces en páginas cacheadas | Endpoint: firma válida → nonces; firma alterada, acción no firmada o fecha cambiada → 400; no lo cachea LSCache. En Chromium con el reloj adelantado 11 h: una sola petición, valores reemplazados en campos, atributos, enlaces y objetos globales (también anidados) |
+| WP Rocket | `rocket_clean_files` una vez por request con las URLs correctas; `rocket_clean_domain` se replica como "todo"; en OpenLiteSpeed/nginx el HTML no se deja en el edge (`edge_html = false`) |
+| Costo propio en el frontend | 0,075 ms y 27 KB al registrar el módulo en una página (presupuesto: 0,5 ms y 200 KB) |
+
+Hallazgos corregidos durante la validación:
+
+- LSCache, con sus valores por defecto (caché privada y caché de REST activas), guardaba en caché privada los GET de la API del admin: el panel mostraba un estado viejo (por ejemplo, el kill switch no aparecía activo). Ahora todas las rutas propias envían `litespeed_control_set_nocache`, y al actualizar se descarta la caché privada vieja.
+- Con la cookie de diagnóstico, LSCache guardaba la respuesta con `Server-Timing` y la repetía aun después de retirar la cookie. Esas respuestas ya no se guardan.
+- LSCache cacheaba el endpoint público de nonces (una semana): ahora recibe `no-cache`.
+- LSCache reconstruye su cabecera de purga al final del request con todo lo acumulado: sin filtrar, nuestras propias purgas volvían como "purgar todo". Lo ya purgado en el request no se repite.
+- Se recalentaba la URL de `product_type` (taxonomía no pública): solo se usan taxonomías visibles.
+- `rocket_clean_files` se llamaba tres veces por request con las mismas URLs.
+- Un `Set-Cookie` añadido durante el render no cambiaba la cabecera del edge.
+
+Decisiones que cambian los documentos (anotadas en `docs/02` y `docs/03`): lo no cacheable se marca con `Cloudflare-CDN-Cache-Control: no-store` (el `Cache-Control` del sitio y el bfcache no cambian); la plantilla del HTML nunca usa `override_origin` (Cloudflare quitaría el `Set-Cookie` y guardaría la respuesta); la purga del edge es por tag solo si la caché de origen reproduce `Cache-Tag`; WP Rocket se purga por archivos y dominio porque `rocket_clean_post` solo existe con licencia.
+
+Calidad: 171 pruebas unitarias, PHPStan nivel 8 sin errores, PHPCS sin errores, TypeScript estricto, E2E del admin en Chromium con la pantalla Caché (activar con confirmación, cambiar de modo con confirmación, purgas, probar URLs, escritorio y móvil sin desbordes).
+
+Pendiente para 2b: el módulo Cloudflare (token, plantillas, purga en el edge, snapshots), y con él el criterio de > 85 % de aciertos del edge. WP Rocket en Apache con licencia real queda sin probar en vivo (el bloque de `.htaccess` se genera y se prueba en unitarias).
+

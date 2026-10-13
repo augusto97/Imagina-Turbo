@@ -350,3 +350,26 @@ Pendiente para las pruebas reales:
 - El verificador externo con Playwright para comprobar cada regla de assets en páginas completas (hoy la verificación es la previsualización del admin).
 - Sitios con Elementor y formularios en plantillas del tema, para afinar la detección de uso.
 - Bases grandes (millones de filas en `wp_postmeta` y Action Scheduler) para medir las tandas.
+
+## Estado de la fase 8
+
+Completada el 2026-10-13 (versión 0.10.0), del lado del plugin. El hub es un servicio aparte: se probó con el hub simulado (`tests/e2e/mock-hub.php`), que implementa la plantilla firmada y el envío por lotes, y con el simulador de Cloudflare.
+
+| Criterio | Resultado |
+|---|---|
+| Plantillas de configuración estándar desde el hub | Plantilla firmada en los dos sentidos; lista blanca de ajustes; nada invasivo; lo ignorado se informa. Una firma inválida conserva la anterior |
+| Detección de desviaciones | Ajustes, módulos, ajustes rápidos y Cloudflare (falta, distinta, cambiada a mano). En la pantalla Flota y en la telemetría |
+| Aplicación por lotes de reglas de Cloudflare a varias zonas | El hub llama al endpoint firmado de cada sitio; cada uno aplica en su zona con su token, snapshot y evento. Probado: estado (dry run), rechazo sin autorización (403), aplicación de 4 ajustes y 4 cambios de Cloudflare, versión desfasada (409), repetición del mismo nonce (401) y una regla cambiada a mano en el panel que se deja sin pisar |
+| Reversible | Snapshot de ajustes por aplicación (revertir probado) y snapshot de la zona en Cloudflare |
+
+Hallazgos corregidos durante la validación:
+
+- Con el módulo Cloudflare apagado y el token conectado, la plantilla habría tocado la zona: ahora Cloudflare solo se comprueba y aplica con el módulo activo (o si la misma plantilla lo enciende).
+- El sitio y el hub se llaman mutuamente durante un lote (el sitio descarga la plantilla mientras el hub espera): el hub simulado necesita `PHP_CLI_SERVER_WORKERS`.
+
+Calidad: 238 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, E2E del admin con la pantalla Flota (móvil sin desborde).
+
+Pendiente para las pruebas reales:
+
+- El hub real (gestión de plantillas, grupos de sitios, orquestación de lotes con pausa ante errores).
+- Lotes contra zonas reales de Cloudflare con tokens de prueba.

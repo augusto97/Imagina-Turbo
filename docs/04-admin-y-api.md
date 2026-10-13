@@ -18,6 +18,7 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Assets** | Gestor por ruta (vista tipo script manager): previsualización solo para el admin, reglas con su estado, inventario de una página (origen, tamaño, dependientes, pie) y sugerencias de formularios, sliders y WooCommerce. |
 | **Ajustes rápidos** | Escudo del servidor (interruptores, intervalos de Heartbeat, límite de filtros, prueba como visitante), guía de cron del sistema, ajustes con interruptor y riesgo (confirmación para moderados e invasivos) y migración desde Perfmatters. |
 | **Base de datos** | Auditoría (autoload, opciones de plugins inactivos, transients, Action Scheduler, revisiones, postmeta huérfano, HPOS, índices, tablas más grandes), acciones con respaldo, lotes restaurables y limpieza programada. |
+| **Flota** | Plantilla del hub (nombre, versión, lo ignorado), desviaciones con su riesgo, aplicar con confirmación, autorización para los lotes del hub con su endpoint, snapshots con revertir. |
 | **Compatibilidad** | Plugins/tema detectados, reglas de la matriz aplicadas, conflictos y solapamientos, versión de la matriz y firma. |
 | **Registro** | Todos los eventos: cambios, aplicaciones, reversiones, modo seguro, errores de API. Filtros y exportación. |
 | **Avanzado** | Kill switch, cookie de bypass para el admin actual, exportar/importar ajustes (sin token), conexión con el hub, licencia (Imagina Updater), modo depuración. |
@@ -77,8 +78,13 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET / POST | `/database/status` · `/database/audit` | Última auditoría, lotes de respaldo, ajustes · auditar ahora (solo lectura) |
 | POST | `/database/actions/{transients\|action_scheduler\|revisions\|autoload}` | Con el módulo activo y `confirm` (428). `autoload` recibe `options[]` y solo acepta opciones atribuidas a plugins inactivos |
 | POST / PUT | `/database/restore/{lote}` · `/database/settings` | Restaurar un lote (`confirm`) · `db_keep_revisions`, `db_schedule`, `db_schedule_days` |
+| GET / POST | `/fleet/status` · `/fleet/sync` | Plantilla, desviaciones, última aplicación, autorización del hub y snapshots · consultar el hub ahora |
+| POST | `/fleet/apply` · `/fleet/revert/{id}` | Aplicar la plantilla (`confirm`, 428) · volver a los ajustes de un snapshot (`confirm`) |
+| PUT | `/fleet/settings` | `fleet_remote`: autorizar que el hub aplique la plantilla (activarlo exige `confirm`) |
 | GET | `/events` | Registro |
 | POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/diag-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
+
+Endpoint del hub (sin sesión): `POST /imagina-turbo/v1/fleet/remote` con `{action: "status"|"apply", policy_version}`, firmado como las peticiones del sitio al hub (cadena canónica con la ruta que pide el hub, ventana de 5 minutos, nonce no repetido, 60 peticiones por hora). Antes de responder, el sitio descarga la plantilla del propio hub: el cuerpo nunca trae configuración. `apply` exige que la versión coincida (409) y que el sitio lo haya autorizado (403).
 
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
 - `POST /?itb-rum=1` — beacon del RUM (fase 6), atendido en el loader MU sin cargar plugins. Valida el origen; 2 KB como máximo; 30 por minuto e IP con APCu. Responde 204, 400, 403 o 429.
@@ -112,6 +118,9 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_asset_rules` | Reglas del gestor de assets: handle, tipo, modo (`never`/`only`), plantillas, ids, tipos de contenido, estado (`testing`, `active`, `disabled`), quién y cuándo la verificó |
 | `itb_db_audit` | Última auditoría de la base de datos |
 | `itb_db_schedule_state` | Última ejecución de la limpieza programada y sus resultados |
+| `itb_fleet` | Plantilla de flota recibida (tal como llegó), desviaciones, error de la última consulta, última aplicación y resumen para la telemetría |
+| `itb_fleet_snapshots` | Los últimos 10 snapshots de lo que la plantilla puede tocar, antes de cada aplicación |
+| `itb_hub_nonces` | Nonces de las peticiones del hub ya vistas (10 minutos) |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)
@@ -232,3 +241,24 @@ El hub es un servicio aparte (puede extender el servidor de Imagina Updater). El
 - **Telemetría** (`POST /v1/telemetry`, firmada, cuerpo gzip): `{schema: 1, site_id, plugin_version, generated_at, window: {from, to}, environment, inventory: {plugins: [{slug, version}], theme}, modules: {id: bool}, metrics: [filas de metrics_hourly], events: [{created_at, module, type, severity, message}]}`. Los eventos van **sin contexto** (puede llevar rutas o datos del sitio). Solo horas completas que ya pasaron por el agregado horario (si el agregado lleva más de 2 h parado, no frena el resto del lote).
 - **Fallos**: tiempo de espera de 8 s; reintento a 1, 2, 4 y 6 h (máximo); lo que queda fuera de la ventana de 24 h se descarta. Un fallo nunca afecta al sitio: todo corre en Action Scheduler o desde el admin.
 - **Hub simulado** para pruebas: `tests/e2e/mock-hub.php` (verifica firma, ventana de 5 min y nonces repetidos; guarda cada lote en JSON).
+
+### Flota (fase 8)
+
+- **Plantilla** (`GET /v1/fleet/policy`, firmada; 204 o 404 = sin plantilla). El hub firma la respuesta con la clave del sitio: `X-ITB-Timestamp` y `X-ITB-Signature` = HMAC sobre `RESPONSE\nRUTA\nTIMESTAMP\nNONCE de la petición\nsha256(cuerpo)`. Una respuesta sin firma válida se descarta y se conserva la plantilla anterior.
+
+```json
+{
+  "schema": 1,
+  "id": "estandar-woo",
+  "version": 3,
+  "name": "Estándar WooCommerce",
+  "settings": { "spec_eagerness": "conservative", "rum_rate": 0.1, "cache_edge_ttl": 86400 },
+  "modules": { "cloudflare": true, "speculation": true },
+  "tweaks": { "embeds": true },
+  "cloudflare": { "rules": [ "cache-static", "cache-html" ], "settings": [ "http3", "early_hints" ] }
+}
+```
+
+- **Qué puede tocar**: ajustes de una lista blanca (`FleetPolicy::SETTINGS`, nunca el hub, el prefijo de tags, los dominios de staging ni estados temporales), módulos y ajustes rápidos seguros o moderados, y reglas de Cloudflare por nombre de plantilla (el sitio las genera con sus datos) o ajustes de zona por id. Lo invasivo y lo desconocido se ignora y se informa.
+- **Telemetría**: el lote lleva `fleet: {policy, version, applied_version, drift: ["kind:clave"], remote}`, sin valores.
+- **Lotes**: el hub llama a `/fleet/remote` de cada sitio (primero `status`, luego `apply` con la versión). Cada sitio aplica con snapshot y evento; las reglas de Cloudflare cambiadas a mano en el panel y todo lo de Cloudflare con el módulo apagado quedan fuera.

@@ -128,3 +128,15 @@ La prueba del admin recorre las dos pantallas (inventario de la portada, borrado
 3. Crear la regla en prueba, `POST /assets/preview {"on":true}` y comparar la portada con la sesión (sin CF7) y sin ella (con CF7).
 4. Activar con `confirm`: la portada en caché para visitantes ya no lleva CF7; `/contacto/` sí.
 5. Base de datos: sembrar transients expirados, revisiones, acciones viejas de Action Scheduler y opciones de un plugin inactivo; ejecutar cada acción y restaurar su lote.
+
+## Flota (fase 8)
+
+```bash
+PHP_CLI_SERVER_WORKERS=4 ITB_HUB_DIR=/tmp/hub php -S 127.0.0.1:8099 tests/e2e/mock-hub.php
+```
+
+1. Registrar el sitio en el hub (`PUT /hub {"url":"http://127.0.0.1:8099"}` y `POST /hub/register`).
+2. Escribir la plantilla en `$ITB_HUB_DIR/policy.json` y `POST /fleet/sync`: aparecen las desviaciones.
+3. `POST /__mock/fleet/push {"dry_run": true, "replay": true}`: estado de cada sitio y 401 al repetir la petición.
+4. `POST /__mock/fleet/push {}`: 403 sin autorización; con `PUT /fleet/settings {"fleet_remote": true, "confirm": true}`, aplica.
+5. Con `touch $ITB_HUB_DIR/bad-signature`, la consulta falla y se conserva la plantilla anterior.

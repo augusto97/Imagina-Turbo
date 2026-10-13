@@ -18,6 +18,7 @@ use ImaginaTurbo\Core\ModuleCatalog;
 use ImaginaTurbo\Core\ModuleRegistry;
 use ImaginaTurbo\Repository\EventRepository;
 use ImaginaTurbo\Repository\MetricsRepository;
+use ImaginaTurbo\Fleet\FleetService;
 
 /**
  * Construcción del lote.
@@ -80,6 +81,8 @@ final class TelemetryBuilder {
 			'inventory'      => $this->inventory(),
 			'modules'        => $modules,
 			'metrics'        => $this->metrics->between( gmdate( 'Y-m-d H:00:00', $from ), gmdate( 'Y-m-d H:00:00', $to ) ),
+			// Flota: plantilla, versión aplicada y qué se desvía (sin valores).
+			'fleet'          => FleetService::storedSummary(),
 			'events'         => array_map(
 				static fn( array $e ): array => [
 					'created_at' => $e['created_at'],

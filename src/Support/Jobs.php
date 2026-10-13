@@ -45,6 +45,9 @@ final class Jobs {
 	/** Base de datos: retención de respaldos y limpiezas programadas por el usuario. */
 	public const DAILY_DB = 'itb_db_daily';
 
+	/** Flota: plantilla del hub y desviaciones. */
+	public const DAILY_FLEET = 'itb_fleet_daily';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -60,6 +63,7 @@ final class Jobs {
 			self::HOURLY_FILTER_WATCH => HOUR_IN_SECONDS,
 			self::DAILY_RUM           => DAY_IN_SECONDS,
 			self::DAILY_DB            => DAY_IN_SECONDS,
+			self::DAILY_FLEET         => DAY_IN_SECONDS,
 		];
 	}
 

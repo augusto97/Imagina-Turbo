@@ -35,6 +35,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\Adapters\NullAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\WpRocketAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\CacheModule;
 use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
+use ImaginaTurbo\Fleet\FleetService;
 use ImaginaTurbo\Modules\AssetManager\AssetInventory;
 use ImaginaTurbo\Modules\AssetManager\AssetRules;
 use ImaginaTurbo\Modules\AssetManager\AssetScanner;
@@ -190,6 +191,16 @@ final class Plugin {
 			fn() => $this->whenActive(
 				function (): void {
 					$this->container->get( DatabaseService::class )->daily( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'database' ) );
+				}
+			)
+		);
+		add_action(
+			Jobs::DAILY_FLEET,
+			fn() => $this->whenActive(
+				function (): void {
+					if ( $this->container->get( HubClient::class )->isRegistered() ) {
+						$this->container->get( FleetService::class )->sync();
+					}
 				}
 			)
 		);
@@ -465,23 +476,35 @@ final class Plugin {
 				return new SnapshotRepository( $wpdb );
 			}
 		);
-		$cloudflareOn = null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' );
-		$c->set(
-			CloudflareService::class,
-			static fn( Container $c ): CloudflareService => new CloudflareService(
+		// Fábrica aparte: la flota necesita un servicio nuevo después de recompilar la config.
+		$cloudflareFactory = static function ( Container $c ) use ( $dir ): CloudflareService {
+			$config = Runtime::$config;
+			return new CloudflareService(
 				$c->get( TokenVault::class ),
 				$c->get( CloudflareState::class ),
 				$c->get( CloudflareClient::class ),
-				SiteContext::fromRuntime( Runtime::$config, $c->get( Settings::class ), $dir . '/data/compat-matrix-v1.json' ),
+				SiteContext::fromRuntime( $config, $c->get( Settings::class ), $dir . '/data/compat-matrix-v1.json' ),
 				$c->get( SnapshotRepository::class ),
 				$c->get( EventLog::class ),
 				$dir . '/data/cloudflare-limits.json',
-				$cloudflareOn,
+				null !== $config && $config->moduleEnabled( 'cloudflare' ),
 				[
-					'enabled'   => null !== Runtime::$config && Runtime::$config->moduleEnabled( 'firewall' ),
+					'enabled'   => null !== $config && $config->moduleEnabled( 'firewall' ),
 					'rules'     => (array) $c->get( Settings::class )->get( 'firewall_rules', [] ),
 					'ratelimit' => (bool) $c->get( Settings::class )->get( 'firewall_ratelimit', true ),
 				]
+			);
+		};
+		$c->set( CloudflareService::class, $cloudflareFactory );
+		$c->set(
+			FleetService::class,
+			static fn( Container $c ): FleetService => new FleetService(
+				$c->get( Settings::class ),
+				$c->get( ModuleCatalog::class ),
+				$c->get( HubClient::class ),
+				$c->get( ConfigCompiler::class ),
+				$c->get( EventLog::class ),
+				static fn(): CloudflareService => $cloudflareFactory( $c )
 			)
 		);
 		// Purga en el edge: Cloudflare si el módulo está activo y conectado; si no, nada.

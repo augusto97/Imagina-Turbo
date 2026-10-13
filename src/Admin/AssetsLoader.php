@@ -38,8 +38,15 @@ final class AssetsLoader {
 	public function enqueue(): void {
 		$dev = $this->devServer();
 		if ( null !== $dev ) {
-			wp_enqueue_script( 'itb-vite-client', $dev . '/@vite/client', [], null, false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion -- servidor de desarrollo.
-			wp_enqueue_script( self::HANDLE, $dev . '/' . self::ENTRY, [], null, true ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
+			// Preámbulo de React Refresh que exige @vitejs/plugin-react en desarrollo.
+			wp_register_script( 'itb-vite-client', $dev . '/@vite/client', [], null, false ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion -- servidor de desarrollo.
+			wp_add_inline_script(
+				'itb-vite-client',
+				'import RefreshRuntime from ' . wp_json_encode( $dev . '/@react-refresh' ) . ';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>(t)=>t;window.__vite_plugin_react_preamble_installed__=true;',
+				'after'
+			);
+			wp_enqueue_script( 'itb-vite-client' );
+			wp_enqueue_script( self::HANDLE, $dev . '/' . self::ENTRY, [ 'wp-i18n', 'itb-vite-client' ], null, true ); // phpcs:ignore WordPress.WP.EnqueuedResourceParameters.MissingVersion
 		} else {
 			$manifest = $this->manifest();
 			$entry    = is_array( $manifest[ self::ENTRY ] ?? null ) ? $manifest[ self::ENTRY ] : null;
@@ -47,7 +54,7 @@ final class AssetsLoader {
 				return;
 			}
 			$base = $this->pluginUrl . '/admin/dist/';
-			wp_enqueue_script( self::HANDLE, $base . $entry['file'], [], ITB_VERSION, true );
+			wp_enqueue_script( self::HANDLE, $base . $entry['file'], [ 'wp-i18n' ], ITB_VERSION, true );
 			foreach ( is_array( $entry['css'] ?? null ) ? $entry['css'] : [] as $index => $css ) {
 				if ( is_string( $css ) ) {
 					wp_enqueue_style( self::HANDLE . '-' . $index, $base . $css, [], ITB_VERSION );
@@ -79,11 +86,10 @@ final class AssetsLoader {
 		if ( self::HANDLE !== $handle && 'itb-vite-client' !== $handle ) {
 			return $tag;
 		}
-		if ( str_contains( $tag, 'type="module"' ) ) {
-			return $tag;
-		}
-		// Solo la etiqueta con src (id="{handle}-js"), no los scripts en línea before/after.
-		return (string) preg_replace( '/<script(\s[^>]*\bid=(["\'])' . preg_quote( $handle, '/' ) . '-js\2)/', '<script type="module"$1', $tag, 1 );
+		// La etiqueta con src (id="{handle}-js"). En el cliente de Vite también el preámbulo en línea
+		// (id="itb-vite-client-js-after"), que usa import. El inline "before" de la app sigue siendo clásico.
+		$suffix = 'itb-vite-client' === $handle ? '(?:-after)?' : '';
+		return (string) preg_replace( '/<script(\s[^>]*\bid=(["\'])' . preg_quote( $handle, '/' ) . '-js' . $suffix . '\2)/', '<script type="module"$1', $tag );
 	}
 
 	/**
@@ -112,7 +118,10 @@ final class AssetsLoader {
 			return null;
 		}
 		$data = json_decode( (string) file_get_contents( $file ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$url  = is_array( $data ) && is_string( $data['origin'] ?? null ) ? $data['origin'] : null;
-		return null !== $url ? untrailingslashit( esc_url_raw( $url ) ) : null;
+		if ( ! is_array( $data ) || ! is_string( $data['origin'] ?? null ) || '' === $data['origin'] ) {
+			return null;
+		}
+		$base = is_string( $data['base'] ?? null ) ? trim( $data['base'], '/' ) : '';
+		return untrailingslashit( esc_url_raw( $data['origin'] . ( '' === $base ? '' : '/' . $base ) ) );
 	}
 }

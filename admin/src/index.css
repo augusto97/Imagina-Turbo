@@ -1,0 +1,90 @@
+/*
+ * Tailwind v4 con prefijo "itb": las clases se escriben itb:flex, itb:text-sm...
+ * No se importa el preflight global para no romper el admin de WordPress: hay un reset
+ * mínimo limitado a .itb-root.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme) prefix(itb);
+@import 'tailwindcss/utilities.css' layer(utilities) prefix(itb);
+@import '@fontsource-variable/inter';
+
+@theme {
+	--font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+	.itb-root,
+	.itb-root *,
+	.itb-root *::before,
+	.itb-root *::after {
+		box-sizing: border-box;
+		border-width: 0;
+		border-style: solid;
+		border-color: var(--itb-color-zinc-200);
+	}
+
+	.itb-root {
+		font-family: var(--itb-font-sans);
+		color: var(--itb-color-zinc-900);
+		font-size: 14px;
+		line-height: 1.5;
+		-webkit-font-smoothing: antialiased;
+	}
+
+	.itb-root :where(h1, h2, h3, h4, p, ul, ol, pre, figure) {
+		margin: 0;
+		padding: 0;
+		font-size: inherit;
+		font-weight: inherit;
+		color: inherit;
+	}
+
+	.itb-root :where(ul, ol) {
+		list-style: none;
+	}
+
+	.itb-root :where(button, input, select, textarea) {
+		font: inherit;
+		color: inherit;
+		margin: 0;
+		box-shadow: none;
+	}
+
+	.itb-root :where(button) {
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.itb-root :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+		min-height: 0;
+		line-height: 1.4;
+		border-radius: 0;
+		background-color: transparent;
+	}
+
+	.itb-root :where(a) {
+		color: inherit;
+		text-decoration: inherit;
+	}
+
+	.itb-root :where(table) {
+		border-collapse: collapse;
+	}
+
+	.itb-root :where(:focus-visible) {
+		outline: 2px solid var(--itb-color-zinc-900);
+		outline-offset: 2px;
+	}
+}
+
+/* El contenedor de WordPress agrega márgenes; la app ocupa todo el ancho útil. */
+.itb-wrap {
+	margin: 0 0 0 -20px;
+}
+
+@media (max-width: 782px) {
+	.itb-wrap {
+		margin-left: -10px;
+	}
+}

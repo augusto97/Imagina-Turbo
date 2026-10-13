@@ -171,7 +171,7 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 		const mock = await pwRequest.newContext();
 		await mock.post( MOCK + '/__mock/reset', { data: { token: TOKEN, zone_name: new URL( BASE ).hostname, plan: 'free' } } );
 		const before = ( await ( await mock.get( MOCK + '/__mock/state' ) ).json() ).result;
-		await rest( 'cloudflare/connect', 'DELETE' );
+		await rest( 'cloudflare/connect', 'DELETE', { confirm: true } );
 		await rest( 'modules/cloudflare', 'PUT', { enabled: true, confirm: true } );
 		await page.click( 'a[href="#/cloudflare"]' );
 		await page.waitForSelector( 'text=Conexión' );
@@ -209,7 +209,16 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 		const overflowCf = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
 		await page.screenshot( { path: OUT + '/8b-movil-cloudflare.png', fullPage: true } );
 		await page.setViewportSize( { width: 1400, height: 1000 } );
+		// Quitar todo lo de Imagina Turbo: se vuelve a aplicar y la tarjeta lo deja como al principio.
+		await rest( 'cloudflare/apply', 'POST', { ids: [ 'rule:' + ( applied.rulesets.http_request_cache_settings?.rules || [] ).map( ( r ) => r.ref ).find( ( r ) => r.endsWith( 'cache-html' ) ), 'setting:http3' ], confirm: true } );
+		await page.reload();
+		await page.waitForSelector( 'text=Quitar todo lo de Imagina Turbo', { timeout: 20000 } );
+		await page.getByRole( 'button', { name: 'Quitar todo de Cloudflare' } ).click();
+		await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Quitar todo', exact: true } ).click();
+		await page.waitForSelector( 'text=Listo: la zona ya no tiene nada de Imagina Turbo.', { timeout: 30000 } );
+		const removed = ( await ( await mock.get( MOCK + '/__mock/state' ) ).json() ).result;
 		cloudflare = {
+			removeAllEqualsBefore: norm( removed ) === norm( before ),
 			preselected,
 			ownRules: ( applied.rulesets.http_request_cache_settings?.rules || [] ).map( ( r ) => r.ref ),
 			settingsApplied: applied.settings,

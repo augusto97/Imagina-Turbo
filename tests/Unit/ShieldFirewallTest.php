@@ -226,6 +226,16 @@ final class ShieldFirewallTest extends TestCase {
 		$this->assertSame( HtaccessWriter::block(), HtaccessWriter::withBlock( '' ) );
 	}
 
+	public function test_htaccess_strip_on_deactivation(): void {
+		$wp   = "# BEGIN WordPress\nRewriteEngine On\n# END WordPress\n";
+		$file = $this->tmp . '/.htaccess';
+		file_put_contents( $file, HtaccessWriter::withBlock( $wp ) );
+		$this->assertTrue( HtaccessWriter::stripFile( $file ) );
+		$this->assertSame( $wp, file_get_contents( $file ), 'el resto del archivo queda igual' );
+		$this->assertFalse( HtaccessWriter::stripFile( $file ), 'sin bloque no se escribe' );
+		$this->assertFalse( HtaccessWriter::stripFile( $this->tmp . '/no-existe' ) );
+	}
+
 	public function test_htaccess_writer_restores_on_failure(): void {
 		$options = [];
 		\Brain\Monkey\Functions\when( 'get_option' )->alias(

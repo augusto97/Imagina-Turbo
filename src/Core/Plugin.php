@@ -214,6 +214,7 @@ final class Plugin {
 			$this->container->get( Menu::class )->register();
 			add_action( 'admin_init', [ $this, 'adminMaintenance' ] );
 			add_filter( 'plugin_action_links_' . $this->basename, [ $this, 'actionLinks' ] );
+			add_action( 'admin_notices', [ $this, 'cloudflareFootprintNotice' ] );
 		}
 		if ( RequestType::Cron === $type ) {
 			add_action( 'init', [ $this, 'notifySafeMode' ], 20 );
@@ -370,11 +371,44 @@ final class Plugin {
 	 * @return array<int|string, string>
 	 */
 	public function actionLinks( array $links ): array {
+		$footprint = $this->container->get( CloudflareState::class )->footprint();
+		if ( isset( $links['deactivate'] ) && ( $footprint['rules'] > 0 || $footprint['settings'] > 0 ) ) {
+			// Confirmación antes de desactivar si quedan cosas del plugin en Cloudflare.
+			$message             = __( 'Imagina Turbo todavía tiene reglas o ajustes en Cloudflare. Si lo desactivas, se quedan en la zona. ¿Desactivar igual? (Para quitarlos: Imagina Turbo → Cloudflare → Quitar todo).', 'imagina-turbo' );
+			$links['deactivate'] = str_replace( '<a ', '<a onclick="return confirm(' . esc_attr( (string) wp_json_encode( $message ) ) . ');" ', $links['deactivate'] );
+		}
 		array_unshift(
 			$links,
 			sprintf( '<a href="%s">%s</a>', esc_url( admin_url( 'admin.php?page=' . Menu::SLUG ) ), esc_html__( 'Panel', 'imagina-turbo' ) )
 		);
 		return $links;
+	}
+
+	/**
+	 * En la pantalla de plugins: aviso si quedan reglas o ajustes del plugin en Cloudflare.
+	 */
+	public function cloudflareFootprintNotice(): void {
+		global $pagenow;
+		if ( 'plugins.php' !== $pagenow || ! current_user_can( 'activate_plugins' ) ) {
+			return;
+		}
+		$footprint = $this->container->get( CloudflareState::class )->footprint();
+		if ( 0 === $footprint['rules'] && 0 === $footprint['settings'] ) {
+			return;
+		}
+		printf(
+			'<div class="notice notice-warning"><p>%s <a href="%s">%s</a></p></div>',
+			esc_html(
+				sprintf(
+					/* translators: 1: reglas, 2: ajustes */
+					__( 'Imagina Turbo tiene %1$d reglas y %2$d ajustes cambiados en Cloudflare. Antes de desactivarlo o borrarlo, quítalos: si no, se quedan en la zona.', 'imagina-turbo' ),
+					$footprint['rules'],
+					$footprint['settings']
+				)
+			),
+			esc_url( admin_url( 'admin.php?page=' . Menu::SLUG . '#/cloudflare' ) ),
+			esc_html__( 'Ir a Cloudflare', 'imagina-turbo' )
+		);
 	}
 
 	/**

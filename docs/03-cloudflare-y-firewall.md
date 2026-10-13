@@ -245,7 +245,9 @@ Optimizaciones automáticas (cada una con nivel de riesgo y registro):
 3. **Aplicar**: `Snapshot` guarda el estado previo (reglas propias + ajustes tocados) en `itb_cf_snapshots`; luego se aplican los cambios. Seguros: automáticos. Sensibles: requieren aprobación o entran en modo prueba.
 4. **Vigilar**: jobs de Action Scheduler (cada hora: analíticas y muestras; diario: optimizador).
 5. **Ajustar**: el optimizador propone o aplica según el riesgo.
-6. **Revertir**: restaurar un snapshot afecta solo las reglas propias (`ref` con prefijo `itb-`) y los ajustes registrados.
+6. **Revertir**: restaurar un snapshot afecta solo las reglas propias (`ref` con prefijo `itb-`) y los ajustes registrados. Restaurar no exige el módulo activo (es lo que se hace al apagarlo).
+7. **Quitar todo** (0.10.1): borra las reglas propias de todas las fases gestionadas (las del cliente no se tocan) y devuelve cada ajuste de zona que el plugin cambió a su valor de antes del primer cambio. Ese valor se guarda una vez, al aplicar, en `itb_cf_state.originals` con una marca de "cambiado / devuelto" (restaurar un snapshot actualiza la marca), así que quitar, deshacer y volver a quitar funciona. Guarda antes un snapshot.
+8. **Al desactivar el plugin**: las reglas no se quitan solas (no se llama a la API durante la desactivación). La pantalla de plugins avisa si quedan reglas o ajustes en la zona y pide confirmar al desactivar; desconectar el token también lo exige (428), porque sin él ya no se pueden quitar desde el plugin.
 
 ## 9. Límites por plan (orientativos — verificar y mantener en el hub)
 

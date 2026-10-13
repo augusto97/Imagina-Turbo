@@ -66,7 +66,7 @@ export function Cloudflare() {
 				<div className="itb:flex itb:flex-col itb:gap-4">
 					{ data.simulator && <Notice level="warning">{ __( 'Conectado a un simulador de la API (ITB_CF_API_BASE en wp-config.php). Solo para pruebas.' ) }</Notice> }
 					{ ! data.available && <Notice level="error">{ __( 'Este servidor no tiene la extensión sodium de PHP: el token no se puede guardar cifrado y Cloudflare queda desactivado.' ) }</Notice> }
-					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2">
+					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 						<ConnectionCard status={ data } />
 						{ connected && <ZoneCard status={ data } /> }
 					</div>
@@ -74,11 +74,12 @@ export function Cloudflare() {
 					{ connected && data.guard.blocked && <Notice level="warning">{ data.guard.reason }</Notice> }
 					{ connected && <PlanCard status={ data } /> }
 					{ connected && (
-						<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2">
+						<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 							<AnalyticsCard />
 							<SnapshotsCard status={ data } />
 						</div>
 					) }
+					{ connected && data.footprint.rules + data.footprint.settings > 0 && <RemoveAllCard status={ data } /> }
 				</div>
 			) }
 		</>
@@ -90,7 +91,8 @@ function ConnectionCard( { status }: { status: CfStatus } ) {
 	const [ token, setToken ] = useState( '' );
 	const [ confirmForget, setConfirmForget ] = useState( false );
 	const connect = useAction( ( value: string ) => api<CfStatus>( 'cloudflare/connect', 'POST', { token: value } ) );
-	const forget = useAction( () => api<CfStatus>( 'cloudflare/connect', 'DELETE' ) );
+	const forget = useAction( () => api<CfStatus>( 'cloudflare/connect', 'DELETE', { confirm: true } ) );
+	const leftovers = status.footprint.rules + status.footprint.settings;
 	const done = ( s: CfStatus ) => {
 		client.setQueryData( [ 'cf' ], s );
 		void client.invalidateQueries( { queryKey: [ 'cf-plan' ] } );
@@ -174,7 +176,11 @@ function ConnectionCard( { status }: { status: CfStatus } ) {
 				open={ confirmForget }
 				onOpenChange={ setConfirmForget }
 				title={ __( '¿Desconectar Cloudflare?' ) }
-				description={ __( 'Se borra el token guardado. Las reglas ya aplicadas en la zona se quedan como están; para quitarlas, restaura un snapshot antes de desconectar.' ) }
+				description={
+					leftovers > 0
+						? `${ __( 'Imagina Turbo todavía tiene en la zona' ) } ${ status.footprint.rules } ${ __( 'reglas y' ) } ${ status.footprint.settings } ${ __( 'ajustes cambiados. Sin el token ya no se pueden quitar desde aquí: usa antes "Quitar todo lo de Imagina Turbo".' ) }`
+						: __( 'Se borra el token guardado. No quedan reglas ni ajustes de Imagina Turbo en la zona.' )
+				}
 				confirmLabel={ __( 'Desconectar' ) }
 				destructive
 				pending={ forget.isPending }
@@ -354,7 +360,7 @@ function SnapshotsCard( { status }: { status: CfStatus } ) {
 								<span className="itb:font-medium">#{ s.id }</span> <span className="itb:text-zinc-500">{ formatDate( s.created_at, config.locale ) }</span>
 								<span className="itb:block itb:truncate itb:text-xs itb:text-zinc-500">{ s.reason }</span>
 							</span>
-							<Button size="sm" variant="outline" disabled={ ! status.enabled || status.guard.blocked || restore.isPending } onClick={ () => setTarget( s ) }>
+							<Button size="sm" variant="outline" disabled={ status.guard.blocked || restore.isPending } onClick={ () => setTarget( s ) }>
 								<History aria-hidden />
 								{ __( 'Restaurar' ) }
 							</Button>
@@ -376,6 +382,51 @@ function SnapshotsCard( { status }: { status: CfStatus } ) {
 					restore.mutate( target.id, {
 						onSettled: () => {
 							setTarget( null );
+							void client.invalidateQueries( { queryKey: [ 'cf-plan' ] } );
+							void client.invalidateQueries( { queryKey: [ 'cf-zone' ] } );
+							void client.invalidateQueries( { queryKey: [ 'cf-snapshots' ] } );
+						},
+					} )
+				}
+			/>
+		</Card>
+	);
+}
+
+function RemoveAllCard( { status }: { status: CfStatus } ) {
+	const client = useQueryClient();
+	const [ open, setOpen ] = useState( false );
+	const remove = useAction( () => api<CfApplyResult>( 'cloudflare/remove-all', 'POST', { confirm: true } ) );
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Quitar todo lo de Imagina Turbo' ) }</CardTitle>
+				<CardDescription>
+					{ `${ __( 'En la zona hay' ) } ${ status.footprint.rules } ${ __( 'reglas de Imagina Turbo y' ) } ${ status.footprint.settings } ${ __( 'ajustes que cambió. Úsalo antes de desactivar o borrar el plugin: borra sus reglas (las tuyas no se tocan) y devuelve los ajustes a su valor anterior. Guarda antes un snapshot, así que también se puede deshacer.' ) }` }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-2 itb:text-[13px]">
+				<div>
+					<Button size="sm" variant="destructive" disabled={ status.guard.blocked || remove.isPending } onClick={ () => setOpen( true ) }>
+						{ __( 'Quitar todo de Cloudflare' ) }
+					</Button>
+				</div>
+				{ remove.data && <Notice level={ remove.data.failed.length > 0 ? 'error' : 'success' }>{ remove.data.failed.length > 0 ? remove.data.failed.map( ( f ) => `${ f.id }: ${ f.error }` ).join( ' · ' ) : __( 'Listo: la zona ya no tiene nada de Imagina Turbo.' ) }</Notice> }
+				{ remove.error && <Notice level="error">{ remove.error.message }</Notice> }
+			</CardContent>
+			<ConfirmDialog
+				open={ open }
+				onOpenChange={ setOpen }
+				title={ __( '¿Quitar todo lo de Imagina Turbo de Cloudflare?' ) }
+				description={ __( 'Se borran sus reglas de caché, reescritura y firewall, y los ajustes de zona que cambió vuelven a su valor anterior. Antes se guarda un snapshot para poder deshacerlo.' ) }
+				confirmLabel={ __( 'Quitar todo' ) }
+				destructive
+				pending={ remove.isPending }
+				onConfirm={ () =>
+					remove.mutate( undefined, {
+						onSettled: () => {
+							setOpen( false );
+							void client.invalidateQueries( { queryKey: [ 'cf' ] } );
 							void client.invalidateQueries( { queryKey: [ 'cf-plan' ] } );
 							void client.invalidateQueries( { queryKey: [ 'cf-zone' ] } );
 							void client.invalidateQueries( { queryKey: [ 'cf-snapshots' ] } );

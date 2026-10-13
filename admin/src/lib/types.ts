@@ -254,6 +254,7 @@ export interface CfStatus {
 	error: string;
 	token_url: string;
 	token_permissions: string[];
+	footprint: { rules: number; settings: number };
 }
 
 export interface CfSetting {

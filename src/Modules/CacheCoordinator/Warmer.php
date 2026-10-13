@@ -33,6 +33,12 @@ final class Warmer {
 	/** Fracción de los núcleos por encima de la cual se pausa. */
 	public const LOAD_FACTOR = 0.7;
 
+	/**
+	 * Una página que tarda más que esto en recalentarse indica que el servidor ya está ocupado
+	 * (procesos PHP agotados no suben la carga de CPU): se pausa un minuto en vez de sumar peticiones.
+	 */
+	public const SLOW_MS = 5000;
+
 	/** Parámetros que nunca se recalientan (acciones, no páginas). */
 	private const BAD_QUERY = [ 'add-to-cart', 'remove_item', '_wpnonce', 'action', 'wc-ajax', 'preview', 's', 'replytocom' ];
 
@@ -103,6 +109,7 @@ final class Warmer {
 		$done   = 0;
 		$errors = 0;
 		$ms     = 0.0;
+		$slow   = false;
 		foreach ( $rows as $row ) {
 			$start    = microtime( true );
 			$response = wp_remote_get(
@@ -116,12 +123,33 @@ final class Warmer {
 					'sslverify'   => (bool) apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro del core para loopback.
 				]
 			);
-			$ms      += ( microtime( true ) - $start ) * 1000;
+			$took     = ( microtime( true ) - $start ) * 1000;
+			$ms      += $took;
 			++$done;
 			$code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
 			if ( $code < 200 || $code >= 400 ) {
 				++$errors;
 			}
+			if ( self::slow( $took ) ) {
+				$slow = true;
+				break;
+			}
+		}
+		if ( $slow ) {
+			// Lo que quedó del lote vuelve a la cola.
+			$this->queue->add( PurgeQueueRepository::KIND_WARM, array_column( array_slice( $rows, $done ), 'item' ) );
+			$state = $this->state();
+			$this->saveState(
+				[
+					'last_run'  => time(),
+					'warmed'    => $state['warmed'] + $done,
+					'errors'    => $state['errors'] + $errors,
+					'avg_ms'    => (int) round( $ms / $done ),
+					'paused_at' => time(),
+				]
+			);
+			self::schedule( Jobs::WARM, 60 );
+			return $done;
 		}
 
 		$state = $this->state();
@@ -203,6 +231,10 @@ final class Warmer {
 			}
 		}
 		return false;
+	}
+
+	public static function slow( float $ms ): bool {
+		return $ms > self::SLOW_MS;
 	}
 
 	public static function overloaded( ?float $load, int $cores ): bool {

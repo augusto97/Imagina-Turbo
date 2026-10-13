@@ -101,6 +101,10 @@ final class Applier {
 		];
 		usort( $selected, static fn( array $a, array $b ): int => ( 'setting' === $a['kind'] ? 3 : $order[ $a['action'] ] ) <=> ( 'setting' === $b['kind'] ? 3 : $order[ $b['action'] ] ) );
 		foreach ( $selected as $change ) {
+			if ( 'setting' === $change['kind'] ) {
+				// El valor de antes del primer cambio, para "Quitar todo lo de Imagina Turbo".
+				$this->state->rememberOriginal( $change['setting'], $change['current'] );
+			}
 			$ok = 'rule' === $change['kind'] ? $this->applyRule( $change ) : $this->applySetting( $change['setting'], $change['desired'] );
 			if ( true !== $ok ) {
 				$result['failed'][] = [
@@ -187,12 +191,17 @@ final class Applier {
 			if ( ! is_string( $id ) || null === $value ) {
 				continue;
 			}
-			$current = $zone['settings'][ $id ]['value'] ?? null;
+			$current  = $zone['settings'][ $id ]['value'] ?? null;
+			$original = $this->state->originals()[ $id ] ?? null;
 			if ( Planner::same( $current, $value ) ) {
 				continue;
 			}
 			$ok = $this->applySetting( $id, $value );
 			if ( true === $ok ) {
+				// Si el ajuste es uno que el plugin cambió alguna vez, queda cambiado o no según el valor restaurado.
+				if ( null !== $original ) {
+					$this->state->setOriginalActive( $id, ! Planner::same( $value, $original['value'] ) );
+				}
 				$result['applied'][] = 'setting:' . $id;
 			} else {
 				$result['failed'][] = [
@@ -209,6 +218,78 @@ final class Applier {
 			[
 				'user'     => get_current_user_id(),
 				'snapshot' => $snapshotId,
+				'failed'   => $result['failed'],
+			]
+		);
+		return $result;
+	}
+
+	/**
+	 * Quita todo lo del plugin de la zona: borra sus reglas en todas las fases gestionadas (las del
+	 * cliente no se tocan) y devuelve los ajustes que cambió a su valor de antes. Guarda antes un
+	 * snapshot, así que también esto se puede deshacer.
+	 *
+	 * @return array{applied: list<string>, failed: list<array{id: string, error: string}>, snapshot_id: int, rolled_back: bool}
+	 */
+	public function removeAll(): array {
+		$result                = [
+			'applied'     => [],
+			'failed'      => [],
+			'snapshot_id' => 0,
+			'rolled_back' => false,
+		];
+		$zone                  = $this->inspector->read();
+		$result['snapshot_id'] = $this->snapshots->insert( $this->zoneId, __( 'Antes de quitar todo lo de Imagina Turbo', 'imagina-turbo' ), $this->capture( $zone ) );
+		if ( 0 === $result['snapshot_id'] ) {
+			$result['failed'][] = [
+				'id'    => 'snapshot',
+				'error' => __( 'No se pudo guardar el snapshot previo; no se quitó nada.', 'imagina-turbo' ),
+			];
+			return $result;
+		}
+		foreach ( Phases::MANAGED as $phase ) {
+			$current = $zone['phases'][ $phase ] ?? null;
+			if ( null === $current ) {
+				continue;
+			}
+			$own = array_filter( $current['rules'], fn( array $rule ): bool => $this->isOwn( $rule ) );
+			if ( $current['readable'] && [] === $own ) {
+				continue;
+			}
+			$error = $this->restorePhase( $phase, [], $current );
+			if ( '' !== $error ) {
+				$result['failed'][] = [
+					'id'    => 'phase:' . $phase,
+					'error' => $error,
+				];
+			} else {
+				$result['applied'][] = 'phase:' . $phase;
+			}
+		}
+		foreach ( $this->state->originals() as $id => $original ) {
+			if ( ! $original['active'] ) {
+				continue;
+			}
+			$current = $zone['settings'][ $id ]['value'] ?? null;
+			$ok      = Planner::same( $current, $original['value'] ) ? true : $this->applySetting( (string) $id, $original['value'] );
+			if ( true === $ok ) {
+				$this->state->setOriginalActive( (string) $id, false );
+				$result['applied'][] = 'setting:' . $id;
+			} else {
+				$result['failed'][] = [
+					'id'    => 'setting:' . $id,
+					'error' => $ok,
+				];
+			}
+		}
+		$this->events->warning(
+			'cloudflare',
+			'remove_all',
+			[] === $result['failed'] ? __( 'Se quitó de Cloudflare todo lo de Imagina Turbo (reglas propias y ajustes devueltos a su valor anterior).', 'imagina-turbo' ) : __( 'No se pudo quitar todo lo de Imagina Turbo de Cloudflare. Revisa la zona.', 'imagina-turbo' ),
+			[
+				'user'     => get_current_user_id(),
+				'snapshot' => $result['snapshot_id'],
+				'applied'  => $result['applied'],
 				'failed'   => $result['failed'],
 			]
 		);

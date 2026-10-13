@@ -145,6 +145,33 @@ Verificado en el código de WooCommerce 11.2.1 y de los temas Astra, Kadence, Bl
   4. **Vigilancia**: si después aparecen fatales o diferencias, la regla se desactiva sola.
 - **Aceptación:** reducción medible de memoria y tiempo en los endpoints filtrados (objetivo: −40 % de memoria en `wc-ajax` y REST de Imagina Search); cero desactivaciones permanentes de plugins en pruebas de estrés con Freemius instalado; `rewrite_rules` intactas tras flush forzado durante requests filtrados.
 
+### Implementación (fase 5)
+
+- **Decisión del punto 6 (resuelta con pruebas):** los filtros de lectura **y** de escritura se mantienen todo el request. Con la lectura filtrada, `is_plugin_active()` coincide con lo cargado (el addon de prueba ve el plugin oculto como inactivo). Con la protección de escritura todo el request, también se cubren las escrituras tardías: el simulador de Freemius vuelve a guardar la lista en `init` y en `shutdown`. Contraprueba en el sitio: sin la protección, **un solo request** desactivó para siempre los dos plugins ocultos; con ella, 31 requests seguidos no perdieron ninguno y la lista quedó ordenada.
+- **`rewrite_rules`**: contraprueba igual. Un plugin que regenera las reglas en `wp_loaded` durante un request filtrado borró la ruta del plugin oculto sin la protección y la dejó intacta con ella.
+- **Exclusiones además de las del documento**:
+  - **Store API**: su namespace incluye el checkout de bloques y la regla es por namespace.
+  - **`wp/v2`, la raíz de la REST y la API propia (`imagina-turbo/v1`)**.
+  - **Requests con sesión iniciada**: el editor y el admin usan REST y admin-ajax.
+  - **Solo GET por defecto en la REST**: en un POST, los plugins quitados no ejecutarían sus efectos (analítica de servidor, sincronización, CRM) y el experimento no los ve. wc-ajax y admin-ajax aplican a todos los métodos, porque casi siempre llegan por POST; la pantalla lo advierte.
+- **Config compilada**: `filter` (clave → `{p: plugins, w: todos los métodos}`) solo con reglas activas y plugins que siguen activos. `experiments` (id → clave y plugins) con las reglas en prueba y las activas, para poder revisarlas.
+- **Loader**: un `isset` en el camino normal. Si hay regla o cookie de experimento, carga `EarlyFilter` (y `ExperimentProbe`). Benchmark de la etapa temprana: 0,096 ms.
+- **Experimentos sin el verificador externo**: el sitio se llama a sí mismo (loopback, anónimo, sin seguir redirecciones, con un parámetro único contra la caché). Una cookie firmada (`itb_exp`, HMAC con clave derivada de `AUTH_KEY` + `AUTH_SALT`, 10 minutos como máximo) decide en el loader si ese request va sin filtrar o filtrado.
+  - Cada request de experimento escribe tiempo, memoria pico, avisos y fatal en `wp-content/imagina-turbo/experiments/{id}.log`. Es una escritura acotada: solo en requests firmados por el propio sitio.
+  - **Calibración**: dos llamadas sin filtrar eligen la comparación exacta (con nonces, hashes y fechas neutralizados) o la estructural (claves y tipos del JSON, etiquetas del HTML).
+  - **Diferencia**: estado, tipo de contenido, redirección, nombres de cookies, cuerpo, un fatal o más avisos de PHP que sin filtrar.
+  - **Promoción**: 20 pares iguales seguidos. Los experimentos no cuentan para el modo seguro: sus fallos quedan en la evidencia.
+  - El verificador externo con Playwright (páginas completas) sigue pendiente.
+- **Vigilancia**: un fatal en un request filtrado queda en `filter-faults.log` (lo escribe el loader en shutdown). La regla se desactiva en el siguiente request de admin o en la tarea horaria, con evento de error. Probado con un addon que llama a una función del plugin oculto. Cada regla activa se revisa una vez al día con 5 pares.
+- **La compilación nunca corre en un request con plugins ocultos**: vería una lista de activos recortada.
+- **Candidatos**: los endpoints filtrables con muestras del perfilador (48 h) y los plugins con al menos 0,5 ms de costo medio allí, sin los protegidos (el propio plugin; WooCommerce en wc-ajax y `wc/*`; Imagina Search y WooCommerce en `wss/v1`).
+- **Medido en el sitio de pruebas** (OpenLiteSpeed, WooCommerce):
+  - `get_refreshed_fragments` sin dos plugins de prueba (uno de ellos reserva 6 MB): 15,0 → 8,9 MB (−41 %), 108 → 84 ms.
+  - Imagina Search (`wss/v1`, búsqueda y populares) sin los 7 plugins ajenos: 23,7 → 17,0 MB (−28 %), 182 → 151 ms.
+  - El −40 % depende de lo que pesen los plugins del sitio: aquí son ligeros. Con Elementor, un SEO o un constructor, la diferencia crece.
+- **Detección de diferencias probada**: quitar el plugin que agrega un fragmento al mini-carrito hizo fallar el experimento en el primer par, con la diferencia exacta en la evidencia.
+- **Pendiente para pruebas reales**: WPML (no hay licencia en el entorno de pruebas) y plugins con Freemius real.
+
 ---
 
 ## 5. Navegación instantánea (`Speculation`)
@@ -256,6 +283,17 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 - Detectar el plugin. Registrar su namespace REST como tipo de request propio para la carga condicional (cargar solo Imagina Search + WooCommerce si consulta precios/stock).
 - Excluir sus URLs de resultados del prerender y del edge si son dinámicas.
 - Mostrar en el perfilador el costo de cada búsqueda.
+
+### Implementación (fase 5)
+
+Verificado en `augusto97/imagina-search` (Woo Smart Search 6.0.2):
+
+- Es el plugin `woo-smart-search/woo-smart-search.php`; se reconoce por el archivo aunque cambie la carpeta.
+- Namespace REST `wss/v1`. En modo WooCommerce usa `wc_get_product()`, así que WooCommerce queda protegido en su regla.
+- Aparece como candidato aunque no haya muestras, con todos los plugins ajenos propuestos y como pruebas una búsqueda real (primera palabra del primer producto) y `/popular`.
+- Su límite de 30 búsquedas por minuto e IP (`wss_rate_limit`) se levanta solo en los requests de experimento.
+- La página de resultados (`results_page_id`) imprime el término y pide los resultados desde el navegador: el HTML es cacheable por URL. Su ruta va a la config (`imagina_search.results_path`) para excluirla del prerender en la fase 6.
+- El costo de cada búsqueda ya sale en el perfilador, con la ruta `wss/v1`.
 
 ---
 

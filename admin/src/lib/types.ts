@@ -527,3 +527,96 @@ export interface NavigationStatus {
 	insights: RumInsightsData;
 	no_store: { route: string; n: number }[];
 }
+
+export interface AssetRule {
+	id: string;
+	handle: string;
+	type: 'js' | 'css';
+	mode: 'never' | 'only';
+	templates: string[];
+	ids: number[];
+	post_types: string[];
+	status: 'testing' | 'active' | 'disabled';
+	note: string;
+	verified_by: number;
+	verified_at: number;
+	created_at: number;
+}
+
+export interface InventoryAsset {
+	handle: string;
+	src: string;
+	origin: 'plugin' | 'theme' | 'core' | 'external' | 'inline' | 'other';
+	owner: string;
+	size: number;
+	deps: string[];
+	footer: boolean;
+	enqueued: boolean;
+	needed_by: string[];
+	protected: boolean;
+	rules: { id: string; status: AssetRule[ 'status' ] }[];
+}
+
+export interface AssetInventory {
+	path: string;
+	status: number;
+	context: { template: string; id: number; post_type: string };
+	js: InventoryAsset[];
+	css: InventoryAsset[];
+	shortcodes: string[];
+	blocks: string[];
+}
+
+export interface AssetSuggestion {
+	plugin: string;
+	label: string;
+	kind: 'form' | 'slider' | 'woo';
+	risk: 'moderate';
+	handle: string;
+	type: 'js' | 'css';
+	mode: 'only';
+	templates: string[];
+	ids: number[];
+	note: string;
+}
+
+export interface AssetsStatus {
+	enabled: boolean;
+	forced_off: string;
+	rules: AssetRule[];
+	preview: boolean;
+	suggestions: {
+		rules: AssetSuggestion[];
+		unused: { plugin: string; label: string; kind: string }[];
+		scanned: { path: string; template: string }[];
+		errors: string[];
+		generated_at: number;
+	} | null;
+	templates: string[];
+	post_types: string[];
+	home: string;
+}
+
+export interface DbAudit {
+	generated_at: number;
+	autoload: { count: number; bytes: number; top: { name: string; bytes: number; owner: 'core' | 'active' | 'inactive' | 'unknown'; plugin: string }[] };
+	inactive_options: { count: number; bytes: number; autoloaded: number; items: { name: string; bytes: number; autoload: boolean; plugin: string }[] };
+	transients: { expired: number; object_cache: boolean };
+	action_scheduler: { available: boolean; old: number; complete: number; failed: number; canceled: number; pending: number; total: number; logs: number };
+	revisions: { total: number; excess: number; posts: number; keep: number; wp_limit: number };
+	orphan_postmeta: number;
+	hpos: { woo: boolean; enabled: boolean; sync: boolean; posts_orders: number; recommendation: string };
+	postmeta_index: { rows: number; indexes: string[]; recommendation: string };
+	tables: { name: string; rows: number; bytes: number }[];
+}
+
+export interface DbStatus {
+	enabled: boolean;
+	audit: DbAudit | null;
+	batches: { batch: string; created_at: string; action: string; rows: number; restored: boolean }[];
+	keep: number;
+	settings: { db_keep_revisions: number; db_schedule: string[]; db_schedule_days: number };
+	last_run: number;
+	result?: { action: string; batch: string; affected: number; backed_up: number; more: boolean };
+	restored?: { batch: string; restored: number; skipped: number };
+}

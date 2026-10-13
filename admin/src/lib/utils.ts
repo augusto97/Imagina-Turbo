@@ -31,3 +31,14 @@ export function downloadFile( name: string, content: string, type: string ): voi
 	link.remove();
 	URL.revokeObjectURL( url );
 }
+
+export function formatBytes( bytes: number, locale: string ): string {
+	const number = new Intl.NumberFormat( locale, { maximumFractionDigits: 1 } );
+	if ( bytes >= 1048576 ) {
+		return `${ number.format( bytes / 1048576 ) } MB`;
+	}
+	if ( bytes >= 1024 ) {
+		return `${ number.format( bytes / 1024 ) } KB`;
+	}
+	return `${ number.format( bytes ) } B`;
+}

@@ -197,6 +197,35 @@ final class Matrix {
 	}
 
 	/**
+	 * Exclusiones de delay JS que no dependen de los plugins activos: las globales (regex de WP Rocket) y
+	 * las de servicios de terceros que se rompen si se retrasan. De terceros solo se toman pagos y
+	 * "otros servicios" (Turnstile, reCAPTCHA, mapas, chats): analítica y anuncios sí se pueden
+	 * retrasar y excluirlos quitaría casi todo el beneficio.
+	 *
+	 * @return list<string>
+	 */
+	public function delayJsGlobal(): array {
+		$out    = [];
+		$global = $this->data['delay_js_global_exclusions'] ?? [];
+		foreach ( is_array( $global ) && is_array( $global['regex'] ?? null ) ? $global['regex'] : [] as $pattern ) {
+			if ( is_string( $pattern ) && '' !== $pattern ) {
+				$out[] = $pattern;
+			}
+		}
+		$third = $this->data['third_party_scripts_never_delay'] ?? [];
+		foreach ( [ 'payment_processors', 'other_services' ] as $category ) {
+			foreach ( is_array( $third ) && is_array( $third[ $category ] ?? null ) ? $third[ $category ] : [] as $service ) {
+				foreach ( is_array( $service ) && is_array( $service['exclude_regex'] ?? null ) ? $service['exclude_regex'] : [] as $pattern ) {
+					if ( is_string( $pattern ) && '' !== $pattern ) {
+						$out[] = $pattern;
+					}
+				}
+			}
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
 	 * @return list<array<string, mixed>>
 	 */
 	public function integrations(): array {

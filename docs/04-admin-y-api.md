@@ -15,9 +15,9 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Firewall** | Reglas del edge que se proponen (ataques en la URL, superficie de WordPress, escáneres) y límite de peticiones a login y checkout; sus cambios pendientes en la zona con el mismo ciclo de aplicar y snapshot que Cloudflare; eventos de las últimas 24 h por regla; verificación de origen cerrado e IP real; reglas en `.htaccess` con respaldo y autoprueba. |
 | **WooCommerce** | Carrito por Store API (selectores del mini-carrito, prueba en vivo), cookies neutralizadas, páginas excluidas, geolocalización. |
 | **Navegación** | Modo y anticipación (prerender con confirmación), prefetch predictivo, respaldo para Safari y Firefox, View Transitions, prioridad LCP, fachadas y muestra del RUM. Resumen de navegación (especuladas, bfcache), Core Web Vitals p75 por plantilla y dispositivo, lo que el RUM decidió (páginas predichas, imagen LCP) y causas de bfcache con las páginas propias que salen con no-store. |
-| **Assets** | Gestor por ruta (vista tipo script manager con previsualización). |
+| **Assets** | Gestor por ruta (vista tipo script manager): previsualización solo para el admin, reglas con su estado, inventario de una página (origen, tamaño, dependientes, pie) y sugerencias de formularios, sliders y WooCommerce. |
 | **Ajustes rápidos** | Escudo del servidor (interruptores, intervalos de Heartbeat, límite de filtros, prueba como visitante), guía de cron del sistema, ajustes con interruptor y riesgo (confirmación para moderados e invasivos) y migración desde Perfmatters. |
-| **Base de datos** | Auditoría, acciones con respaldo, programación. |
+| **Base de datos** | Auditoría (autoload, opciones de plugins inactivos, transients, Action Scheduler, revisiones, postmeta huérfano, HPOS, índices, tablas más grandes), acciones con respaldo, lotes restaurables y limpieza programada. |
 | **Compatibilidad** | Plugins/tema detectados, reglas de la matriz aplicadas, conflictos y solapamientos, versión de la matriz y firma. |
 | **Registro** | Todos los eventos: cambios, aplicaciones, reversiones, modo seguro, errores de API. Filtros y exportación. |
 | **Avanzado** | Kill switch, cookie de bypass para el admin actual, exportar/importar ajustes (sin token), conexión con el hub, licencia (Imagina Updater), modo depuración. |
@@ -70,7 +70,13 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | PUT | `/navigation/settings` | `spec_mode`, `spec_eagerness`, `spec_predictive`, `spec_fallback`, `view_transitions`, `hints_lcp`, `hints_facades`, `rum_rate`. Pasar a prerender exige `confirm` (428) |
 | GET / POST | `/navigation/report?days=7\|30` · `/navigation/insights` | Informe del RUM · recalcular ahora las páginas predichas y la imagen LCP |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
-| GET / POST | `/db/audit` · `/db/actions/{task}` | Auditoría y acciones |
+| GET | `/assets/status` | Módulo, reglas, si la previsualización está activa, última tanda de sugerencias, plantillas y tipos de contenido del sitio |
+| POST | `/assets/inspect` · `/assets/suggest` | Inventario de una ruta (loopback firmado como visitante anónimo) · inventariar páginas de muestra y calcular sugerencias |
+| POST / DELETE | `/assets/rules` · `/assets/rules/{id}/activate\|disable\|test` · `/assets/rules/{id}` | Crear en prueba · activar (`confirm`, 428; guarda quién y cuándo verificó y purga la caché) · desactivar · volver a prueba · eliminar |
+| POST | `/assets/preview` | `{on}`: cookie firmada `itb_assets_prev` (HttpOnly, 2 h) para ver las reglas en prueba; purga la caché privada de ese admin (LSCache, WP Rocket) |
+| GET / POST | `/database/status` · `/database/audit` | Última auditoría, lotes de respaldo, ajustes · auditar ahora (solo lectura) |
+| POST | `/database/actions/{transients\|action_scheduler\|revisions\|autoload}` | Con el módulo activo y `confirm` (428). `autoload` recibe `options[]` y solo acepta opciones atribuidas a plugins inactivos |
+| POST / PUT | `/database/restore/{lote}` · `/database/settings` | Restaurar un lote (`confirm`) · `db_keep_revisions`, `db_schedule`, `db_schedule_days` |
 | GET | `/events` | Registro |
 | POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/diag-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
 
@@ -103,6 +109,9 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_htaccess_backup` | Copia completa del `.htaccess` antes del último cambio |
 | `itb_rum_insights` | Lo que decidió la tarea diaria del RUM: páginas predichas por plantilla e imagen LCP por plantilla (con su id de adjunto o `featured`) |
 | `itb_filter_rules` | Reglas de carga condicional: clave, plugins, métodos, peticiones de prueba, estado (`testing`, `active`, `failed`, `disabled`), motivo y evidencia |
+| `itb_asset_rules` | Reglas del gestor de assets: handle, tipo, modo (`never`/`only`), plantillas, ids, tipos de contenido, estado (`testing`, `active`, `disabled`), quién y cuándo la verificó |
+| `itb_db_audit` | Última auditoría de la base de datos |
+| `itb_db_schedule_state` | Última ejecución de la limpieza programada y sus resultados |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)
@@ -178,6 +187,18 @@ cf_snapshots (                        -- fase 2b, esquema v4; se conservan 50 po
   reason VARCHAR(100) NOT NULL,
   payload LONGTEXT NOT NULL,          -- JSON: reglas propias por fase (con su posición) + ajustes editables
   KEY zone (zone_id, id)
+)
+
+db_backups (                          -- fase 7, esquema v8; se conservan 30 días
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  batch CHAR(12) NOT NULL,            -- un lote por acción: se restaura entero
+  created_at DATETIME NOT NULL,
+  action VARCHAR(40) NOT NULL,        -- transients, action_scheduler, revisions, autoload
+  tbl VARCHAR(64) NOT NULL,           -- tabla sin prefijo: options, posts, postmeta, actionscheduler_*
+  op VARCHAR(10) NOT NULL,            -- insert (volver a insertar la fila) o update (volver a poner los valores)
+  row_data LONGTEXT NOT NULL,         -- JSON de la fila tal como estaba
+  restored_at DATETIME NULL,
+  KEY batch (batch)
 )
 ```
 

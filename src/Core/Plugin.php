@@ -35,6 +35,14 @@ use ImaginaTurbo\Modules\CacheCoordinator\Adapters\NullAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\WpRocketAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\CacheModule;
 use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
+use ImaginaTurbo\Modules\AssetManager\AssetInventory;
+use ImaginaTurbo\Modules\AssetManager\AssetRules;
+use ImaginaTurbo\Modules\AssetManager\AssetScanner;
+use ImaginaTurbo\Modules\Database\DatabaseActions;
+use ImaginaTurbo\Modules\Database\DatabaseAudit;
+use ImaginaTurbo\Modules\Database\DatabaseService;
+use ImaginaTurbo\Repository\DbBackupRepository;
+use ImaginaTurbo\Modules\CacheCoordinator\DelayJsExclusions;
 use ImaginaTurbo\Modules\CacheCoordinator\Edge\EdgePurger;
 use ImaginaTurbo\Modules\CacheCoordinator\Edge\NullEdgePurger;
 use ImaginaTurbo\Modules\CacheCoordinator\NonceRefresh;
@@ -177,6 +185,14 @@ final class Plugin {
 				}
 			)
 		);
+		add_action(
+			Jobs::DAILY_DB,
+			fn() => $this->whenActive(
+				function (): void {
+					$this->container->get( DatabaseService::class )->daily( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'database' ) );
+				}
+			)
+		);
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
@@ -205,6 +221,14 @@ final class Plugin {
 		}
 
 		if ( null !== Runtime::$config ) {
+			// Coexistencia: exclusiones de delay JS de la matriz para el plugin de caché del sitio.
+			if ( RequestType::FrontendHtml === $type ) {
+				DelayJsExclusions::register();
+				// Inventario de assets (petición loopback firmada desde el admin).
+				if ( isset( $_COOKIE['itb_assets_inv'] ) ) {
+					AssetInventory::register();
+				}
+			}
 			( new ModuleRegistry() )->boot( $this->container, Runtime::$config, self::request() );
 		}
 	}
@@ -571,6 +595,30 @@ final class Plugin {
 				}
 			)
 		);
+		$c->set( AssetRules::class, static fn(): AssetRules => new AssetRules() );
+		$c->set( AssetScanner::class, static fn( Container $c ): AssetScanner => new AssetScanner( $c->get( AssetRules::class ) ) );
+		$c->set(
+			DbBackupRepository::class,
+			static function (): DbBackupRepository {
+				global $wpdb;
+				return new DbBackupRepository( $wpdb );
+			}
+		);
+		$c->set(
+			DatabaseAudit::class,
+			static function (): DatabaseAudit {
+				global $wpdb;
+				return new DatabaseAudit( $wpdb );
+			}
+		);
+		$c->set(
+			DatabaseActions::class,
+			static function ( Container $c ): DatabaseActions {
+				global $wpdb;
+				return new DatabaseActions( $wpdb, $c->get( DbBackupRepository::class ), $c->get( DatabaseAudit::class ), $c->get( EventLog::class ) );
+			}
+		);
+		$c->set( DatabaseService::class, static fn( Container $c ): DatabaseService => new DatabaseService( $c->get( Settings::class ), $c->get( DatabaseActions::class ), $c->get( DbBackupRepository::class ) ) );
 		$c->set( MuLoaderInstaller::class, static fn(): MuLoaderInstaller => new MuLoaderInstaller( $dir, WPMU_PLUGIN_DIR ) );
 		$c->set( Jobs::class, static fn(): Jobs => new Jobs() );
 		$c->set(

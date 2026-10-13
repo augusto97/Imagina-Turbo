@@ -17,6 +17,7 @@ use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
+use ImaginaTurbo\Modules\AssetManager\AssetRules;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Modules\Rum\RumInsights;
@@ -28,15 +29,15 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 7;
+	public const DB_VERSION        = 8;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION, AssetRules::OPTION, 'itb_db_audit', 'itb_db_schedule_state' ];
 
 	/** Tablas propias sin prefijo. */
-	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots', 'itb_rum_hist', 'itb_rum_events' ];
+	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots', 'itb_rum_hist', 'itb_rum_events', 'itb_db_backups' ];
 
 	public function __construct(
 		private readonly Settings $settings,
@@ -235,6 +236,25 @@ final class Installer {
   n int(10) unsigned NOT NULL DEFAULT 0,
   ip_bits bigint(20) unsigned NOT NULL DEFAULT 0,
   PRIMARY KEY  (day,kind,template,device,value)
+) {$charset};"
+		);
+
+		// Respaldos de las acciones de base de datos (fase 7, esquema v8): cada fila borrada o cambiada,
+		// en JSON, para poder restaurar el lote. "op" dice cómo: insert (volver a insertar la fila) o
+		// update (volver a poner los valores guardados en la fila con esa clave).
+		$backups = $wpdb->prefix . 'itb_db_backups';
+		dbDelta(
+			"CREATE TABLE {$backups} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  batch char(12) NOT NULL,
+  created_at datetime NOT NULL,
+  action varchar(40) NOT NULL,
+  tbl varchar(64) NOT NULL,
+  op varchar(10) NOT NULL,
+  row_data longtext NOT NULL,
+  restored_at datetime DEFAULT NULL,
+  PRIMARY KEY  (id),
+  KEY batch (batch)
 ) {$charset};"
 		);
 

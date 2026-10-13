@@ -56,7 +56,7 @@ final class Client {
 	 * Cliente con un token concreto (verificación antes de guardarlo).
 	 */
 	public function withToken( string $token ): self {
-		return new self( static fn(): ?string => $token, $this->events, $this->sleep );
+		return new self( static fn(): string => $token, $this->events, $this->sleep );
 	}
 
 	public static function base(): string {
@@ -66,6 +66,9 @@ final class Client {
 		return self::BASE;
 	}
 
+	/**
+	 * @param array<string, scalar> $query Parámetros de la URL.
+	 */
 	public function get( string $path, array $query = [] ): Response {
 		return $this->request( 'GET', $path, null, $query );
 	}
@@ -145,7 +148,8 @@ final class Client {
 			++$attempt;
 		}
 
-		if ( ! $response->ok() && null !== $this->events ) {
+		// Un 404 en una lectura es una respuesta esperada (p. ej. una fase sin ruleset de entrada).
+		if ( ! $response->ok() && null !== $this->events && ! ( 'GET' === $method && 404 === $response->status ) ) {
 			$this->events->warning(
 				'cloudflare',
 				'api_error',

@@ -33,6 +33,9 @@ final class Jobs {
 	/** Siembra del recalentado completo desde el sitemap. */
 	public const WARM_SEED = 'itb_warm_seed';
 
+	/** Cloudflare: analíticas y deriva de reglas (solo lectura de la zona). */
+	public const HOURLY_CLOUDFLARE = 'itb_cf_hourly';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -40,10 +43,11 @@ final class Jobs {
 	 */
 	public static function recurring(): array {
 		return [
-			self::DAILY_CLEANUP    => DAY_IN_SECONDS,
-			self::HOURLY_ROLLUP    => HOUR_IN_SECONDS,
-			self::HOURLY_TELEMETRY => HOUR_IN_SECONDS,
-			self::DAILY_AUDIT      => DAY_IN_SECONDS,
+			self::DAILY_CLEANUP     => DAY_IN_SECONDS,
+			self::HOURLY_ROLLUP     => HOUR_IN_SECONDS,
+			self::HOURLY_TELEMETRY  => HOUR_IN_SECONDS,
+			self::DAILY_AUDIT       => DAY_IN_SECONDS,
+			self::HOURLY_CLOUDFLARE => HOUR_IN_SECONDS,
 		];
 	}
 

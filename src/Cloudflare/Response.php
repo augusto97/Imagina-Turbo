@@ -45,7 +45,19 @@ final class Response {
 	public static function fromHttp( int $status, string $body, int $retryAfter = 0 ): self {
 		$data = json_decode( $body, true );
 		if ( ! is_array( $data ) ) {
-			return new self( $status, false, null, [ [ 'code' => 'itb_invalid_json', 'message' => 'HTTP ' . $status ] ], [], $retryAfter );
+			return new self(
+				$status,
+				false,
+				null,
+				[
+					[
+						'code'    => 'itb_invalid_json',
+						'message' => 'HTTP ' . $status,
+					],
+				],
+				[],
+				$retryAfter
+			);
 		}
 		$errors = [];
 		foreach ( is_array( $data['errors'] ?? null ) ? $data['errors'] : [] as $error ) {

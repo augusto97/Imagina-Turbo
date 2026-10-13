@@ -22,8 +22,12 @@ final class Rule {
 
 	public const DESCRIPTION_PREFIX = '[imagina-turbo] ';
 
+	/** Campos de una regla que gestionamos (los demás los pone Cloudflare). */
+	public const FIELDS = [ 'ref', 'description', 'expression', 'action', 'action_parameters', 'enabled', 'ratelimit' ];
+
 	/**
 	 * @param array<string, mixed> $parameters action_parameters.
+	 * @param array<string, mixed> $ratelimit  Objeto ratelimit (solo en la fase http_ratelimit, campo de la regla).
 	 */
 	public function __construct(
 		public readonly string $phase,
@@ -33,6 +37,7 @@ final class Rule {
 		public readonly string $action,
 		public readonly array $parameters = [],
 		public readonly bool $enabled = true,
+		public readonly array $ratelimit = [],
 	) {
 	}
 
@@ -49,13 +54,25 @@ final class Rule {
 			is_string( $raw['expression'] ?? null ) ? $raw['expression'] : '',
 			is_string( $raw['action'] ?? null ) ? $raw['action'] : '',
 			is_array( $raw['action_parameters'] ?? null ) ? $raw['action_parameters'] : [],
-			false !== ( $raw['enabled'] ?? true )
+			false !== ( $raw['enabled'] ?? true ),
+			is_array( $raw['ratelimit'] ?? null ) ? $raw['ratelimit'] : []
 		);
 	}
 
-	public static function isOwn( array $raw ): bool {
-		$ref = $raw['ref'] ?? '';
-		return is_string( $ref ) && str_starts_with( $ref, self::REF_PREFIX );
+	/**
+	 * Solo los campos gestionados de una regla de la API (para snapshots y para volver a crearla).
+	 *
+	 * @param array<mixed> $raw Regla.
+	 * @return array<string, mixed>
+	 */
+	public static function strip( array $raw ): array {
+		$out = [];
+		foreach ( self::FIELDS as $field ) {
+			if ( array_key_exists( $field, $raw ) ) {
+				$out[ $field ] = $raw[ $field ];
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -73,6 +90,9 @@ final class Rule {
 		];
 		if ( [] !== $this->parameters ) {
 			$body['action_parameters'] = $this->parameters;
+		}
+		if ( [] !== $this->ratelimit ) {
+			$body['ratelimit'] = $this->ratelimit;
 		}
 		return $body;
 	}

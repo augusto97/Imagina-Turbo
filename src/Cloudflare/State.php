@@ -23,8 +23,8 @@ final class State {
 	 * @return array{zone_id: string, zone_name: string, account_id: string, plan: string, plan_name: string, status: string, connected_at: int, checked_at: int, permissions: array<string, bool>, applied: array<string, array{hash: string, at: int}>, error: string}
 	 */
 	public function all(): array {
-		$s = get_option( self::OPTION, [] );
-		$s = is_array( $s ) ? $s : [];
+		$s     = get_option( self::OPTION, [] );
+		$s     = is_array( $s ) ? $s : [];
 		$perms = [];
 		foreach ( is_array( $s['permissions'] ?? null ) ? $s['permissions'] : [] as $k => $v ) {
 			if ( is_string( $k ) ) {

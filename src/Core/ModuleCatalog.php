@@ -27,6 +27,9 @@ final class ModuleCatalog {
 			'cache_coordinator' => \ImaginaTurbo\Modules\CacheCoordinator\CacheModule::class,
 			'cloudflare'        => \ImaginaTurbo\Modules\Cloudflare\CloudflareModule::class,
 			'woo_cart'          => \ImaginaTurbo\Modules\WooCart\WooCartModule::class,
+			'shield'            => \ImaginaTurbo\Modules\Shield\ShieldModule::class,
+			'tweaks'            => \ImaginaTurbo\Modules\Tweaks\TweaksModule::class,
+			'firewall'          => \ImaginaTurbo\Modules\Firewall\FirewallModule::class,
 		];
 	}
 

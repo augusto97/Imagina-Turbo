@@ -14,6 +14,7 @@ use ImaginaTurbo\Compat\MatrixException;
 use ImaginaTurbo\Compat\Resolver;
 use ImaginaTurbo\Core\EarlyLoader;
 use ImaginaTurbo\Core\Environment\Detector;
+use ImaginaTurbo\Modules\Tweaks\TweakCatalog;
 use ImaginaTurbo\Modules\WooCart\ThemeSelectors;
 use ImaginaTurbo\Core\Environment\OverlapGuard;
 use ImaginaTurbo\Core\ModuleCatalog;
@@ -221,6 +222,8 @@ final class ConfigCompiler {
 			'static_passthrough'          => array_map( 'strtolower', $compat['static_passthrough'] ?? [] ),
 			'integrations'                => $compat['integrations'] ?? [],
 			'woo'                         => $this->wooConfig( $theme ),
+			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
+			'tweaks'                      => $this->tweaksConfig(),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
 			'profiler'                    => [
 				'rate'            => (float) $this->settings->get( 'profiler_sample_rate', Settings::DEFAULT_SAMPLE_RATE ),
@@ -264,6 +267,45 @@ final class ConfigCompiler {
 			'sitemaps'        => $compat['sitemaps'] ?? [],
 			'preload_exclude' => $compat['preload_exclude'] ?? [],
 			'bypass_paths'    => array_values( array_unique( $bypassPaths ) ),
+		];
+	}
+
+	/**
+	 * Escudo: lo moderado (XML-RPC, usuarios de la REST) solo se bloquea si ningún plugin activo lo
+	 * requiere según la matriz (docs/02 módulo 6).
+	 *
+	 * @param array<string, mixed> $requires Requisitos de las integraciones activas.
+	 * @return array<string, mixed>
+	 */
+	private function shieldConfig( array $requires ): array {
+		$xmlrpcRequired = true === ( $requires['xmlrpc'] ?? false );
+		$usersRequired  = true === ( $requires['rest_users'] ?? false );
+		$on             = fn( string $key ): bool => true === $this->settings->get( $key, true );
+		return [
+			'static'           => $on( 'shield_static' ),
+			'author'           => $on( 'shield_author' ),
+			'xmlrpc'           => $on( 'shield_xmlrpc' ) && ! $xmlrpcRequired,
+			'rest_users'       => $on( 'shield_rest_users' ) && ! $usersRequired,
+			'heartbeat'        => $on( 'shield_heartbeat' ),
+			'heartbeat_admin'  => (int) $this->settings->get( 'shield_heartbeat_admin', 60 ),
+			'heartbeat_editor' => (int) $this->settings->get( 'shield_heartbeat_editor', 15 ),
+			'filter_limit'     => (int) $this->settings->get( 'shield_filter_limit', 3 ),
+			'required'         => [
+				'xmlrpc'     => $xmlrpcRequired,
+				'rest_users' => $usersRequired,
+			],
+		];
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function tweaksConfig(): array {
+		$stored = $this->settings->get( 'tweaks', [] );
+		return [
+			'on'        => TweakCatalog::resolve( is_array( $stored ) ? $stored : [] ),
+			'revisions' => (int) $this->settings->get( 'tweak_revisions', 5 ),
+			'autosave'  => (int) $this->settings->get( 'tweak_autosave', 120 ),
 		];
 	}
 

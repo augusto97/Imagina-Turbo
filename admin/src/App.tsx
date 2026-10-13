@@ -6,6 +6,7 @@ import { Cloudflare } from './screens/Cloudflare';
 import { Woo } from './screens/Woo';
 import { Firewall } from './screens/Firewall';
 import { PluginFilter } from './screens/PluginFilter';
+import { Navigation } from './screens/Navigation';
 import { Tweaks } from './screens/Tweaks';
 import { Diagnostics } from './screens/Diagnostics';
 import { Log } from './screens/Log';
@@ -20,6 +21,7 @@ export function App() {
 			{ route === 'cache' && <Cache /> }
 			{ route === 'cloudflare' && <Cloudflare /> }
 			{ route === 'woocommerce' && <Woo /> }
+			{ route === 'navegacion' && <Navigation /> }
 			{ route === 'carga' && <PluginFilter /> }
 			{ route === 'firewall' && <Firewall /> }
 			{ route === 'ajustes' && <Tweaks /> }

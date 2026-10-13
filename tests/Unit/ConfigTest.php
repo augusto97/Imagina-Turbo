@@ -168,7 +168,7 @@ final class ConfigTest extends TestCase {
 		// Solo los módulos implementados y seguros quedan activos. Ajustes rápidos se apaga porque
 		// Perfmatters está activo (solapamiento).
 		$this->assertTrue( $data['modules']['profiler'] );
-		$this->assertSame( [ 'profiler', 'shield' ], array_keys( array_filter( $data['modules'] ) ) );
+		$this->assertSame( [ 'profiler', 'shield', 'speculation', 'rum', 'frontend_hints' ], array_keys( array_filter( $data['modules'] ) ) );
 		$this->assertSame( 0.01, $data['profiler']['rate'] );
 		$this->assertSame( 0, $data['profiler']['intensive_until'] );
 		$this->assertArrayHasKey( 'plugin_filter', $data['modules'] );

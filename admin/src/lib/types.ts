@@ -468,3 +468,62 @@ export interface FilterStatus {
 	faults_pending: boolean;
 	required_pairs: number;
 }
+
+export interface RumVitals {
+	template: string;
+	device: 'm' | 'd';
+	n: number;
+	lcp: number | null;
+	inp: number | null;
+	cls: number | null;
+	ttfb: number | null;
+	prerendered: number;
+	prefetched: number;
+	bfcache: number;
+	back_forward: number;
+}
+
+export interface RumEventRow {
+	template: string;
+	device: string;
+	value: string;
+	n: number | string;
+	bits: string;
+}
+
+export interface RumReportData {
+	days: number;
+	navigation: { navigations: number; speculated_pct: number | null; prerendered: number; prefetched: number; bfcache_pct: number | null; bfcache: number; back_forward: number; reloads: number };
+	vitals: RumVitals[];
+	bfcache: { reason: string; n: number }[];
+	next: RumEventRow[];
+	lcp: RumEventRow[];
+}
+
+export interface RumInsightsData {
+	predicted: Record<string, string[]>;
+	lcp: Record<string, { kind: 'image' | 'featured'; id: number; src: string; n: number; share: number }>;
+	generated: number;
+}
+
+export interface NavigationSettings {
+	spec_mode: 'prefetch' | 'prerender';
+	spec_eagerness: 'conservative' | 'moderate' | 'eager';
+	rum_rate: number;
+	spec_predictive: boolean;
+	spec_fallback: boolean;
+	view_transitions: boolean;
+	hints_lcp: boolean;
+	hints_facades: boolean;
+}
+
+export interface NavigationStatus {
+	modules: Record<'speculation' | 'rum' | 'frontend_hints', { enabled: boolean; forced_off: string }>;
+	settings: NavigationSettings;
+	core_api: boolean;
+	permalink: boolean;
+	hub_rum: boolean;
+	report: RumReportData;
+	insights: RumInsightsData;
+	no_store: { route: string; n: number }[];
+}

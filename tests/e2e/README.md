@@ -104,3 +104,17 @@ Plugins de prueba en el sitio (solo pruebas): uno pesado (6 MB y 15 ms), uno que
 
 Las contrapruebas (sin la protección de escritura o de `rewrite_rules`) se hacen comentando el `add_filter` correspondiente en la copia del sitio y esperando a que OPcache revalide (unos segundos).
 
+## Navegación y RUM (fase 6)
+
+```bash
+ITB_BASE_URL=http://127.0.0.1:8080 ITB_VIDEO_URL=http://127.0.0.1:8080/entrada-con-video/ node tests/e2e/nav-e2e.js
+```
+
+Con la muestra del RUM al 100 % (`PUT /navigation/settings {"rum_rate": 1}`) y la caché purgada.
+
+- **Qué recorre**: portada → hover y clic a un enlace interno (debe llegar como `navigational-prefetch`) → atrás y adelante (bfcache) → recarga.
+- **Qué devuelve**: las reglas de especulación con sus exclusiones, los beacons y, con `ITB_VIDEO_URL`, que la fachada crea el iframe al tocarla.
+- **bfcache**: Playwright lo desactiva por defecto (`--disable-back-forward-cache`); la prueba quita ese argumento. La vuelta atrás se espera con `waitUntil: 'commit'`, porque no hay evento `load`.
+- **Fachadas sin red**: `zz-itb-fake-oembed.php` (MU plugin de prueba) responde el oEmbed de YouTube.
+- **Insights**: se pueden sembrar contadores en `itb_rum_events` con muchos bits en `ip_bits` y recalcular con `POST /navigation/insights`.
+

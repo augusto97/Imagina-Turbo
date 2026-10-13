@@ -56,7 +56,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Resolver la decisión abierta sobre retirar o mantener el filtro de lectura.
 - **Aceptación:** criterios del módulo 4; prueba de estrés con Freemius, WPML y un plugin que hace flush de rewrite rules.
 
-### Fase 6 — Navegación instantánea y RUM
+### Fase 6 — Navegación instantánea y RUM ✅ (ver "Estado de la fase 6" al final; prerender, métricas de campo y mejora de LCP quedan para sitios reales)
 - `Rum`, `Speculation` (core + predictivo + fallback), bfcache (RUM), View Transitions, `FrontendHints` (LCP, fachadas).
 - **Aceptación:** criterios de los módulos 5, 9 y 11.
 
@@ -296,4 +296,32 @@ Pendiente para las pruebas reales:
 - WPML y un plugin con Freemius real (prueba de estrés del documento).
 - Sitios con Elementor, SEO y constructores, para medir el −40 % en condiciones reales.
 - El verificador externo con Playwright (páginas completas). Mientras tanto, los experimentos son loopback y comparan respuestas, no efectos fuera de ellas.
+
+## Estado de la fase 6
+
+Completada el 2026-10-13 (versión 0.8.0). Probada en OpenLiteSpeed + LSCache + WooCommerce 11.2.1 (WordPress 7.1, API de Speculation Rules del core) con Chromium (`tests/e2e/nav-e2e.js`).
+
+| Criterio | Resultado |
+|---|---|
+| > 30 % de navegaciones especuladas en Chrome móvil | Medible: el RUM distingue prerender (`activationStart`) y prefetch (`deliveryType`). En Chromium, hover + clic llegó como `navigational-prefetch`, y también la página predicha. **El porcentaje real sale de visitantes reales** |
+| Cero prefetch a URLs de acción | El core excluye toda URL con query; se agregan carrito, checkout, cuenta, login y las rutas sin caché. El respaldo excluye query, extensiones, nofollow, descargas y esas rutas |
+| El servidor no recibe más requests sin caché | Solo se especula lo cacheable. El predictivo exige contenido publicado y pasa las mismas exclusiones |
+| bfcache | Atrás y adelante restaurados del bfcache y contados por el RUM; causas (`notRestoredReasons`) y páginas propias con no-store en la pantalla |
+| Mejora de LCP p75 | La imagen LCP recibe `fetchpriority="high"`, sin lazy load, y precarga móvil con la URL medida (comprobado en el HTML). **La mejora se mide con RUM antes/después en un sitio con tráfico** |
+| RUM sin datos personales | Solo contadores; visitantes distintos con un mapa de 64 bits de hash de IP con sal diaria. Endpoint local en 15 ms sin cargar plugins; otro origen → 403, basura → 400 |
+| Scripts < 3 KB | `itb-rum.min.js` 2,0 KB, `itb-prefetch.min.js` 1,4 KB |
+
+Hallazgos corregidos durante la validación:
+
+- Un patrón de exclusión con comodín inicial producía un prefijo vacío en el respaldo, y eso habría excluido todos los enlaces en Safari y Firefox.
+- El mismo destino desde móvil y escritorio pisaba el mapa de visitantes. Ahora se combina con `BIT_OR` en SQL.
+- La tienda de WooCommerce es el archivo del tipo `product`, no una página: ahora cuenta como contenido publicado.
+
+Calidad: 223 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, E2E del admin con la pantalla Navegación (confirmación del prerender, móvil sin desborde), benchmark de la etapa temprana 0,05 ms.
+
+Pendiente para las pruebas reales:
+
+- Prerender en un navegador real (Chromium headless no lo dispara).
+- Porcentaje de navegaciones especuladas y mejora de LCP con visitantes reales.
+- Beacons al hub real.
 

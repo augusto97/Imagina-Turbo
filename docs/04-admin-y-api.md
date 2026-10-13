@@ -14,7 +14,7 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Cloudflare** | Conexión del token (asistente), zona y plan, ajustes de zona, reglas propias y de terceros (solo lectura), **diff** de cambios propuestos, aplicar, historial de snapshots con revertir, deriva detectada. |
 | **Firewall** | Reglas del edge que se proponen (ataques en la URL, superficie de WordPress, escáneres) y límite de peticiones a login y checkout; sus cambios pendientes en la zona con el mismo ciclo de aplicar y snapshot que Cloudflare; eventos de las últimas 24 h por regla; verificación de origen cerrado e IP real; reglas en `.htaccess` con respaldo y autoprueba. |
 | **WooCommerce** | Carrito por Store API (selectores del mini-carrito, prueba en vivo), cookies neutralizadas, páginas excluidas, geolocalización. |
-| **Navegación instantánea** | Modo y eagerness, exclusiones, prefetch predictivo (top transiciones), View Transitions, métricas de prerender. |
+| **Navegación** | Modo y anticipación (prerender con confirmación), prefetch predictivo, respaldo para Safari y Firefox, View Transitions, prioridad LCP, fachadas y muestra del RUM. Resumen de navegación (especuladas, bfcache), Core Web Vitals p75 por plantilla y dispositivo, lo que el RUM decidió (páginas predichas, imagen LCP) y causas de bfcache con las páginas propias que salen con no-store. |
 | **Assets** | Gestor por ruta (vista tipo script manager con previsualización). |
 | **Ajustes rápidos** | Escudo del servidor (interruptores, intervalos de Heartbeat, límite de filtros, prueba como visitante), guía de cron del sistema, ajustes con interruptor y riesgo (confirmación para moderados e invasivos) y migración desde Perfmatters. |
 | **Base de datos** | Auditoría, acciones con respaldo, programación. |
@@ -66,12 +66,16 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET / POST | `/tweaks/perfmatters` · `/tweaks/perfmatters/import` | Equivalencias de `perfmatters_options` (lo que se mapea y lo que no, con dónde vive) · importarlas (`confirm`) |
 | GET / PUT | `/woo/status` · `/woo/settings` | Carrito por Store API: tema y selectores en uso (verificados o no), selectores propios, productos vistos, geolocalización · guardar selectores propios y productos vistos (recompila la config) |
 | POST | `/woo/inspect` | Pide la portada sin carrito y con carrito: cabecera del edge, script del carrito, cart-fragments original y Set-Cookie |
+| GET | `/navigation/status` | Módulos, ajustes, si el core trae la API de Speculation Rules, enlaces permanentes, informe del RUM (7 días), insights y páginas propias con no-store (48 h) |
+| PUT | `/navigation/settings` | `spec_mode`, `spec_eagerness`, `spec_predictive`, `spec_fallback`, `view_transitions`, `hints_lcp`, `hints_facades`, `rum_rate`. Pasar a prerender exige `confirm` (428) |
+| GET / POST | `/navigation/report?days=7\|30` · `/navigation/insights` | Informe del RUM · recalcular ahora las páginas predichas y la imagen LCP |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
 | GET / POST | `/db/audit` · `/db/actions/{task}` | Auditoría y acciones |
 | GET | `/events` | Registro |
 | POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/diag-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
 
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
+- `POST /?itb-rum=1` — beacon del RUM (fase 6), atendido en el loader MU sin cargar plugins. Valida el origen; 2 KB como máximo; 30 por minuto e IP con APCu. Responde 204, 400, 403 o 429.
 - `GET /imagina-turbo/v1/nonce?a[]=...&t=...&s=...` — refresco de nonces para formularios en páginas cacheadas (implementado en la fase 2a). Solo las acciones que la página imprimió firmadas con HMAC (`a` = acciones, `t` = momento de la página, `s` = firma; máximo 20 acciones y 8 días). 30 peticiones por minuto e IP (con APCu o caché de objetos persistente). Respuesta `Cache-Control: private, no-store` y `Cloudflare-CDN-Cache-Control: no-store`; LSCache recibe `no-cache`. Con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint inicializa la sesión de Woo para las acciones `woocommerce*`. Solo se registra con el módulo de caché activo y el refresco encendido.
 
 Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con sus valores por defecto, guardaría en caché privada sus GET) y aseguran el esquema de la base antes de responder.
@@ -82,7 +86,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit` |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades` |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
@@ -97,6 +101,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |
 | `itb_htaccess_backup` | Copia completa del `.htaccess` antes del último cambio |
+| `itb_rum_insights` | Lo que decidió la tarea diaria del RUM: páginas predichas por plantilla e imagen LCP por plantilla (con su id de adjunto o `featured`) |
 | `itb_filter_rules` | Reglas de carga condicional: clave, plugins, métodos, peticiones de prueba, estado (`testing`, `active`, `failed`, `disabled`), motivo y evidencia |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
@@ -140,11 +145,21 @@ metrics_hourly (                      -- retención 30 días
   PRIMARY KEY (hour, request_type, route_key)
 )
 
-rum_hourly (                          -- si no hay hub
-  hour DATETIME NOT NULL, template VARCHAR(100) NOT NULL, device CHAR(1) NOT NULL,
-  n INT UNSIGNED, lcp_p75 SMALLINT, inp_p75 SMALLINT, cls_p75 DECIMAL(5,3), ttfb_p75 SMALLINT,
-  prerendered INT UNSIGNED, bfcache INT UNSIGNED,
-  PRIMARY KEY (hour, template, device)
+rum_hist (                            -- fase 6, esquema v7; retención 30 días
+  hour DATETIME NOT NULL, template VARCHAR(40) NOT NULL, device CHAR(1) NOT NULL,
+  metric VARCHAR(8) NOT NULL,         -- lcp, inp, cls, ttfb, nav
+  bucket SMALLINT UNSIGNED NOT NULL,  -- intervalo (25 ms LCP/TTFB, 10 ms INP, 0,01 CLS) o tipo de navegación
+  n INT UNSIGNED NOT NULL,
+  PRIMARY KEY (hour, template, device, metric, bucket)
+)
+
+rum_events (                          -- fase 6, esquema v7; retención 30 días
+  day DATE NOT NULL, kind VARCHAR(8) NOT NULL,   -- lcp, next, nrr
+  template VARCHAR(40) NOT NULL, device CHAR(1) NOT NULL,
+  value VARCHAR(120) NOT NULL,        -- ruta de la imagen, ruta siguiente o causa de bfcache
+  n INT UNSIGNED NOT NULL,
+  ip_bits BIGINT UNSIGNED NOT NULL,   -- un bit por hash de IP (sal diaria): visitantes distintos estimados
+  PRIMARY KEY (day, kind, template, device, value)
 )
 
 purge_queue (                         -- fase 2a, esquema v3

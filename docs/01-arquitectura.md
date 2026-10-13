@@ -155,7 +155,7 @@ La regla "sin consultas en el frontend" admite solo estas excepciones, todas mue
 - Muestras del perfilador (1 %, con la auditoría pasiva de `Set-Cookie` en la misma fila): se escriben en `shutdown` con un solo `INSERT`. *(Cambio en la fase 1: no se llama a `fastcgi_finish_request()`/`litespeed_finish_request()`. Cerrar la respuesta antes de tiempo hace que se pierda la salida que otros plugins emiten en `shutdown`, y ese fallo aparecería solo en el 1 % de los requests, imposible de diagnosticar. El `INSERT` cuesta décimas de milisegundo y solo en la muestra.)*
 - Caché de atribución del perfilador (`wp-content/imagina-turbo/profiler-symbols.php`): archivo PHP escrito de forma atómica solo en requests muestreados que descubren funciones o clases nuevas; se sirve desde OPcache.
 - Contador de fatales del modo seguro: archivo, no base de datos.
-- Endpoint RUM local (solo sin hub): `SHORTINIT`, un `INSERT ... ON DUPLICATE KEY UPDATE`.
+- Endpoint RUM local (solo sin hub): `POST /?itb-rum=1`, atendido en el loader MU antes de cargar plugins, con dos `INSERT ... ON DUPLICATE KEY UPDATE` (contadores, sin IP). *(Cambio en la fase 6: en lugar de `SHORTINIT`, que exigía un archivo propio que adivine la ruta de `wp-load.php`.)*
 - Cola de purga (fase 2a): solo cuando un request del frontend **cambia contenido** (un pedido en el checkout que baja el stock, un comentario aprobado automáticamente). Se agrupa todo en `shutdown` en un `INSERT IGNORE` por tipo. Ver una página nunca escribe.
 
 - Experimentos de carga condicional (fase 5): una línea en `experiments/{id}.log` por request firmado con la cookie `itb_exp` (solo los que hace el propio sitio). Y `filter-faults.log` cuando un request filtrado termina en fatal.
@@ -202,6 +202,6 @@ Verificado en `augusto97/imagina-updater` (commit 617d439): no hay SDK que integ
 
 ## Almacenamiento
 
-- Tablas propias (prefijo `{$wpdb->prefix}itb_`): `events`, `metrics_hourly`, `rum_hourly`, `route_samples`, `cf_snapshots`. Detalle en `docs/04-admin-y-api.md`.
+- Tablas propias (prefijo `{$wpdb->prefix}itb_`): `events`, `metrics_hourly`, `route_samples`, `purge_queue`, `cf_snapshots`, `rum_hist`, `rum_events`. Detalle en `docs/04-admin-y-api.md`.
 - Archivos: `wp-content/imagina-turbo/` (config compilada, banderas, contador de fatales, caché de la matriz). Proteger con `index.php` vacío y reglas de denegación.
 - Retención: rollups horarios 30 días, eventos 180 días, muestras crudas 48 h.

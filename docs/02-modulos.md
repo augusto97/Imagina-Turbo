@@ -188,6 +188,29 @@ Verificado en el código de WooCommerce 11.2.1 y de los temas Astra, Kadence, Bl
 - **View Transitions:** opción para agregar `@view-transition { navigation: auto; }` en un `<style>` pequeño.
 - **Aceptación:** en Chrome móvil, > 30 % de navegaciones internas con `activationStart > 0` o servidas desde prefetch; cero prefetch a URLs de acción; el servidor no recibe más requests sin caché que antes (medido con las muestras).
 
+### Implementación (fase 6)
+
+API del core verificada en WordPress 7.1 (`wp-includes/speculative-loading.php`):
+
+- Con sesión iniciada o sin enlaces permanentes, la configuración es `null` (desactivado) y se respeta.
+- Con enlaces permanentes, el core ya excluye toda URL con query: `add-to-cart`, `_wpnonce`, `action` y logout quedan fuera sin hacer nada. También excluye wp-admin, `wp-*.php`, uploads, plugins y temas.
+- Una regla de lista admite `immediate`; una de documento no.
+
+Lo que hace el módulo:
+
+- **Configuración**: `wp_speculation_rules_configuration` devuelve el modo y la anticipación elegidos. Por defecto, prefetch moderado. El prerender pide confirmación (428).
+- **Exclusiones**: `wp_speculation_rules_href_exclude_paths` agrega carrito, checkout, cuenta, login y las rutas que nunca se cachean, sacadas de la config compilada.
+- **Prefetch predictivo**: `wp_load_speculation_rules` agrega una regla de lista `itb-predicted` (prefetch, `immediate`) con las páginas siguientes de la plantilla actual, sin la página actual.
+- **WordPress < 6.8**: la misma regla, impresa en `wp_footer`.
+- **Respaldo** (`itb-prefetch.js`, 1,4 KB): solo se descarga si el navegador no entiende Speculation Rules. Precarga al tocar, al pulsar o tras 80 ms de hover, y los enlaces predichos cuando entran en pantalla. Respeta Save-Data y 2G. Las exclusiones con comodín inicial se omiten: un prefijo vacío excluiría todo.
+- **View Transitions**: `<style>@view-transition{navigation:auto}</style>` en `wp_head`. Apagado por defecto porque cambia cómo se ve la navegación.
+- **bfcache**: la pantalla muestra las causas de exclusión (RUM, `notRestoredReasons`) y las páginas propias que salen con `no-store` según las muestras del perfilador.
+- **Medido en Chromium** (sitio de pruebas):
+  - Con prefetch moderado, al pasar el cursor y pulsar, la página llegó como `navigational-prefetch`.
+  - Atrás y adelante volvieron del bfcache.
+  - La regla predicha (portada → `/tienda/`) también sirvió la navegación desde el prefetch.
+  - **El prerender no se pudo comprobar**: Chromium headless no lo dispara. Queda para un navegador real.
+
 ---
 
 ## 6. Escudo de servidor (`Shield`)
@@ -258,6 +281,18 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 - Delay de JS de terceros y fuentes: **delegar** al plugin de caché, alimentando sus exclusiones con la matriz.
 - **Aceptación:** mejora de LCP p75 en móvil en las plantillas afectadas, medida por RUM antes/después.
 
+### Implementación (fase 6)
+
+- **Origen de los datos**: la imagen LCP por plantilla la decide la tarea diaria del RUM (`RumInsights`) con los datos móviles de 14 días. Hacen falta 50 muestras, unos 20 visitantes distintos (estimados con el mapa de bits de IP-hash) y que la misma imagen sea el LCP en al menos el 60 % de las visitas de esa plantilla.
+- **Tipos de imagen LCP**:
+  - Una imagen fija (la portada, por ejemplo): un adjunto de la biblioteca, resuelto con `attachment_url_to_postid` sobre la ruta sin sufijo de tamaño.
+  - **`featured`**: la imagen destacada de cada página (fichas de producto, entradas). El RUM compara el nombre de archivo del LCP con el de la imagen destacada que la página le pasa en su configuración. Así una plantilla con imágenes distintas en cada página también se aprovecha.
+- **En la página**:
+  - `fetchpriority="high"` y `loading="eager"` en esa imagen (`wp_get_attachment_image_attributes` y `wp_content_img_tag`).
+  - Con una imagen fija, además `<link rel="preload" as="image" media="(max-width: 767px)">` con la URL que midió el RUM. Solo en móvil: en escritorio el navegador elegiría otro tamaño y la precarga se desperdiciaría.
+- **Fachadas** (`embed_oembed_html`): YouTube con miniatura de `i.ytimg.com` y Vimeo sin miniatura (no hay forma oficial de obtenerla sin pedirla a su API). El iframe se crea al tocar, con `autoplay=1`. No se tocan los iframes con `enablejsapi`. El CSS y el JS (unos cientos de bytes en línea) solo se imprimen en páginas con alguna fachada. Probado en el sitio: sin iframes al cargar y el reproductor aparece al tocar.
+- **Preconnect**: no implementado. Las imágenes LCP que se aceptan son del mismo origen, y para terceros haría falta medir sus recursos en el RUM. Queda para cuando haya datos reales.
+
 ---
 
 ## 10. Base de datos (`Database`)
@@ -276,6 +311,22 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 - Envío con `navigator.sendBeacon` en `pagehide`, **directo al hub** (no al servidor del cliente). Sin datos personales; IP no se guarda.
 - Alternativa sin hub: endpoint local mínimo con `SHORTINIT` que solo agrega contadores.
 
+### Implementación (fase 6)
+
+- **Carga del script**: un script en línea en cada página del frontend sin sesión guarda la plantilla actual en `sessionStorage` (para medir de qué plantilla viene cada visita) y decide la muestra (5 %). Solo la muestra descarga `itb-rum.js` (2,0 KB). En un prerender espera a `prerenderingchange`.
+- **Qué mide**:
+  - LCP (y la ruta de su imagen si es del mismo sitio), INP aproximado (Event Timing, umbral de 40 ms), CLS (ventanas de sesión) y TTFB.
+  - El tipo de navegación: normal, recarga, atrás sin bfcache, restaurada del bfcache, prerender (`activationStart`) o prefetch (`deliveryType`).
+  - `notRestoredReasons` y la transición plantilla anterior → ruta actual.
+  - El beacon se envía con `sendBeacon` al ocultarse la página. Una vuelta desde el bfcache envía uno mínimo en `pageshow`.
+- **Endpoint local**: `POST /?itb-rum=1`, atendido en el loader MU antes de cargar plugins (como la guardia del escudo). Responde en unos 15 ms en el sitio de pruebas. Valida el origen, limita el tamaño a 2 KB y, si hay APCu, limita a 30 beacons por minuto e IP. Hace dos `INSERT … ON DUPLICATE KEY UPDATE`. Se eligió el loader en vez de `SHORTINIT` porque no exige adivinar la ruta de `wp-load.php` desde un archivo propio.
+- **Almacenamiento**: solo contadores.
+  - `itb_rum_hist`: histogramas por hora, plantilla, dispositivo y métrica. El p75 sale de los intervalos: 25 ms para LCP y TTFB, 10 ms para INP, 0,01 para CLS.
+  - `itb_rum_events`: por día, imagen LCP, página siguiente y causas de bfcache, con un mapa de 64 bits (`ip_bits`): un bit por hash de IP con sal diaria. Con conteo lineal estima visitantes distintos. **La IP no se guarda.**
+  - Retención: 30 días.
+- **Con hub**: si el sitio está registrado, los beacons van a `{hub}/v1/rum?site={id}` (el hub simulado lo acepta).
+- **Probado en Chromium** con la muestra al 100 %: beacons de navegación normal, prefetch, recarga y bfcache, transición portada → tienda, LCP con su imagen, CLS y TTFB.
+
 ---
 
 ## 12. Integración con Imagina Search (`Integrations/ImaginaSearch`)
@@ -292,7 +343,7 @@ Verificado en `augusto97/imagina-search` (Woo Smart Search 6.0.2):
 - Namespace REST `wss/v1`. En modo WooCommerce usa `wc_get_product()`, así que WooCommerce queda protegido en su regla.
 - Aparece como candidato aunque no haya muestras, con todos los plugins ajenos propuestos y como pruebas una búsqueda real (primera palabra del primer producto) y `/popular`.
 - Su límite de 30 búsquedas por minuto e IP (`wss_rate_limit`) se levanta solo en los requests de experimento.
-- La página de resultados (`results_page_id`) imprime el término y pide los resultados desde el navegador: el HTML es cacheable por URL. Su ruta va a la config (`imagina_search.results_path`) para excluirla del prerender en la fase 6.
+- La página de resultados (`results_page_id`) imprime el término y pide los resultados desde el navegador: el HTML es cacheable por URL. Su ruta va a la config (`imagina_search.results_path`). Como siempre lleva `?q=`, el core ya la excluye de la especulación (con enlaces permanentes excluye toda URL con query).
 - El costo de cada búsqueda ya sale en el perfilador, con la ruta `wss/v1`.
 
 ---

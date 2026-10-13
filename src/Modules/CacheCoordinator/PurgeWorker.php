@@ -79,14 +79,24 @@ final class PurgeWorker {
 				: $this->edge->purge( $useTags ? $this->tags->tags( $tags ) : [], $useTags ? $urls : array_values( array_unique( array_merge( $urls, $byUrl ) ) ), false );
 			$summary['edge'] = $result['ok'] ? ( $all ? 'all' : ( $useTags ? 'tags' : 'urls' ) ) : 'error';
 			if ( ! $result['ok'] ) {
-				// Vuelve a la cola y se reintenta en 5 minutos (límites de la API, red caída…).
+				// Vuelve a la cola lo que falte (límites de la API, red caída…). Los tags que vuelven ya
+				// llevan prefijo: se guardan sin él, como el resto de la cola.
 				if ( $all ) {
 					$this->queue->add( PurgeQueueRepository::KIND_ALL, [ 'all' ] );
+				} else {
+					$left = isset( $result['tags_left'] ) ? array_values( array_filter( array_map( [ $this->tags, 'strip' ], $result['tags_left'] ) ) ) : $tags;
+					$this->queue->add( PurgeQueueRepository::KIND_TAG, $left );
+					$this->queue->add( PurgeQueueRepository::KIND_URL, $result['urls_left'] ?? $urls );
 				}
-				$this->queue->add( PurgeQueueRepository::KIND_TAG, $tags );
-				$this->queue->add( PurgeQueueRepository::KIND_URL, $urls );
-				Warmer::schedule( Jobs::PURGE_FLUSH, 300 );
-				$this->events->warning( 'cache', 'edge_purge', __( 'La purga en el edge falló; se reintentará en 5 minutos.', 'imagina-turbo' ), [ 'error' => $result['error'] ] );
+				$retry = max( 60, min( 3600, (int) ( $result['retry_after'] ?? 300 ) ) );
+				Warmer::schedule( Jobs::PURGE_FLUSH, $retry );
+				$this->events->warning(
+					'cache',
+					'edge_purge',
+					/* translators: %d: segundos. */
+					sprintf( __( 'La purga en el edge no se completó; lo pendiente se reintentará en %d s.', 'imagina-turbo' ), $retry ),
+					[ 'error' => $result['error'] ]
+				);
 			}
 		}
 

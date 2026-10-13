@@ -1,4 +1,4 @@
-import { Activity, Gauge, Layers, ScrollText, Settings2, Zap } from 'lucide-react';
+import { Activity, Cloud, Gauge, Layers, ScrollText, Settings2, Zap } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge } from './ui/badge';
 import { config } from '@/lib/config';
@@ -11,6 +11,7 @@ const items: { route: Route; label: string; icon: typeof Gauge }[] = [
 	{ route: 'panel', label: __( 'Panel' ), icon: Gauge },
 	{ route: 'diagnostico', label: __( 'Diagnóstico' ), icon: Activity },
 	{ route: 'cache', label: __( 'Caché' ), icon: Layers },
+	{ route: 'cloudflare', label: __( 'Cloudflare' ), icon: Cloud },
 	{ route: 'registro', label: __( 'Registro' ), icon: ScrollText },
 	{ route: 'avanzado', label: __( 'Avanzado' ), icon: Settings2 },
 ];

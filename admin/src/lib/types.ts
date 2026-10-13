@@ -239,3 +239,77 @@ export interface InspectResult {
 	headers: Record<string, string>;
 	cookies: string[];
 }
+
+export type CfAction = 'create' | 'update' | 'delete' | 'none' | 'drifted' | 'blocked';
+
+export interface CfStatus {
+	available: boolean;
+	enabled: boolean;
+	token: { state: 'none' | 'ok' | 'rotated' | 'broken'; last4: string; saved: number };
+	zone: { id: string; name: string; plan: string; plan_name: string; status: string } | null;
+	permissions: Record<string, boolean>;
+	guard: { blocked: boolean; reason: string };
+	simulator: boolean;
+	checked_at: number;
+	error: string;
+	token_url: string;
+	token_permissions: string[];
+}
+
+export interface CfSetting {
+	id: string;
+	label: string;
+	value: unknown;
+	recommended: unknown;
+	read_only: boolean;
+	note: string;
+}
+
+export interface CfZone {
+	settings: CfSetting[];
+	alerts: { level: 'error' | 'warning' | 'info'; message: string }[];
+	phases: { phase: string; label: string; own: number; foreign: number; limit: number }[];
+}
+
+export interface CfChange {
+	id: string;
+	kind: 'rule' | 'setting';
+	title: string;
+	description: string;
+	action: CfAction;
+	risk: 'safe' | 'moderate' | 'invasive';
+	reason: string;
+	current: unknown;
+	desired: unknown;
+}
+
+export interface CfPlan {
+	changes: CfChange[];
+	plan: string;
+	notes: string[];
+}
+
+export interface CfApplyResult {
+	applied: string[];
+	failed: { id: string; error: string }[];
+	snapshot_id: number;
+	rolled_back: boolean;
+}
+
+export interface CfSnapshot {
+	id: number;
+	created_at: string;
+	reason: string;
+}
+
+export interface CfAnalytics {
+	available: boolean;
+	error: string;
+	fetched_at: number;
+	window_hours: number;
+	requests: number;
+	cached: number;
+	ratio: number | null;
+	by_status: { status: string; requests: number }[];
+	top_uncached: { path: string; requests: number }[];
+}

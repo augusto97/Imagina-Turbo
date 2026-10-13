@@ -88,10 +88,11 @@ imagina-turbo/
 
 1. WordPress carga los MU-plugins. **`imagina-turbo-loader.php`** se ejecuta primero (nombre con prefijo para orden alfabético; aun así, no asumir que es el primero).
 2. El loader:
+   0. Comprueba que el plugin principal existe en disco (`WP_PLUGIN_DIR/imagina-turbo/imagina-turbo.php`). Si se borró por FTP sin pasar por `uninstall.php`, el loader queda huérfano: no hace nada y no lanza errores. El plugin principal, al cargarse, comprueba además que está en `active_plugins`; si el loader se ejecuta con el plugin inactivo, tampoco hace nada (la config compilada se borra al desactivar).
    1. Revisa el kill switch (constante `ITB_DISABLE`, archivo `wp-content/imagina-turbo/disable`, cookie de bypass de admin válida). Si aplica, termina sin hacer nada.
    2. Revisa el modo seguro (`wp-content/imagina-turbo/safe-mode.flag`). Si existe, solo carga el perfilador pasivo.
-   3. Incluye `wp-content/imagina-turbo/config.php` (array PHP, OPcache). Si no existe o la versión no coincide, entra en modo seguro.
-   4. Clasifica el request con `RequestClassifier` (solo `$_SERVER`, `$_GET`, constantes ya definidas).
+   3. Incluye `wp-content/imagina-turbo/config.php` (array PHP, OPcache). Si no existe o la versión no coincide, no aplica nada en el frontend (sin guardia ni filtros) y el plugin principal la recompila en el siguiente request de admin o cron. No se activa el modo seguro por esto: una config ausente no es un fallo, es un estado inicial.
+   4. Clasifica el request con `RequestClassifier`. Lee solo `$_SERVER`, `$_GET`, `$_POST['action']` (admin-ajax recibe `action` casi siempre por POST; PHP ya parseó el cuerpo) y constantes ya definidas. La ruta se normaliza quitando el path de `home_url` (WordPress en subcarpeta) y el prefijo REST real (`rest_get_url_prefix()`, que puede cambiar por filtro) viene de la config compilada.
    5. Ejecuta la **guardia PHP** del escudo (bloqueos baratos: XML-RPC, enumeración de autores, 404 de assets) antes de cargar plugins.
    6. Registra el filtro de `option_active_plugins` si la carga condicional está activa para ese tipo de request.
    7. Registra el `shutdown` para detectar fatales.
@@ -113,7 +114,7 @@ imagina-turbo/
 | `Login` | `wp-login.php` o slug de login personalizado (resuelto en la config compilada) |
 | `XmlRpc` | `xmlrpc.php` |
 | `Feed`, `Sitemap`, `Robots` | patrones de ruta conocidos |
-| `StaticMiss` | extensión de asset (`.jpg .png .webp .avif .css .js .woff2 .svg .ico .map`) que llegó a PHP: el archivo no existe |
+| `StaticMiss` | extensión de asset (`.jpg .jpeg .png .gif .webp .avif .css .js .woff .woff2 .ttf .svg .ico .map`) que llegó a PHP: el archivo no existe. **Excepciones** (se tratan como `FrontendHtml`): `/favicon.ico` (el core redirige al ícono del sitio desde WP 5.4) y las rutas que la matriz declara en `static_miss_passthrough` (plugins que generan imágenes o assets bajo demanda cuando el archivo no existe). |
 | `Checkout`, `Cart`, `Account` | rutas resueltas de las páginas de Woo (config compilada, incluye traducciones) |
 
 ## Configuración compilada
@@ -140,15 +141,28 @@ imagina-turbo/
 ```
 
 - Las regex y la matriz completa **nunca** se leen en el frontend; el compilador deja solo lo que aplica a ese sitio.
+- Además de `v` y `hash`, la config incluye `home_path` (path de `home_url`, sin barra final) y `rest_prefix` para que el clasificador no dependa de WordPress.
+- **Multisite**: un archivo por sitio, `config-{blog_id}.php`. El loader resuelve el `blog_id` con `$GLOBALS['blog_id']` (ya definido cuando cargan los MU-plugins). En instalación simple es `config.php`. La carga condicional en multisite queda fuera del alcance hasta la fase 5.
+
+### Escrituras en el frontend (excepción acotada a la regla 1)
+
+La regla "sin consultas en el frontend" admite solo estas excepciones, todas muestreadas o fuera del camino crítico:
+
+- Muestras del perfilador (1 %) y auditoría de `Set-Cookie`: se escriben en `shutdown` **después** de `fastcgi_finish_request()`/`litespeed_finish_request()` cuando existe, con un solo `INSERT`.
+- Contador de fatales del modo seguro: archivo, no base de datos.
+- Endpoint RUM local (solo sin hub): `SHORTINIT`, un `INSERT ... ON DUPLICATE KEY UPDATE`.
+
+Cualquier otra escritura en el frontend es un error.
 
 ## Modo seguro y kill switch
 
 - **Kill switch** (desactiva todo excepto el admin del plugin):
   - `define('ITB_DISABLE', true);` en `wp-config.php`.
   - Archivo `wp-content/imagina-turbo/disable`.
-  - Cookie `itb_bypass` = `expira|hmac(AUTH_KEY)`, emitida desde el admin. Se valida en el loader sin funciones pluggable. Sirve para probar el sitio "como si el plugin no existiera" solo para ese admin.
-- **Modo seguro automático**: el loader registra `register_shutdown_function`; si `error_get_last()` es fatal (E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR) en un request donde se filtraron plugins, incrementa un contador en archivo con ventana de 5 minutos. Con 3 fatales en la ventana, crea `safe-mode.flag`, registra el evento y notifica (correo al admin + hub).
-- Al salir del modo seguro (manual desde el admin), se recompila la configuración.
+  - Cookie `itb_bypass` = `user_id|expira|hmac_sha256(user_id|expira, clave)`, con `clave = hash_hmac('sha256', 'itb_bypass', AUTH_KEY . AUTH_SALT)`. Emitida desde el admin (`HttpOnly`, `Secure` si el sitio es HTTPS, `SameSite=Lax`, máximo 8 h). Se valida en el loader sin funciones pluggable y con `hash_equals`. Sirve para probar el sitio "como si el plugin no existiera" solo para ese admin.
+  - **Ojo con el edge**: la cookie no evita que Cloudflare entregue páginas ya cacheadas. Por eso `itb_bypass` forma parte de las `bypass_cookies` de la config y de la expresión de la regla `itb-cache-html` (ver `docs/03`).
+- **Modo seguro automático**: el loader registra `register_shutdown_function`; si `error_get_last()` es fatal (E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR) **y** el request filtró plugins o el archivo del error está dentro del propio plugin, incrementa un contador en archivo con ventana de 5 minutos (escritura con `flock`). Con 3 fatales en la ventana, crea `safe-mode.flag`, registra el evento y notifica (correo al admin + hub). Los fatales ajenos (otro plugin que falla por sí solo) no cuentan: no es culpa nuestra y el modo seguro no los arreglaría.
+- Al salir del modo seguro (manual desde el admin), se borra el contador y se recompila la configuración.
 
 ## Coexistencia
 
@@ -159,6 +173,9 @@ imagina-turbo/
 | Perfmatters | Apaga carga condicional de plugins, gestor de assets y ajustes equivalentes. Muestra aviso de migración. |
 | Autoptimize, W3TC, WP Super Cache, WP Fastest Cache, FlyingPress, NitroPack, WP-Optimize, Breeze, Hummingbird, SG Optimizer | Aviso de conflicto. Apaga módulos equivalentes. Recomienda un solo plugin de caché. |
 | Plugin oficial de Cloudflare | Se coordina: nuestro módulo gestiona reglas y purga; recomendar desactivar APO del plugin oficial si está activo. |
+| Plugins que filtran `active_plugins` (Perfmatters MU, Plugin Organizer, Freesoul Deactivate Plugins, Asset CleanUp Pro con descarga de plugins) | Apaga `PluginFilter` sin excepción: solo un plugin puede filtrar `active_plugins`. Lista en `overlapping_plugins.plugin_filtering` de la matriz. |
+
+`OverlapGuard` lee solo las listas de `overlapping_plugins` por módulo. LiteSpeed Cache y el plugin oficial de Cloudflare **nunca** se tratan como conflicto aunque aparezcan en listas heredadas: se coordinan.
 
 ## Almacenamiento
 

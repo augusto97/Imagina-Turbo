@@ -45,8 +45,9 @@ Hace lo que nadie más hace bien:
 ## Stack y convenciones
 
 - PHP 8.1+ con `declare(strict_types=1);`, PSR-4 vía Composer (`classmap-authoritative` en producción), patrón Repository/Service, inyección de dependencias con un contenedor simple propio.
-- Tareas en segundo plano con **Action Scheduler** (incluido vía Composer si WooCommerce no está).
-- Admin: React 18 + TypeScript + Vite con `@kucrut/vite-for-wp`, shadcn/ui con prefijo de Tailwind `itb-`, TanStack Query y Table, Zustand, React Hook Form + Zod, Lucide, fuente Inter. Estética tipo Linear/Vercel.
+- Tareas en segundo plano con **Action Scheduler**, incluido siempre vía Composer y cargado en el archivo principal: su propio registro elige la versión más nueva si WooCommerce u otro plugin trae otra copia. No condicionarlo a que falte WooCommerce.
+- Dependencias PHP de terceros en `vendor/` con namespace prefijado (Strauss o PHP-Scoper) para no chocar con las copias de otros plugins. Excepción: Action Scheduler, que ya gestiona sus versiones.
+- Admin: React 18 + TypeScript + Vite con `@kucrut/vite-for-wp`, shadcn/ui con Tailwind v4 y prefijo `itb` (en v4 se escribe `itb:flex`, no `itb-flex`; se declara con `@import "tailwindcss" prefix(itb);`), TanStack Query y Table, Zustand, React Hook Form + Zod, Lucide, fuente Inter. Estética tipo Linear/Vercel. El reset de Tailwind (preflight) se limita al contenedor de la app para no romper los estilos del admin de WordPress.
 - Scripts del frontend: JavaScript vanilla, sin dependencias, cada uno < 3 KB minificado.
 - Textos de interfaz en español (con i18n preparado: text domain `imagina-turbo`).
 - Estándares: WordPress Coding Standards para hooks y seguridad (nonces, capabilities, sanitización, escape), PHPStan nivel 6+.

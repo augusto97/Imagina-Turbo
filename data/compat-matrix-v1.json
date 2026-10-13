@@ -1,8 +1,8 @@
 {
   "schema": "imagina-perf-compat",
   "schema_version": 1,
-  "version": "1.0.0",
-  "generated": "2026-10-12",
+  "version": "1.1.0",
+  "generated": "2026-10-13",
   "sources": {
     "wpr": "WP Rocket 3.23.5.1 (GPLv2+): inc/ThirdParty, inc/3rd-party, dynamic-lists*.json",
     "perfmatters": "Perfmatters 2.6.9 (GPLv2+): inc/data/delay_js_quick_exclusions.php, inc/perfmatters_mu.php"
@@ -221,7 +221,7 @@
       ".mybluehost.me",
       ".live-website.com"
     ],
-    "staging_note": "En estos dominios no aplicar reglas de Cloudflare, no purgar y no recalentar."
+    "staging_note": "En estos dominios no aplicar reglas de Cloudflare, no purgar y no recalentar. Pendiente: confirmar los dominios temporales de ServerAvatar y Plesk; mientras tanto, el admin permite agregar dominios de staging propios."
   },
   "integrations": [
     {
@@ -2743,7 +2743,10 @@
       "preload": {
         "sitemap": "/sitemap.xml"
       },
-      "notes": "Usar su sitemap como fuente de URLs para precarga/recalentado (solo si el módulo de sitemap está activo)."
+      "notes": "Usar su sitemap como fuente de URLs para precarga/recalentado (solo si el módulo de sitemap está activo).",
+      "requires": {
+        "xmlrpc": true
+      }
     },
     {
       "id": "plugin:jet-popup/jet-popup.php",
@@ -3766,8 +3769,9 @@
       "cache": {
         "require_cookie_before_cache": [
           {
-            "cookie": "pll_language (o constante PLL_COOKIE)",
-            "when": "opción 'detectar idioma del navegador' activa"
+            "cookie": "pll_language",
+            "cookie_constant": "PLL_COOKIE",
+            "when": "option:polylang.browser == 1"
           }
         ]
       },
@@ -5506,7 +5510,7 @@
       "preload": {
         "exclude_taxonomies": [
           "product_shipping_class",
-          "pa_* (atributos)"
+          "pa_*"
         ],
         "exclude_dynamic": [
           "wc_page:cart",
@@ -6181,7 +6185,7 @@
         "cache_key_query_params_conditional": [
           {
             "param": "lang",
-            "when": "idioma por parámetro"
+            "when": "option:icl_sitepress_settings.language_negotiation_type == 3"
           }
         ]
       },
@@ -9352,7 +9356,8 @@
       },
       {
         "slug": "litespeed-cache",
-        "plugin_file": "litespeed-cache/litespeed-cache.php"
+        "plugin_file": "litespeed-cache/litespeed-cache.php",
+        "coordinate": true
       },
       {
         "slug": "w3-total-cache",
@@ -9400,10 +9405,11 @@
       },
       {
         "slug": "cloudflare",
-        "plugin_file": "cloudflare/cloudflare.php"
+        "plugin_file": "cloudflare/cloudflare.php",
+        "coordinate": true
       }
     ],
-    "notes": "Lista curada (no viene de los ZIP). LiteSpeed Cache y el plugin oficial de Cloudflare no se desactivan: se coordinan. El resto: desactivar módulos propios equivalentes y avisar.",
+    "notes": "Lista curada (no viene de los ZIP). Las entradas con coordinate=true (LiteSpeed Cache y el plugin oficial de Cloudflare) nunca se tratan como conflicto: se coordinan. El resto: desactivar módulos propios equivalentes y avisar.",
     "generic_legacy_optimizers": [
       {
         "slug": "check-and-enable-gzip-compression",
@@ -9416,10 +9422,6 @@
       {
         "slug": "wpcompressor",
         "file": "wpcompressor/wpcompressor.php"
-      },
-      {
-        "slug": "wp-super-cache",
-        "file": "wp-super-cache/wp-cache.php"
       },
       {
         "slug": "hyper-cache-extended",
@@ -9490,18 +9492,6 @@
         "file": "enable-gzip-compression/enable-gzip-compression.php"
       },
       {
-        "slug": "wp-fastest-cache",
-        "file": "wp-fastest-cache/wpFastestCache.php"
-      },
-      {
-        "slug": "litespeed-cache",
-        "file": "litespeed-cache/litespeed-cache.php"
-      },
-      {
-        "slug": "w3-total-cache",
-        "file": "w3-total-cache/w3-total-cache.php"
-      },
-      {
         "slug": "add-expires-headers",
         "file": "add-expires-headers/add-expires-headers.php"
       },
@@ -9540,10 +9530,6 @@
       {
         "slug": "cache-enabler",
         "file": "cache-enabler/cache-enabler.php"
-      },
-      {
-        "slug": "wp-optimize",
-        "file": "wp-optimize/wp-optimize.php"
       },
       {
         "slug": "leverage-browser-caching",
@@ -9649,6 +9635,34 @@
         "slug": "lazy-load-for-videos",
         "file": "lazy-load-for-videos/codeispoetry.php"
       }
-    ]
+    ],
+    "plugin_filtering": [
+      {
+        "slug": "perfmatters",
+        "plugin_file": "perfmatters/perfmatters.php",
+        "note": "Solo cuenta si su MU plugin está activo (opción perfmatters_options.assets.mu_mode)."
+      },
+      {
+        "slug": "plugin-organizer",
+        "plugin_file": "plugin-organizer/plugin-organizer.php"
+      },
+      {
+        "slug": "freesoul-deactivate-plugins",
+        "plugin_file": "freesoul-deactivate-plugins/freesoul-deactivate-plugins.php"
+      },
+      {
+        "slug": "wp-asset-clean-up-pro",
+        "plugin_file": "wp-asset-clean-up-pro/wpacu.php",
+        "note": "Solo la versión Pro descarga plugins por ruta."
+      }
+    ],
+    "plugin_filtering_note": "Plugins que filtran active_plugins. Solo uno puede hacerlo: si alguno está activo, PluginFilter se apaga. Verificar plugin_file de cada entrada contra la versión vigente antes de marcarla como verificada."
+  },
+  "schema_extensions_v1_1": {
+    "requires.xmlrpc": "El plugin necesita xmlrpc.php: el Shield y la regla itb-fw-wp-surface no lo bloquean.",
+    "requires.rest_users": "El plugin necesita /wp-json/wp/v2/users en anónimo.",
+    "requires.webhook_paths": "Rutas de webhooks (p. ej. pasarelas de pago) que van en la regla itb-fw-skip-webhooks. Pendiente: pasarelas de LATAM (Wompi, ePayco, PayU, Mercado Pago) y Stripe/WooPayments, verificando la ruta real en cada plugin. Las que usan la API de WooCommerce (/wc-api/ o ?wc-api=) ya quedan cubiertas por la regla genérica.",
+    "static_miss_passthrough": "Patrones de ruta de assets que el plugin genera bajo demanda cuando el archivo no existe; el Shield no les responde 404.",
+    "coordinate": "En overlapping_plugins: plugin que se coordina, nunca conflicto."
   }
 }

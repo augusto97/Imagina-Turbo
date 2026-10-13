@@ -2,6 +2,8 @@
 
 Generada el 2026-10-12 a partir de WP Rocket 3.23.5.1 y Perfmatters 2.6.9 (ambos GPLv2+). Los datos se reestructuraron a un esquema propio; no se copió código.
 
+Versión de los datos: 1.1.0 (2026-10-13).
+
 ## Contenido de `compat-matrix-v1.json`
 
 | Sección | Qué contiene |
@@ -22,6 +24,19 @@ Generada el 2026-10-12 a partir de WP Rocket 3.23.5.1 y Perfmatters 2.6.9 (ambos
 - `require_cookie_before_cache`: no servir caché hasta que la cookie exista (p. ej. moneda por geolocalización).
 - `cart_cookies` (Woo): solo actúan como bypass si el módulo de carrito por Store API está desactivado.
 - `cache_key_query_params_conditional`: parámetros que sí deben formar parte de la llave en ciertas configuraciones (`v` de geolocalización de Woo, `lang` de WPML).
+
+### Campos agregados en 1.1.0
+
+| Campo | Uso |
+|---|---|
+| `requires.xmlrpc` | El plugin necesita `xmlrpc.php` (Jetpack). El Shield y la regla `itb-fw-wp-surface` no lo bloquean. |
+| `requires.rest_users` | El plugin necesita `/wp-json/wp/v2/users` en anónimo. |
+| `requires.webhook_paths` | Rutas de webhooks para `itb-fw-skip-webhooks`. **Pendiente**: pasarelas de LATAM (Wompi, ePayco, PayU, Mercado Pago), Stripe y WooPayments, verificando la ruta real. Las que usan `/wc-api/` o `?wc-api=` ya quedan cubiertas. |
+| `static_miss_passthrough` | Rutas de assets generados bajo demanda: el Shield no les responde 404. |
+| `overlapping_plugins.plugin_filtering` | Plugins que filtran `active_plugins`. Si alguno está activo, `PluginFilter` se apaga. |
+| `overlapping_plugins.*[].coordinate` | `true` = se coordina, nunca es conflicto (LiteSpeed Cache, plugin oficial de Cloudflare). |
+
+Cambios de datos en 1.1.0: valores en texto libre convertidos a datos procesables (`pa_*`, cookie de Polylang, condición de WPML por parámetro); `generic_legacy_optimizers` ya no repite los plugins de `cache_or_full_optimization` (incluía LiteSpeed Cache, que se coordina).
 
 ### Qué es dato fuerte y qué hay que validar
 

@@ -22,7 +22,9 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
 
 ## 2. Coordinador de caché (`CacheCoordinator`)
 
-- **Riesgo:** moderado. **Por defecto:** activo en modo "solo sincronizar purgas"; emisión de cabeceras para el edge requiere activar Cloudflare.
+- **Riesgo:** moderado. **Por defecto:** inactivo (regla 3: solo lo seguro viene activo). Al conectar Cloudflare, el asistente propone activarlo; primero en modo "solo sincronizar purgas" y, tras verificación, con emisión de cabeceras para el edge.
+- **Requisito previo (fase 2):** hasta que exista el refresco de nonces (`itb-nonce.js`), el edge TTL máximo es 10 h, porque los nonces de WordPress viven 12–24 h y los formularios/AJAX con nonce fallarían en páginas cacheadas más tiempo. Por eso el refresco de nonces se adelanta a la fase 2.
+- **Cabeceras en caché de origen** *(verificar antes de la fase 2)*: cuando WP Rocket sirve su HTML desde archivo (reglas de `.htaccess`/nginx o `advanced-cache.php`), PHP no corre y **las cabeceras propias (`Cache-Tag`, `Cloudflare-CDN-Cache-Control`) no viajan**. Con WP Rocket: emitirlas desde las reglas del servidor (filtros de `.htaccess` de WP Rocket) o, si no es posible, que la regla del edge fije el TTL (`override_origin`) y la purga sea por URL. Con LSCache: comprobar que guarda y reproduce las cabeceras de la respuesta junto con la página; si no, mismo plan B.
 - **Qué hace:** decide qué es cacheable, etiqueta las páginas, emite cabeceras para el edge y sincroniza purgas entre el plugin de caché y Cloudflare.
 - **Cabeceras para páginas cacheables** (anónimo, GET, sin `Set-Cookie`, no excluido):
   - `Cloudflare-CDN-Cache-Control: max-age=<edge_ttl>, stale-while-revalidate=<swr>, stale-if-error=<sie>` — controla solo el edge de Cloudflare, sin interferir con el `Cache-Control` que manda WordPress o LSCache al navegador. *(verificar soporte y precedencia en docs de Cloudflare)*
@@ -45,6 +47,8 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
 | Cambios en páginas de Woo (IDs de carrito/checkout/cuenta) | `all` + recompilar config |
 
 - **Cola (`PurgeQueue`):** Action Scheduler, ventana de agrupación de 30 s, deduplicar, lotes según el límite de la API. Purga por tag si el plan lo permite; si no, por URL (resolver URLs de cada tag).
+- **Orden de purga:** primero la caché de origen (LSCache/WP Rocket), después Cloudflare, después el recalentado. Al revés, el edge vuelve a llenarse con la copia vieja del origen.
+- **Sin bucles:** las purgas que nosotros enviamos al plugin de caché se marcan (bandera en memoria durante el request) para que el escucha de purgas del adaptador no las vuelva a encolar hacia Cloudflare.
 - **Adaptadores:**
   - `LiteSpeedAdapter`: enviar tags propios a LSCache y purgar con sus acciones públicas (`litespeed_purge_url`, `litespeed_purge_post`, `litespeed_purge_all`, `litespeed_tag_add` *(verificar nombres en la versión actual)*). Escuchar las purgas de LSCache para replicarlas en Cloudflare.
   - `WpRocketAdapter`: usar `rocket_clean_post`, `rocket_clean_files`, `rocket_clean_domain`; escuchar `after_rocket_clean_post`, `after_rocket_clean_domain` *(verificar)*. Alimentar `rocket_delay_js_exclusions` con la matriz.
@@ -62,6 +66,8 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
   - Desencolar `wc-cart-fragments` en todo el sitio.
   - `itb-cart.js`: lee `GET /wp-json/wc/store/v1/cart`, guarda conteo y total en `localStorage`, actualiza los elementos del mini-carrito (selectores configurables con valores por defecto para los temas comunes: Astra, Flatsome, Woodmart, Kadence, Blocksy, Hello+Elementor). Se actualiza en los eventos `added_to_cart`, `removed_from_cart` (jQuery) y `wc-blocks_added_to_cart`, y al volver a la pestaña (`visibilitychange`).
   - Si el carrito está vacío (no existe `woocommerce_items_in_cart`), no hacer la petición: mostrar 0 directamente.
+  - **Prerender**: si `document.prerendering` es verdadero, no llamar a la Store API hasta el evento `prerenderingchange`. Si no, cada página pre-renderizada genera un request sin caché al origen aunque nadie la vea.
+  - Alcance: el script actualiza conteo y total. Los mini-carritos que muestran la lista de productos (desplegable) necesitan un renderizador por tema; los no soportados abren el carrito en lugar de mostrar el desplegable.
   - Neutralizar cookies en páginas cacheables: reemplazar `wc_track_product_view` por una versión en `localStorage` (opcional, configurable) para el widget de productos vistos.
   - Geolocalización con caché (`?v=hash`): si `woocommerce_default_customer_address` = `geolocation_ajax`, incluir `v` en la llave de caché.
   - Nunca cachear: carrito, checkout (con cualquier query string), cuenta (con cualquier query string), `?add-to-cart=`, `wc-ajax`, Store API.
@@ -94,12 +100,12 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
 
 ## 5. Navegación instantánea (`Speculation`)
 
-- **Riesgo:** seguro (prefetch) / moderado (prerender). **Por defecto:** prefetch `moderate` + prerender `conservative`.
+- **Riesgo:** seguro (prefetch) / moderado (prerender). **Por defecto:** prefetch `moderate` activo; prerender `conservative` **inactivo** hasta verificarlo en el sitio (regla 3). El prerender ejecuta JavaScript (analítica, píxeles, carrito) de páginas que quizá nadie vea.
 - **Cómo:**
   - Usar la API del core (WP 6.8+): filtros `wp_speculation_rules_configuration` (modo y eagerness), `wp_speculation_rules_href_exclude_paths` (exclusiones) y la acción `wp_load_speculation_rules` para agregar reglas propias *(verificar firmas)*. En WP < 6.8, imprimir el `<script type="speculationrules">` en `wp_footer`.
   - Exclusiones siempre: carrito, checkout, cuenta, logout, `wp-admin`, `wp-login`, `*add-to-cart=*`, `*remove_item=*`, `*_wpnonce=*`, `*action=*`, enlaces con `rel="nofollow"`, descargas y extensiones de archivo.
   - Solo especular URLs que el coordinador marca como cacheables.
-  - **Prefetch predictivo**: el RUM registra transiciones página → siguiente (muestreadas). Un job diario calcula las 2–4 siguientes más probables por plantilla y las agrega como regla `immediate` de prefetch.
+  - **Prefetch predictivo**: el RUM registra transiciones página → siguiente (muestreadas). Un job diario calcula las 2–4 siguientes más probables por plantilla y las agrega como regla `immediate` de prefetch. Como los beacons no se autentican, solo entran URLs del mismo origen que existan como contenido publicado y pasen las exclusiones de arriba.
   - Respetar `Save-Data` y conexiones lentas (el script de fallback lo evalúa en el cliente).
   - `itb-prefetch-fallback.js` para Safari/Firefox: prefetch en `touchstart`/`mousedown` y de las URLs predichas, con `IntersectionObserver`.
 - **bfcache:** auditar en el admin las causas de exclusión (RUM con `notRestoredReasons` en Chrome) y las cabeceras `no-store` en páginas cacheables. Corregir lo propio; reportar lo de terceros.
@@ -110,11 +116,11 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
 
 ## 6. Escudo de servidor (`Shield`)
 
-- **Riesgo:** seguro. **Por defecto:** activo (salvo XML-RPC si hay Jetpack u otro plugin que lo necesite según la matriz).
+- **Riesgo:** seguro, salvo los bloqueos marcados como moderados. **Por defecto:** activos los seguros (`StaticMiss`, `?author=N`). Los moderados (XML-RPC y `/wp-json/wp/v2/users`) se ofrecen activados solo si ningún plugin activo los requiere según la matriz (`requires.xmlrpc`, `requires.rest_users`); si alguno los requiere, quedan desactivados y se explica por qué.
 - **Guardia PHP en el loader (antes de cargar plugins):**
-  - `XmlRpc` → 403 (o permitir si la matriz lo requiere).
-  - `?author=N` en anónimo → 404.
-  - `StaticMiss` → 404 con cuerpo vacío y `Cache-Control: public, max-age=3600`.
+  - `XmlRpc` → 403 (o permitir si la matriz lo requiere: Jetpack, app móvil de WordPress, etc.).
+  - `?author=N` en anónimo → 404 (solo si no hay cookie `wordpress_logged_in_*`; la validación real de la sesión no existe aún en el loader, así que un logueado conserva el comportamiento del core).
+  - `StaticMiss` → 404 con cuerpo vacío y `Cache-Control: public, max-age=600` (10 min: si el archivo aparece después, p. ej. tras regenerar CSS, el 404 no queda cacheado mucho tiempo). Excepciones: `/favicon.ico` y `static_miss_passthrough` de la matriz.
   - `/wp-json/wp/v2/users` en anónimo → 401 (configurable).
 - **Cron:** detectar si `DISABLE_WP_CRON` está activo. Si no, mostrar guía para cron del sistema (comando listo para copiar, incluido ServerAvatar/Plesk). No editar `wp-config.php` automáticamente.
 - **Heartbeat:** desactivar en el frontend, 60 s en el admin, 15 s en el editor (configurable).
@@ -143,6 +149,7 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
 ## 9. Pistas de frontend (`FrontendHints`)
 
 - **Riesgo:** seguro. **Por defecto:** activo cuando hay datos de RUM.
+- **Datos no confiables:** los beacons de RUM no llevan autenticación, así que cualquiera puede enviar datos falsos. Solo se aceptan como LCP URLs del mismo origen que correspondan a un adjunto de la biblioteca de medios (resuelto en el job diario, nunca en el frontend), y solo se usan valores que se repiten en ≥ 50 muestras de ≥ 20 IP-hash distintas en el hub.
 - **LCP:** el RUM reporta el elemento LCP por plantilla y dispositivo (URL de imagen y selector). Con ≥ 50 muestras: agregar `fetchpriority="high"` y quitar `loading="lazy"` a esa imagen vía `wp_get_attachment_image_attributes` y `wp_content_img_tag`; `<link rel="preload" as="image">` con `imagesrcset` en `wp_head`.
 - **Fachadas:** YouTube y Vimeo con `embed_oembed_html` (miniatura + carga al tocar).
 - **Preconnect** a los orígenes de terceros detectados como críticos.

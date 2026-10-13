@@ -54,7 +54,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
 
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
-- `GET /imagina-turbo/v1/nonce?action=...` — refresco de nonces para formularios en páginas cacheadas. Solo acciones en lista blanca (formularios detectados). Respuesta `Cache-Control: private, no-store`.
+- `GET /imagina-turbo/v1/nonce?action=...` — refresco de nonces para formularios en páginas cacheadas. Solo acciones en lista blanca (formularios detectados). Respuesta `Cache-Control: private, no-store`. Ojo: con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint debe inicializar la sesión de Woo antes de generar el nonce.
 
 ## Datos
 
@@ -121,7 +121,9 @@ Jobs de limpieza diarios por Action Scheduler (grupo `imagina-turbo`).
 
 El hub es un servicio aparte (puede extender el servidor de Imagina Updater). El plugin funciona completo sin él.
 
-- **Autenticación**: cabeceras `X-ITB-Site` (id del sitio), `X-ITB-License` (clave de licencia de Imagina Updater), `X-ITB-Timestamp` y `X-ITB-Signature` = HMAC-SHA256(cuerpo + timestamp, `itb_site_key`). Rechazar timestamps con más de 5 minutos de diferencia.
+- **Autenticación**: cabeceras `X-ITB-Site` (id del sitio), `X-ITB-License` (clave de licencia de Imagina Updater), `X-ITB-Timestamp`, `X-ITB-Nonce` (16 bytes aleatorios en hex) y `X-ITB-Signature` = HMAC-SHA256 sobre la cadena canónica `MÉTODO\nRUTA\nTIMESTAMP\nNONCE\nsha256_hex(cuerpo)` con `itb_site_key`.
+  - Concatenar `cuerpo + timestamp` sin separador es ambiguo y no cubre método ni ruta; la cadena canónica evita que una firma válida sirva para otro endpoint.
+  - Rechazar timestamps con más de 5 minutos de diferencia y nonces ya vistos en esa ventana (anti-replay). Comparar firmas con `hash_equals`.
 - **Endpoints del hub** (versionados):
 
 | Método | Ruta | Uso |

@@ -8,6 +8,11 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 
 ## Fases
 
+### Dependencias externas
+
+- **Hub**: servicio aparte, sin especificación de servidor todavía (solo el protocolo en `docs/04`). La fase 1 envía telemetría; hasta que el hub exista, el cliente se construye contra un servidor simulado y la telemetría queda desactivada. Ninguna fase del plugin se bloquea por el hub (regla 7).
+- **Verificador**: servicio aparte (Node + Playwright). Se necesita desde la fase 3 (WooCart) y es obligatorio en la fase 5. Debe especificarse y construirse en paralelo a las fases 1–2. Mientras no exista, la verificación es manual y queda registrada como tal.
+
 ### Fase 0 — Fundaciones
 - Bootstrap, Composer, contenedor, `ModuleInterface`, registro de módulos.
 - MU loader (instalación/actualización/desinstalación automáticas y seguras).
@@ -18,7 +23,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Carga y validación de la matriz de compatibilidad (`Compat\Matrix`, `Resolver`).
 - Esqueleto del admin (React + Vite) con Panel, Registro y Avanzado.
 - Licencia vía Imagina Updater.
-- **Aceptación:** loader < 0,3 ms y < 150 KB medidos con el benchmark; activar/desactivar el plugin no deja residuos; un fatal simulado 3 veces activa el modo seguro; la matriz compila solo las reglas de los plugins activos.
+- **Aceptación:** loader < 0,3 ms y < 150 KB medidos con el benchmark; activar/desactivar el plugin no deja residuos; un fatal simulado 3 veces activa el modo seguro (fatal originado en el propio plugin, ya que en la fase 0 aún no se filtran plugins); la matriz compila solo las reglas de los plugins activos; el loader huérfano (plugin borrado por FTP) no produce errores.
 
 ### Fase 1 — Perfilador y diagnóstico (solo lectura)
 - Módulo `Profiler`, `Server-Timing`, muestras y rollups.
@@ -31,11 +36,12 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - `CacheCoordinator` completo (cabeceras, tags, mapa de purga, cola, adaptadores LSCache/WP Rocket/Null, recalentado).
 - Módulo Cloudflare: token, inspector, plantillas de caché, ajustes de zona, purga, diff, aplicar, snapshots, revertir, deriva.
 - Pantallas Caché y Cloudflare.
+- Refresco de nonces para formularios en páginas cacheadas (adelantado desde la fase 3). Sin él, edge TTL máximo de 10 h.
+- Verificar si LSCache y WP Rocket conservan las cabeceras propias en sus respuestas cacheadas (ver `docs/02`, módulo 2) y elegir el plan B si no.
 - **Aceptación:** en el sitio WooCommerce de prueba, > 85 % de aciertos del edge en tráfico anónimo; edición de producto reflejada en < 60 s; revertir un snapshot deja la zona exactamente como estaba (comparación JSON).
 
 ### Fase 3 — WooCommerce
 - `WooCart` (Store API, fragments fuera, cookies neutralizadas, geolocalización).
-- Refresco de nonces para formularios.
 - **Aceptación:** criterios del módulo 3 en `docs/02-modulos.md`, probados en Astra, Flatsome y Woodmart (o los temas reales de los clientes).
 
 ### Fase 4 — Escudo, ajustes y firewall

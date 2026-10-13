@@ -210,3 +210,32 @@ export interface HubStatus {
 	license: boolean;
 	result?: { sent: boolean; reason: string };
 }
+
+export interface CacheSettings {
+	mode: 'sync' | 'headers';
+	edge_ttl: number;
+	swr: number;
+	sie: number;
+	nonce_refresh: boolean;
+	warm: boolean;
+}
+
+export interface CacheStatus {
+	enabled: boolean;
+	settings: CacheSettings;
+	adapter: { id: 'litespeed' | 'wp-rocket' | 'none'; server: string; headers_on_hit: boolean; edge_html: boolean; verified: boolean };
+	edge: { available: boolean; supports_tags: boolean };
+	tags: { prefix: string };
+	queue: { tags: number; urls: number; all: boolean; warm: number };
+	last: { at?: number; tags?: number; urls?: number; all?: boolean; edge?: string; warm?: number };
+	warmer: { last_run: number; warmed: number; errors: number; avg_ms: number; paused_at: number; load: number; seeded_at: number };
+	sitemaps: string[];
+	result?: Record<string, unknown>;
+}
+
+export interface InspectResult {
+	url: string;
+	status: number;
+	headers: Record<string, string>;
+	cookies: string[];
+}

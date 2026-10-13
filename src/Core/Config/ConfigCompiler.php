@@ -22,6 +22,7 @@ use ImaginaTurbo\Core\ModuleRegistry;
 use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Hub\HubClient;
 use ImaginaTurbo\Integrations\ImaginaSearch;
+use ImaginaTurbo\Modules\AssetManager\AssetRules;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Support\Filesystem;
@@ -254,6 +255,10 @@ final class ConfigCompiler {
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
+			// Exclusiones de delay JS para WP Rocket o LSCache (solo si alguno está activo).
+			// Gestor de assets: solo con el módulo activo (las reglas "testing" solo las aplica la previsualización).
+			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
+			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( $compat['delay_js'] ?? [] ) : [],
 			'rum'                         => $this->rumConfig(),
 			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
 			'hints'                       => [

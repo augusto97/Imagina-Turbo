@@ -34,6 +34,8 @@ final class ModuleCatalog {
 			'speculation'       => \ImaginaTurbo\Modules\Speculation\SpeculationModule::class,
 			'rum'               => \ImaginaTurbo\Modules\Rum\RumModule::class,
 			'frontend_hints'    => \ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule::class,
+			'asset_manager'     => \ImaginaTurbo\Modules\AssetManager\AssetManagerModule::class,
+			'database'          => \ImaginaTurbo\Modules\Database\DatabaseModule::class,
 		];
 	}
 

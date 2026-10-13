@@ -269,6 +269,16 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 - **Reglas:** por tipo de contenido, plantilla, ID, o "todo excepto". Sugerencias automáticas: assets de formularios fuera de páginas con formulario (CF7, WPForms, Fluent Forms, Gravity Forms detectando shortcode/bloque), assets de Woo fuera de páginas de Woo (moderado, con verificación), assets de sliders fuera de páginas con slider.
 - **Aceptación:** UI tipo "script manager" en el admin con previsualización de la ruta; cada regla verificable con el verificador.
 
+### Implementación (fase 7)
+
+- **Reglas** (`itb_asset_rules`): un handle (JS o CSS) y un modo. "Nunca aquí" lo quita en las plantillas, ids o tipos de contenido elegidos; "solo aquí" lo quita en el resto del sitio. "Solo aquí" sin ningún lugar no es válida (lo quitaría en todo el sitio). La barra de administración y los assets propios (`itb-*`) no se pueden quitar.
+- **Cómo se quita**: `wp_dequeue_script` / `wp_dequeue_style` en `wp_enqueue_scripts` (9999), `wp_print_styles`, `wp_print_scripts` y `wp_print_footer_scripts` (5, para lo que encolan los shortcodes). Desencolar solo quita la petición directa: si otro asset que se queda lo necesita, WordPress lo imprime igual, así que una regla nunca deja a un script sin su dependencia. Las dependencias que ya nadie necesita desaparecen solas (con CF7, `swv`).
+- **Estados**: toda regla nace en prueba. Una regla en prueba solo se aplica al administrador con la sesión iniciada y la cookie firmada `itb_assets_prev` (2 h); esas páginas no se guardan en caché, y al activar o quitar la previsualización se purga su caché privada (LSCache con "Cache Logged-in Users", WP Rocket por usuario). Activar pide confirmar que se revisaron las páginas, guarda quién y cuándo, y purga la caché de páginas.
+- **Inventario**: el sitio se pide la ruta a sí mismo como visitante anónimo con una cookie firmada (`itb_assets_inv`, 5 min) y un identificador de petición. Esa petición no aplica reglas, no se cachea y guarda en un transient lo que la página imprimió (handles, origen, dependencias, si se encolaron directamente, si van en el pie, shortcodes y bloques renderizados). No va en el HTML para que ninguna optimización del plugin de caché lo altere.
+- **Sugerencias**: se inventaría la portada y una página de cada tipo (entrada, página, producto, tienda). Formularios y sliders (CF7, WPForms, Fluent Forms, Gravity Forms, Ninja Forms, Formidable, Slider Revolution, Smart Slider, MetaSlider): sus assets solo en las páginas cuyo contenido o datos de Elementor tienen su shortcode o bloque. Si aparece en un widget, una plantilla del tema, un bloque reutilizable o una página donde el contenido no lo incluye, se usa en cualquier página y no se sugiere nada. Si no se usa en ningún contenido, se sugiere revisar el plugin. WooCommerce: sus assets solo en la tienda (plantillas de producto y categorías, carrito, checkout, cuenta y páginas con bloques o shortcodes de productos), salvo la atribución de pedidos (registra la página de entrada) y los fragmentos del carrito. Solo se sugieren handles encolados directamente que nada necesita.
+- **Delay JS**: las exclusiones de la matriz (globales de pasarelas de pago y las de cada integración activa) se pasan a WP Rocket (`rocket_delay_js_exclusions`, regex) y a LSCache (`litespeed_optm_js_defer_exc`, solo las literales). Solo agregan exclusiones.
+- Probado en el sitio con Contact Form 7 6.2.2: sugerencia "solo en /contacto/", previsualización solo para el admin, y tras activar la portada en caché sin CF7 y el contacto con su formulario.
+
 ---
 
 ## 9. Pistas de frontend (`FrontendHints`)
@@ -301,6 +311,14 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 - **Auditoría:** tamaño del autoload y top 20 opciones; opciones de plugins inactivos; transients expirados; Action Scheduler (completadas/fallidas > 30 días); revisiones; postmeta huérfano; estado de HPOS; índices sugeridos para `wp_postmeta` (solo recomendación).
 - **Acciones:** limpiar transients expirados, purgar Action Scheduler antiguo, limitar revisiones, cambiar `autoload` a `no` en opciones de plugins inactivos (con confirmación y respaldo de la fila). Nunca borrar tablas automáticamente.
 - **Aceptación:** cada acción crea un respaldo restaurable y un evento en el registro.
+
+### Implementación (fase 7)
+
+- **Auditoría** (siempre disponible, solo lectura, a petición): tamaño y top 20 del autoload con su dueño (núcleo, plugin activo, plugin inactivo, desconocido), opciones de plugins inactivos (por el nombre de su carpeta; si coincide también con uno activo, se trata como activo), transients expirados en `wp_options`, Action Scheduler terminado hace más de 30 días, revisiones que sobran, postmeta huérfano, HPOS (y la sincronización), índices de `wp_postmeta` con la recomendación de un índice compuesto a partir de 200.000 filas, y las 15 tablas más grandes.
+- **Acciones** (con el módulo activo y confirmación): transients expirados, Action Scheduler antiguo (con sus registros), revisiones que sobran (conserva las N más recientes de cada contenido; N es el de "Limitar revisiones" si ese ajuste está activo) y autoload desactivado en opciones elegidas de plugins inactivos (rechaza cualquier otra). Por tandas de 1.000 filas.
+- **Respaldo**: antes de tocar nada, cada fila va a `itb_db_backups` con un lote; si el respaldo no se completa, no se borra nada. Restaurar vuelve a insertar las filas borradas (las que ya existan se dejan) y devuelve los valores cambiados al original exacto (por ejemplo, el `auto` de autoload). Lotes de 30 días.
+- **Programación**: opcional, cada N días, con las mismas acciones salvo el autoload (siempre manual), desde la tarea diaria `itb_db_daily`.
+- Probado en el sitio: las cuatro acciones y sus restauraciones devolvieron el estado exacto.
 
 ---
 

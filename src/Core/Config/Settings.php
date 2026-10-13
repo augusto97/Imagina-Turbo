@@ -74,6 +74,9 @@ final class Settings {
 			'view_transitions'         => false,
 			'hints_lcp'                => true,
 			'hints_facades'            => true,
+			'db_keep_revisions'        => 5,
+			'db_schedule'              => [],
+			'db_schedule_days'         => 7,
 		];
 	}
 
@@ -251,6 +254,8 @@ final class Settings {
 			'shield_filter_limit'     => [ 0, 20 ],
 			'tweak_revisions'         => [ 0, 100 ],
 			'tweak_autosave'          => [ 30, DAY_IN_SECONDS ],
+			'db_keep_revisions'       => [ 1, 100 ],
+			'db_schedule_days'        => [ 1, 90 ],
 		] as $key => [ $min, $max ] ) {
 			if ( isset( $input[ $key ] ) && is_numeric( $input[ $key ] ) ) {
 				$out[ $key ] = (int) max( $min, min( $max, (int) $input[ $key ] ) );
@@ -271,6 +276,11 @@ final class Settings {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
+		}
+
+		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).
+		if ( isset( $input['db_schedule'] ) && is_array( $input['db_schedule'] ) ) {
+			$out['db_schedule'] = array_values( array_intersect( [ 'transients', 'action_scheduler', 'revisions' ], $input['db_schedule'] ) );
 		}
 
 		return $out;

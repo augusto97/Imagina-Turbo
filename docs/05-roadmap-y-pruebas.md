@@ -325,3 +325,28 @@ Pendiente para las pruebas reales:
 - Porcentaje de navegaciones especuladas y mejora de LCP con visitantes reales.
 - Beacons al hub real.
 
+
+## Estado de la fase 7
+
+Completada el 2026-10-13 (versión 0.9.0). Probada en OpenLiteSpeed + LSCache 7.9.1 (con caché de usuarios con sesión) + WooCommerce 11.2.1 + Contact Form 7 6.2.2.
+
+| Criterio | Resultado |
+|---|---|
+| `AssetManager` con sugerencias y verificación | Inventario por loopback firmado; sugerencias de formularios, sliders y WooCommerce según el uso en el contenido, Elementor y widgets. Cada regla nace en prueba, se ve con la previsualización solo del admin y se activa con confirmación (queda quién y cuándo). Con CF7: portada en caché sin sus assets, contacto con su formulario |
+| Sin tocar el HTML | Solo `wp_dequeue_*` en hooks de WordPress; una dependencia que otro asset necesita sigue cargándose |
+| `Database` con auditoría, acciones y respaldos | Auditoría siempre disponible; cuatro acciones con respaldo por lote y evento; restaurar devolvió el estado exacto en las cuatro |
+| Exclusiones de delay JS desde la matriz | `rocket_delay_js_exclusions` (126 patrones en el sitio) y `litespeed_optm_js_defer_exc` (107 literales), verificados en el código de WP Rocket 3.23.5.1 y LSCache 7.9.1 |
+
+Hallazgos corregidos durante la validación:
+
+- Con "Cache Logged-in Users" de LSCache, el admin veía su copia en caché de antes de la previsualización: ahora activar o quitar la previsualización purga su caché privada.
+- La atribución de pedidos de WooCommerce aparecía como sugerencia "solo en la tienda", pero registra la página de entrada del visitante: queda fuera de las sugerencias.
+- `wp_user_roles` se atribuía a un plugin desconocido; ahora es núcleo.
+
+Calidad: 233 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, E2E del admin con las pantallas Assets y Base de datos (móvil sin desborde), benchmark de la etapa temprana 0,06 ms.
+
+Pendiente para las pruebas reales:
+
+- El verificador externo con Playwright para comprobar cada regla de assets en páginas completas (hoy la verificación es la previsualización del admin).
+- Sitios con Elementor y formularios en plantillas del tema, para afinar la detección de uso.
+- Bases grandes (millones de filas en `wp_postmeta` y Action Scheduler) para medir las tandas.

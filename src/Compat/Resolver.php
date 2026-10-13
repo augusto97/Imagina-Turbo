@@ -30,7 +30,8 @@ final class Resolver {
 	 *     static_passthrough: list<string>,
 	 *     purge_all_hooks: list<string>,
 	 *     sitemaps: list<string>,
-	 *     preload_exclude: list<string>
+	 *     preload_exclude: list<string>,
+	 *     delay_js: list<string>
 	 * }
 	 */
 	public function resolve( Matrix $matrix, array $activePlugins, string $stylesheet, string $template ): array {
@@ -57,6 +58,7 @@ final class Resolver {
 			'purge_all_hooks'             => [],
 			'sitemaps'                    => [],
 			'preload_exclude'             => $matrix->coreList( 'preload_exclude_patterns' ),
+			'delay_js'                    => $matrix->delayJsGlobal(),
 		];
 
 		foreach ( $matrix->integrations() as $integration ) {
@@ -95,13 +97,21 @@ final class Resolver {
 					$result['purge_all_hooks'][] = substr( $hook, 0, -4 );
 				}
 			}
+			// Exclusiones de delay JS (formato regex de WP Rocket; las "contains" se escapan).
+			$delay              = is_array( $integration['delay_js'] ?? null ) ? $integration['delay_js'] : [];
+			$result['delay_js'] = array_merge(
+				$result['delay_js'],
+				self::strings( $delay['exclude_regex'] ?? [] ),
+				array_map( static fn( string $s ): string => preg_quote( $s, '#' ), self::strings( $delay['exclude_contains'] ?? [] ) )
+			);
+
 			$preload = is_array( $integration['preload'] ?? null ) ? $integration['preload'] : [];
 			if ( is_string( $preload['sitemap'] ?? null ) && str_starts_with( $preload['sitemap'], '/' ) ) {
 				$result['sitemaps'][] = $preload['sitemap'];
 			}
 		}
 
-		foreach ( [ 'integrations', 'bypass_cookies', 'bypass_paths', 'dynamic_paths', 'vary_cookies', 'require_cookie_before_cache', 'cart_cookies', 'static_passthrough', 'purge_all_hooks', 'sitemaps', 'preload_exclude' ] as $key ) {
+		foreach ( [ 'integrations', 'bypass_cookies', 'bypass_paths', 'dynamic_paths', 'vary_cookies', 'require_cookie_before_cache', 'cart_cookies', 'static_passthrough', 'purge_all_hooks', 'sitemaps', 'preload_exclude', 'delay_js' ] as $key ) {
 			$result[ $key ] = self::unique( $result[ $key ] );
 		}
 		$result['requires']['webhook_paths'] = self::unique( $result['requires']['webhook_paths'] );

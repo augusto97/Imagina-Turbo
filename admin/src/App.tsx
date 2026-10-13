@@ -8,6 +8,8 @@ import { Firewall } from './screens/Firewall';
 import { PluginFilter } from './screens/PluginFilter';
 import { Navigation } from './screens/Navigation';
 import { Tweaks } from './screens/Tweaks';
+import { Assets } from './screens/Assets';
+import { Database } from './screens/Database';
 import { Diagnostics } from './screens/Diagnostics';
 import { Log } from './screens/Log';
 import { Panel } from './screens/Panel';
@@ -25,6 +27,8 @@ export function App() {
 			{ route === 'carga' && <PluginFilter /> }
 			{ route === 'firewall' && <Firewall /> }
 			{ route === 'ajustes' && <Tweaks /> }
+			{ route === 'assets' && <Assets /> }
+			{ route === 'base-de-datos' && <Database /> }
 			{ route === 'registro' && <Log /> }
 			{ route === 'avanzado' && <Advanced /> }
 		</Layout>

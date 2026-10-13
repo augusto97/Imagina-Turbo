@@ -118,3 +118,13 @@ Con la muestra del RUM al 100 % (`PUT /navigation/settings {"rum_rate": 1}`) y l
 - **Fachadas sin red**: `zz-itb-fake-oembed.php` (MU plugin de prueba) responde el oEmbed de YouTube.
 - **Insights**: se pueden sembrar contadores en `itb_rum_events` con muchos bits en `ip_bits` y recalcular con `POST /navigation/insights`.
 
+
+## Assets y base de datos (fase 7)
+
+La prueba del admin recorre las dos pantallas (inventario de la portada, borrador de regla, auditoría y confirmación de una acción). Para el flujo completo:
+
+1. Instalar Contact Form 7 y una página `/contacto/` con su shortcode.
+2. `POST /assets/suggest`: debe sugerir CF7 "solo en" esa página.
+3. Crear la regla en prueba, `POST /assets/preview {"on":true}` y comparar la portada con la sesión (sin CF7) y sin ella (con CF7).
+4. Activar con `confirm`: la portada en caché para visitantes ya no lleva CF7; `/contacto/` sí.
+5. Base de datos: sembrar transients expirados, revisiones, acciones viejas de Action Scheduler y opciones de un plugin inactivo; ejecutar cada acción y restaurar su lote.

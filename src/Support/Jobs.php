@@ -42,6 +42,9 @@ final class Jobs {
 	/** RUM: páginas predichas, imágenes LCP y limpieza. */
 	public const DAILY_RUM = 'itb_rum_daily';
 
+	/** Base de datos: retención de respaldos y limpiezas programadas por el usuario. */
+	public const DAILY_DB = 'itb_db_daily';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -56,6 +59,7 @@ final class Jobs {
 			self::HOURLY_CLOUDFLARE   => HOUR_IN_SECONDS,
 			self::HOURLY_FILTER_WATCH => HOUR_IN_SECONDS,
 			self::DAILY_RUM           => DAY_IN_SECONDS,
+			self::DAILY_DB            => DAY_IN_SECONDS,
 		];
 	}
 

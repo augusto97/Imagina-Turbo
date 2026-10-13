@@ -41,6 +41,8 @@ final class RestRegistrar {
 			new PluginFilterController( $this->container ),
 			new NavigationController( $this->container ),
 			new TweaksController( $this->container ),
+			new AssetsController( $this->container ),
+			new DatabaseController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

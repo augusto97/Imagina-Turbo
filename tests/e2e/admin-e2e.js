@@ -264,6 +264,44 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	navigation.mobileOverflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
 	await page.setViewportSize( { width: 1400, height: 1000 } );
 
+	// Assets: inventario de la portada, preparar una regla desde la tabla y la previsualización.
+	await page.click( 'a[href="#/assets"]' );
+	await page.waitForSelector( 'text=Inspeccionar una página' );
+	await page.getByRole( 'button', { name: 'Inspeccionar', exact: true } ).click();
+	await page.waitForSelector( 'text=/^JavaScript · \\d+/', { timeout: 30000 } );
+	const assets = {
+		inventoryRows: await page.locator( 'table tbody tr' ).count(),
+		rules: await page.locator( 'text=/^(Activa|En prueba|Desactivada)$/' ).count(),
+	};
+	const quitar = page.getByRole( 'button', { name: 'Quitar…' } ).first();
+	if ( await quitar.count() > 0 ) {
+		await quitar.click();
+		assets.draft = await page.getByText( 'Nueva regla (en prueba)' ).count() > 0;
+		await page.getByRole( 'button', { name: 'Cancelar' } ).click();
+	}
+	await page.screenshot( { path: OUT + '/14-assets.png', fullPage: true } );
+	await page.setViewportSize( { width: 390, height: 844 } );
+	assets.mobileOverflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+	await page.setViewportSize( { width: 1400, height: 1000 } );
+
+	// Base de datos: auditoría (solo lectura) y confirmación de las acciones.
+	await page.click( 'a[href="#/base-de-datos"]' );
+	await page.waitForSelector( 'text=Limpieza programada' );
+	await page.getByRole( 'button', { name: 'Auditar ahora' } ).click();
+	await page.waitForSelector( 'text=Opciones de plugins inactivos', { timeout: 30000 } );
+	const database = { audited: true, backups: await page.getByRole( 'button', { name: 'Restaurar' } ).count() };
+	const limpiar = page.getByRole( 'button', { name: 'Limpiar' } ).first();
+	if ( await limpiar.isEnabled() ) {
+		await limpiar.click();
+		database.confirm = await page.getByRole( 'dialog' ).count() > 0;
+		await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Cancelar' } ).click();
+	}
+	await page.screenshot( { path: OUT + '/15-base-de-datos.png', fullPage: true } );
+	await page.setViewportSize( { width: 390, height: 844 } );
+	database.mobileOverflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+	await page.screenshot( { path: OUT + '/15b-movil-base-de-datos.png', fullPage: true } );
+	await page.setViewportSize( { width: 1400, height: 1000 } );
+
 	// Carga condicional: reglas con su evidencia (si el sitio ya tiene alguna) y revisión de una activa.
 	await page.click( 'a[href="#/carga"]' );
 	await page.waitForSelector( 'text=Protecciones' );
@@ -332,6 +370,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, navigation, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, navigation, assets, database, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

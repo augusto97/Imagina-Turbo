@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Modules\PluginFilter;
 
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
+use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
  * Cliente HTTP mínimo.
@@ -40,6 +41,9 @@ final class LoopbackClient {
 		$response = wp_remote_request( $url, $args );
 		if ( is_wp_error( $response ) ) {
 			return $response->get_error_message();
+		}
+		if ( CloudflareAccess::blockedResponse( $response ) ) {
+			return CloudflareAccess::message( $url );
 		}
 		$headers = [];
 		foreach ( wp_remote_retrieve_headers( $response ) as $name => $value ) {

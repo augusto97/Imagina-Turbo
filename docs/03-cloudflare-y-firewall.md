@@ -249,6 +249,10 @@ Optimizaciones automáticas (cada una con nivel de riesgo y registro):
 7. **Quitar todo** (0.10.1): borra las reglas propias de todas las fases gestionadas (las del cliente no se tocan) y devuelve cada ajuste de zona que el plugin cambió a su valor de antes del primer cambio. Ese valor se guarda una vez, al aplicar, en `itb_cf_state.originals` con una marca de "cambiado / devuelto" (restaurar un snapshot actualiza la marca), así que quitar, deshacer y volver a quitar funciona. Guarda antes un snapshot.
 8. **Al desactivar el plugin**: las reglas no se quitan solas (no se llama a la API durante la desactivación). La pantalla de plugins avisa si quedan reglas o ajustes en la zona y pide confirmar al desactivar; desconectar el token también lo exige (428), porque sin él ya no se pueden quitar desde el plugin.
 
+### Cloudflare Access (Zero Trust)
+
+El plugin no toca la configuración de Access: su token no tiene permisos de Zero Trust y "Quitar todo" solo borra reglas propias. Las peticiones del sitio a sí mismo (experimentos de carga condicional, inventario de assets, inspecciones de caché y WooCommerce, auditoría de cacheabilidad, prueba del escudo) pasan por Cloudflare; si una ruta está dentro de una aplicación de Access, la respuesta es una redirección al login del equipo (`*.cloudflareaccess.com/cdn-cgi/access/login/...`). Desde la 0.10.2 eso se detecta (`Support\CloudflareAccess`) y el error lo dice, con la solución: una política Bypass para esa ruta o limitar la aplicación al login. Nada se da por bueno en ese caso: un experimento sin la medición del propio sitio ya fallaba.
+
 ## 9. Límites por plan (orientativos — verificar y mantener en el hub)
 
 *Verificado el 2026-10-13 y guardado en `data/cloudflare-limits.json` (actualizable desde el hub):* reglas de caché y Transform Free 10 / Pro 25 / Business 50 / Enterprise 300; WAF personalizadas 5 / 20 / 100 / 1.000; rate limiting 1 / 2 / 5 / 100. Regex solo Business y Enterprise. TTL mínimo del edge: Free 2 h, Pro 1 h, Business y Enterprise 1 s. Rate limiting en Free: solo campos de ruta y bot verificado, periodo y bloqueo de 10 s.

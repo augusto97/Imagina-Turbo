@@ -19,11 +19,12 @@ use ImaginaTurbo\Modules\CacheCoordinator\CacheModule;
 use ImaginaTurbo\Modules\CacheCoordinator\Edge\EdgePurger;
 use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
-use ImaginaTurbo\Modules\CacheCoordinator\Purger;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
+use ImaginaTurbo\Modules\CacheCoordinator\Purger;
 use ImaginaTurbo\Modules\CacheCoordinator\TagBuilder;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
 use ImaginaTurbo\Repository\PurgeQueueRepository;
+use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
  * Estado, ajustes y acciones de caché.
@@ -269,6 +270,9 @@ final class CacheController extends Controller {
 		);
 		if ( is_wp_error( $response ) ) {
 			return $this->error( 'itb_inspect', $response->get_error_message(), 502 );
+		}
+		if ( CloudflareAccess::blockedResponse( $response ) ) {
+			return $this->error( 'itb_access', CloudflareAccess::message( $url ), 502 );
 		}
 		$headers = [];
 		foreach ( wp_remote_retrieve_headers( $response ) as $name => $value ) {

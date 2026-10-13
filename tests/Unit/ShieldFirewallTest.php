@@ -16,6 +16,7 @@ use ImaginaTurbo\Cloudflare\SiteContext;
 use ImaginaTurbo\Cloudflare\Templates;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Firewall\HtaccessWriter;
+use ImaginaTurbo\Support\CloudflareAccess;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
 use ImaginaTurbo\Modules\Shield\EarlyGuard;
 use ImaginaTurbo\Modules\Shield\ShieldModule;
@@ -224,6 +225,16 @@ final class ShieldFirewallTest extends TestCase {
 		$this->assertStringContainsString( 'Jeff Starr', $block, 'crédito al 8G' );
 		$this->assertStringContainsString( '!/wc-api/', $block );
 		$this->assertSame( HtaccessWriter::block(), HtaccessWriter::withBlock( '' ) );
+	}
+
+	public function test_cloudflare_access_detection(): void {
+		$login = 'https://imagina.cloudflareaccess.com/cdn-cgi/access/login/tienda.test?kid=abc&redirect_url=%2Fwp-admin%2Fadmin-ajax.php';
+		$this->assertTrue( CloudflareAccess::blocked( 302, $login ), 'redirección al login del equipo' );
+		$this->assertTrue( CloudflareAccess::blocked( 302, 'https://tienda.test/cdn-cgi/access/login/tienda.test' ) );
+		$this->assertTrue( CloudflareAccess::blocked( 200, '', $login ), 'se siguió la redirección y se terminó en Access' );
+		$this->assertFalse( CloudflareAccess::blocked( 302, 'https://tienda.test/mi-cuenta/' ), 'una redirección del propio sitio' );
+		$this->assertFalse( CloudflareAccess::isAccessUrl( 'https://cloudflareaccess.com.atacante.test/' ) );
+		$this->assertFalse( CloudflareAccess::isAccessUrl( '' ) );
 	}
 
 	public function test_htaccess_strip_on_deactivation(): void {

@@ -17,6 +17,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
 use ImaginaTurbo\Modules\WooCart\ThemeSelectors;
 use ImaginaTurbo\Modules\WooCart\WooCartModule;
+use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
  * Carrito por Store API.
@@ -126,6 +127,10 @@ final class WooController extends Controller {
 			);
 			if ( is_wp_error( $response ) ) {
 				$results[ $case ] = [ 'error' => $response->get_error_message() ];
+				continue;
+			}
+			if ( CloudflareAccess::blockedResponse( $response ) ) {
+				$results[ $case ] = [ 'error' => CloudflareAccess::message( $url ) ];
 				continue;
 			}
 			$body             = (string) wp_remote_retrieve_body( $response );

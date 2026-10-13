@@ -61,7 +61,7 @@ final class OriginLock {
 	 * @return array{samples: int, cloudflare: int, direct: int, local: int, proxy_ip: int, state: string, message: string}
 	 */
 	public static function report( array $rows, int $since = 0 ): array {
-		$from = $since > 0 ? gmdate( 'Y-m-d H:i:s', $since ) : '';
+		$from  = $since > 0 ? gmdate( 'Y-m-d H:i:s', $since ) : '';
 		$count = [
 			self::DIRECT              => 0,
 			self::CLOUDFLARE          => 0,

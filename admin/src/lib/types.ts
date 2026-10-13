@@ -313,3 +313,29 @@ export interface CfAnalytics {
 	by_status: { status: string; requests: number }[];
 	top_uncached: { path: string; requests: number }[];
 }
+
+export interface WooStatus {
+	woocommerce: boolean;
+	enabled: boolean;
+	theme: { slug: string; known: boolean; verified: boolean };
+	selectors: { count: string[]; total: string[]; menu: string[] };
+	custom: { count: string[]; total: string[] };
+	recently_viewed: boolean;
+	geolocation: boolean;
+	tax_incl: boolean;
+	known_themes: string[];
+}
+
+export interface WooInspectCase {
+	error?: string;
+	status?: number;
+	edge?: string;
+	script?: boolean;
+	fragments?: boolean;
+	set_cookies?: string[];
+}
+
+export interface WooInspect {
+	empty: WooInspectCase;
+	cart: WooInspectCase;
+}

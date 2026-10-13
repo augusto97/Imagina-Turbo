@@ -91,3 +91,16 @@ Para otros temas: `ITB_COUNT_SELECTOR` y `ITB_MENU_SELECTOR`. Astra: `'.ast-site
 - A mano: `curl -D -` a un asset inexistente, `/?author=1`, `POST /xmlrpc.php`, `/wp-json/wp/v2/users` y `/?rest_route=/wp/v2/users` → 404, 404, 403, 401, 401 con `X-ITB-Shield`. Con un plugin `jetpack/jetpack.php` activo (basta la cabecera) y la config recompilada, XML-RPC vuelve a 200.
 - `.htaccess` en OpenLiteSpeed: después de escribir las reglas hay que reiniciar (`lswsctrl restart`) para que las lea.
 
+## Carga condicional (fase 5)
+
+Plugins de prueba en el sitio (solo pruebas): uno pesado (6 MB y 15 ms), uno que guarda `active_plugins` en `init` y `shutdown` como Freemius e informa `is_plugin_active()` en la cabecera `X-ITB-Test-Heavy-Active`, uno con una regla de reescritura, uno que agrega un fragmento al mini-carrito y uno que, con `?itb_flush=1`, regenera las reglas y, con `?itb_fatal=1`, llama a una función del pesado.
+
+1. Activar el módulo (`PUT /modules/plugin_filter` con `confirm`).
+2. Una regla que quita el plugin del fragmento falla. Una que quita el pesado y el de reescritura pasa en un paso.
+3. `POST /?wc-ajax=get_refreshed_fragments` 30 veces: `active_plugins` intacta y ordenada; `X-ITB-Test-Heavy-Active: no`.
+4. Con `&itb_flush=1`: la ruta `^itb-test-route/?$` sigue en `rewrite_rules`.
+5. Con `&itb_fatal=1`: 500, línea en `filter-faults.log`; al abrir el admin, la regla queda desactivada.
+6. Imagina Search: copiar `woo-smart-search` del repositorio, activarlo y probar el candidato `Rest:wss/v1`.
+
+Las contrapruebas (sin la protección de escritura o de `rewrite_rules`) se hacen comentando el `add_filter` correspondiente en la copia del sitio y esperando a que OPcache revalide (unos segundos).
+

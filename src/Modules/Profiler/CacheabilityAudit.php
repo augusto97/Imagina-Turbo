@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Modules\Profiler;
 
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
  * Ejecución y análisis de la auditoría.
@@ -111,7 +112,17 @@ final class CacheabilityAudit {
 					'sslverify'   => (bool) apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro del core para loopback.
 				]
 			);
-			if ( is_wp_error( $response ) ) {
+			if ( CloudflareAccess::blockedResponse( $response ) ) {
+				$result = [
+					'label'   => $target['label'],
+					'url'     => $target['url'],
+					'status'  => 0,
+					'verdict' => 'error',
+					'issues'  => [ CloudflareAccess::message( $target['url'] ) ],
+					'cookies' => [],
+					'headers' => [],
+				];
+			} elseif ( is_wp_error( $response ) ) {
 				$result = [
 					'label'   => $target['label'],
 					'url'     => $target['url'],

@@ -15,6 +15,7 @@ use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
+use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
  * Ajustes y prueba del escudo.
@@ -130,7 +131,11 @@ final class ShieldController extends Controller {
 			if ( 'xmlrpc' === $key ) {
 				$args['body'] = '<?xml version="1.0"?><methodCall><methodName>system.listMethods</methodName></methodCall>';
 			}
-			$response    = wp_remote_request( $url, $args );
+			$response = wp_remote_request( $url, $args );
+			if ( CloudflareAccess::blockedResponse( $response ) ) {
+				$out[ $key ] = [ 'error' => CloudflareAccess::message( $url ) ];
+				continue;
+			}
 			$out[ $key ] = is_wp_error( $response ) ? [ 'error' => $response->get_error_message() ] : [
 				'status' => (int) wp_remote_retrieve_response_code( $response ),
 				'shield' => implode( ', ', (array) wp_remote_retrieve_header( $response, 'x-itb-shield' ) ),

@@ -383,3 +383,7 @@ Revisión de la regla 4 (todo cambio es reversible) antes de instalar en un siti
 - **Recalentado**: se pausa un minuto si una página tarda más de 5 s. En el servidor de pruebas (10 procesos PHP) hubo una saturación mientras recalentaba tras purgar todo; la carga de CPU no la detectaba.
 
 Lo que sigue sin ser reversible está en la pantalla correspondiente: purgas de caché (se rehace sola), "Limitar revisiones" (WordPress borra las sobrantes al guardar, sin respaldo) y respaldos de base de datos de más de 30 días.
+
+## Versión 0.10.2
+
+Detección de Cloudflare Access (Zero Trust) en las peticiones del sitio a sí mismo: el error dice que Access bloqueó la ruta y cómo permitirla. Probado simulando Access delante de `/contacto/` y `admin-ajax.php`: el inventario de assets, la inspección de caché y un experimento de carga condicional devolvieron el mensaje; la portada siguió funcionando.

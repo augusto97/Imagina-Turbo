@@ -97,6 +97,7 @@ final class Connector {
 		$zone     = '/zones/' . rawurlencode( $zoneId );
 		$settings = $this->client->get( $zone . '/settings/http3' );
 		$rules    = $this->client->get( Phases::entrypoint( $zoneId, Phases::CACHE ) );
+		$waf      = $this->client->get( Phases::entrypoint( $zoneId, Phases::WAF ) );
 		$graphql  = $this->client->post(
 			'/graphql',
 			[
@@ -109,6 +110,7 @@ final class Connector {
 			'settings_read'  => $settings->ok(),
 			// 404 = la fase todavía no tiene ruleset de entrada; el permiso existe.
 			'rulesets_read'  => $rules->ok() || 404 === $rules->status,
+			'waf_read'       => $waf->ok() || 404 === $waf->status,
 			'analytics_read' => $graphql->ok(),
 		];
 	}

@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Modules\Profiler;
 
+use ImaginaTurbo\Modules\Firewall\OriginLock;
+
 /**
  * Resumen, ranking por plugin, fases y rutas.
  */
@@ -53,7 +55,7 @@ final class Report {
 			'queries_avg'     => (int) round( array_sum( array_map( static fn( array $r ): int => (int) $r['queries'], $rows ) ) / $n ),
 			'overhead_us_avg' => (int) round( array_sum( array_map( static fn( array $r ): int => (int) $r['overhead_us'], $rows ) ) / $n ),
 			'cacheable_pct'   => round( 100 * count( array_filter( $rows, static fn( array $r ): bool => 1 === (int) $r['cacheable'] ) ) / $n, 1 ),
-			'via_cf_pct'      => round( 100 * count( array_filter( $rows, static fn( array $r ): bool => 1 === (int) $r['via_cf'] ) ) / $n, 1 ),
+			'via_cf_pct'      => round( 100 * count( array_filter( $rows, static fn( array $r ): bool => OriginLock::viaCloudflare( (int) $r['via_cf'] ) ) ) / $n, 1 ),
 			'by_type'         => $byType,
 		];
 	}

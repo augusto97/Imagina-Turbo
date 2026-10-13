@@ -17,6 +17,7 @@ use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
+use ImaginaTurbo\Modules\Firewall\OriginLock;
 use ImaginaTurbo\Support\Filesystem;
 use ImaginaTurbo\Support\Jobs;
 
@@ -25,12 +26,12 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 5;
+	public const DB_VERSION        = 6;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift' ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION ];
 
 	/** Tablas propias sin prefijo. */
 	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots' ];
@@ -93,7 +94,13 @@ final class Installer {
 	 * Crea o actualiza tablas si cambió la versión del esquema.
 	 */
 	public static function maybeUpgrade(): void {
-		if ( (int) get_option( self::DB_VERSION_OPTION, 0 ) !== self::DB_VERSION ) {
+		$previous = (int) get_option( self::DB_VERSION_OPTION, 0 );
+		if ( $previous !== self::DB_VERSION ) {
+			// Desde la versión 6 de la base, via_cf distingue tráfico directo de local: las muestras
+			// anteriores no sirven para saber si el origen está cerrado.
+			if ( $previous < 6 ) {
+				update_option( OriginLock::STATE_OPTION, [ 'since' => time() ], false );
+			}
 			self::createTables();
 			// Hasta la 0.3 LSCache podía guardar en caché privada las respuestas del admin: se descartan.
 			do_action( 'litespeed_purge_private_all' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.

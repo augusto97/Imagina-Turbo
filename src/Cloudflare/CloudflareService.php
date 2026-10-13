@@ -19,6 +19,9 @@ use ImaginaTurbo\Repository\SnapshotRepository;
  */
 final class CloudflareService {
 
+	/** Clave del estado con la fecha desde la que cada regla del firewall está en desafío. */
+	public const CHALLENGE_KEY = 'itb_cf_challenge';
+
 	/** Permisos que se piden al crear el token (nombres del panel de Cloudflare). */
 	public const TOKEN_PERMISSIONS = [
 		'Zone → Zone → Read',
@@ -30,6 +33,9 @@ final class CloudflareService {
 		'Zone → Zone WAF → Edit (firewall, fase 4)',
 	];
 
+	/**
+	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool} $firewall Ajustes del firewall.
+	 */
 	public function __construct(
 		private readonly TokenVault $vault,
 		private readonly State $state,
@@ -39,6 +45,7 @@ final class CloudflareService {
 		private readonly EventLog $events,
 		private readonly string $limitsFile,
 		private readonly bool $moduleEnabled,
+		private readonly array $firewall = [],
 	) {
 	}
 
@@ -157,6 +164,8 @@ final class CloudflareService {
 		$this->vault->forget();
 		$this->state->forget();
 		delete_option( Analytics::OPTION );
+		delete_option( Analytics::FIREWALL_OPTION );
+		delete_option( self::CHALLENGE_KEY );
 		$this->events->warning(
 			'cloudflare',
 			'disconnect',
@@ -266,8 +275,23 @@ final class CloudflareService {
 		$zone      = $zone ?? $this->inspector()->read();
 		$limits    = $this->limits();
 		$templates = new Templates( $this->site, $limits );
-		$planner   = new Planner( $templates->rules(), [ Phases::CACHE, Phases::TRANSFORM ], Templates::settings(), $this->site->refPrefix, $limits, $this->state );
+		$rules     = $templates->rules();
 		$notes     = [];
+		if ( true === ( $this->firewall['enabled'] ?? false ) ) {
+			$firewall = new FirewallTemplates(
+				$this->site,
+				$limits,
+				is_array( $this->firewall['rules'] ?? null ) ? $this->firewall['rules'] : [],
+				false !== ( $this->firewall['ratelimit'] ?? true ),
+				$this->challengeSince( $zone )
+			);
+			$rules    = array_merge( $rules, $firewall->rules() );
+			if ( 'free' === $limits->plan() ) {
+				$notes[] = __( 'Plan Free: el límite de peticiones solo puede mirar la ruta, así que el checkout clásico (?wc-ajax=checkout) no queda cubierto en el edge. Lo protegen la pasarela (Turnstile/reCAPTCHA), CrowdSec y la guardia PHP.', 'imagina-turbo' );
+			}
+		}
+		// Las fases del firewall siempre se revisan: si el módulo se apaga, sus reglas se proponen para eliminar.
+		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::WAF, Phases::RATELIMIT ], Templates::settings(), $this->site->refPrefix, $limits, $this->state );
 		if ( ! $this->site->edgeHeaders ) {
 			$notes[] = __( 'La caché del HTML en el edge necesita el coordinador de caché en modo «Emitir cabeceras para el edge» (pantalla Caché).', 'imagina-turbo' );
 		}
@@ -324,6 +348,9 @@ final class CloudflareService {
 			return;
 		}
 		( new Analytics( $this->client, $this->state->zoneId(), $this->site->host ) )->refresh();
+		if ( true === ( $this->firewall['enabled'] ?? false ) ) {
+			( new Analytics( $this->client, $this->state->zoneId(), $this->site->host ) )->firewall();
+		}
 		$drifted = [];
 		foreach ( $this->plan()['changes'] as $change ) {
 			if ( 'drifted' === $change['action'] ) {
@@ -338,6 +365,56 @@ final class CloudflareService {
 		}
 		update_option( 'itb_cf_drift', $drifted, false );
 		$this->state->update( [ 'checked_at' => time() ] );
+	}
+
+	/**
+	 * Desde cuándo cada regla propia del firewall está en desafío: se registra la primera vez que se
+	 * ve en la zona con managed_challenge y se olvida si deja de estarlo.
+	 *
+	 * @param array{phases: array<string, array{readable: bool, exists: bool, id: string, rules: list<array<string, mixed>>, error: string}>, settings: array<string, mixed>} $zone Lectura.
+	 * @return array<string, int>
+	 */
+	private function challengeSince( array $zone ): array {
+		$stored = get_option( self::CHALLENGE_KEY, [] );
+		$stored = is_array( $stored ) ? $stored : [];
+		$out    = [];
+		foreach ( $zone['phases'][ Phases::WAF ]['rules'] ?? [] as $rule ) {
+			$ref = is_string( $rule['ref'] ?? null ) ? $rule['ref'] : '';
+			if ( '' === $ref || ! str_starts_with( $ref, $this->site->refPrefix . 'fw-' ) ) {
+				continue;
+			}
+			if ( 'managed_challenge' === ( $rule['action'] ?? '' ) ) {
+				$out[ $ref ] = is_int( $stored[ $ref ] ?? null ) ? $stored[ $ref ] : time();
+			} elseif ( 'block' === ( $rule['action'] ?? '' ) ) {
+				// Ya en bloqueo: se conserva la fecha para que el plan siga proponiendo block.
+				$out[ $ref ] = is_int( $stored[ $ref ] ?? null ) ? $stored[ $ref ] : time() - FirewallTemplates::TEST_DAYS * DAY_IN_SECONDS;
+			}
+		}
+		if ( $out !== $stored ) {
+			update_option( self::CHALLENGE_KEY, $out, false );
+		}
+		return $out;
+	}
+
+	/**
+	 * Eventos del firewall de las últimas 24 h (reglas propias y del cliente), agrupados.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public function firewallEvents( bool $refreshIfOld = true ): array {
+		$stored = get_option( Analytics::FIREWALL_OPTION, null );
+		if ( is_array( $stored ) && is_int( $stored['fetched_at'] ?? null ) && ( ! $refreshIfOld || $stored['fetched_at'] >= time() - HOUR_IN_SECONDS || ! $this->ready() ) ) {
+			return $stored;
+		}
+		if ( ! $this->ready() ) {
+			return [
+				'available' => false,
+				'error'     => '',
+				'events'    => [],
+				'total'     => 0,
+			];
+		}
+		return ( new Analytics( $this->client, $this->state->zoneId(), $this->site->host ) )->firewall();
 	}
 
 	public function purger(): CloudflarePurger {

@@ -156,6 +156,7 @@ La regla "sin consultas en el frontend" admite solo estas excepciones, todas mue
 - Caché de atribución del perfilador (`wp-content/imagina-turbo/profiler-symbols.php`): archivo PHP escrito de forma atómica solo en requests muestreados que descubren funciones o clases nuevas; se sirve desde OPcache.
 - Contador de fatales del modo seguro: archivo, no base de datos.
 - Endpoint RUM local (solo sin hub): `SHORTINIT`, un `INSERT ... ON DUPLICATE KEY UPDATE`.
+- Cola de purga (fase 2a): solo cuando un request del frontend **cambia contenido** (un pedido en el checkout que baja el stock, un comentario aprobado automáticamente). Se agrupa todo en `shutdown` en un `INSERT IGNORE` por tipo. Ver una página nunca escribe.
 
 Cualquier otra escritura en el frontend es un error.
 

@@ -39,7 +39,8 @@ final class Cacheability {
 	 *     preview: bool,
 	 *     search: bool,
 	 *     password_required: bool,
-	 *     do_not_cache: bool
+	 *     do_not_cache: bool,
+	 *     bypass_path?: bool
 	 * } $request Datos del request.
 	 * @return array{cacheable: bool, reason: string, ttl: int}
 	 */
@@ -78,6 +79,9 @@ final class Cacheability {
 		if ( $request['do_not_cache'] ) {
 			return $no( 'donotcachepage' );
 		}
+		if ( $request['bypass_path'] ?? false ) {
+			return $no( 'bypass_path' );
+		}
 		foreach ( $request['headers'] as $header ) {
 			$lower = strtolower( $header );
 			if ( str_starts_with( $lower, 'set-cookie:' ) ) {
@@ -106,6 +110,38 @@ final class Cacheability {
 			'reason'    => 'ok',
 			'ttl'       => $ttl,
 		];
+	}
+
+	/**
+	 * La ruta está en las rutas que nunca se cachean (integraciones de la matriz, páginas dinámicas).
+	 *
+	 * Patrón con * = comodín; sin * = la ruta exacta y lo que cuelga de ella; con ? = se compara con
+	 * "ruta?query".
+	 *
+	 * @param string       $path     Ruta relativa a home, en minúsculas.
+	 * @param list<string> $patterns Patrones.
+	 */
+	public static function pathBypassed( string $path, string $query, array $patterns ): bool {
+		foreach ( $patterns as $pattern ) {
+			$pattern = strtolower( trim( $pattern ) );
+			if ( '' === $pattern ) {
+				continue;
+			}
+			$subject = str_contains( $pattern, '?' ) ? $path . '?' . $query : $path;
+			if ( str_contains( $pattern, '*' ) ) {
+				$regex = '#^' . str_replace( '\\*', '.*', preg_quote( $pattern, '#' ) ) . '$#';
+				if ( 1 === preg_match( $regex, $subject ) ) {
+					return true;
+				}
+				continue;
+			}
+			$pattern = rtrim( $pattern, '/' );
+			$base    = rtrim( $subject, '/' );
+			if ( '' !== $pattern && ( $base === $pattern || str_starts_with( $subject, $pattern . '/' ) ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**

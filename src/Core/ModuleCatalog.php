@@ -25,6 +25,7 @@ final class ModuleCatalog {
 		return [
 			'profiler'          => \ImaginaTurbo\Modules\Profiler\ProfilerModule::class,
 			'cache_coordinator' => \ImaginaTurbo\Modules\CacheCoordinator\CacheModule::class,
+			'cloudflare'        => \ImaginaTurbo\Modules\Cloudflare\CloudflareModule::class,
 		];
 	}
 

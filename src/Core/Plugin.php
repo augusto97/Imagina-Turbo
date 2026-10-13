@@ -11,6 +11,11 @@ namespace ImaginaTurbo\Core;
 
 use ImaginaTurbo\Admin\AssetsLoader;
 use ImaginaTurbo\Admin\Menu;
+use ImaginaTurbo\Cloudflare\Client as CloudflareClient;
+use ImaginaTurbo\Cloudflare\CloudflareService;
+use ImaginaTurbo\Cloudflare\SiteContext;
+use ImaginaTurbo\Cloudflare\State as CloudflareState;
+use ImaginaTurbo\Cloudflare\TokenVault;
 use ImaginaTurbo\Core\Config\CompiledConfig;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
@@ -44,6 +49,7 @@ use ImaginaTurbo\Repository\EventRepository;
 use ImaginaTurbo\Repository\MetricsRepository;
 use ImaginaTurbo\Repository\PurgeQueueRepository;
 use ImaginaTurbo\Repository\SampleRepository;
+use ImaginaTurbo\Repository\SnapshotRepository;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
 
@@ -135,6 +141,16 @@ final class Plugin {
 		add_action( Jobs::PURGE_FLUSH, fn() => $this->whenCache( fn() => $this->container->get( PurgeWorker::class )->run() ) );
 		add_action( Jobs::WARM, fn() => $this->whenCache( fn() => $this->container->get( Warmer::class )->run() ) );
 		add_action( Jobs::WARM_SEED, fn() => $this->whenCache( fn() => $this->container->get( Warmer::class )->seed() ) );
+		add_action(
+			Jobs::HOURLY_CLOUDFLARE,
+			fn() => $this->whenActive(
+				function (): void {
+					if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' ) ) {
+						$this->container->get( CloudflareService::class )->hourly();
+					}
+				}
+			)
+		);
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
@@ -361,7 +377,43 @@ final class Plugin {
 				};
 			}
 		);
-		$c->set( EdgePurger::class, static fn(): EdgePurger => new NullEdgePurger() );
+		$c->set( TokenVault::class, static fn(): TokenVault => new TokenVault() );
+		$c->set( CloudflareState::class, static fn(): CloudflareState => new CloudflareState() );
+		$c->set(
+			CloudflareClient::class,
+			static function ( Container $c ): CloudflareClient {
+				$vault = $c->get( TokenVault::class );
+				return new CloudflareClient( static fn(): ?string => $vault->read(), $c->get( EventLog::class ) );
+			}
+		);
+		$c->set(
+			SnapshotRepository::class,
+			static function (): SnapshotRepository {
+				global $wpdb;
+				return new SnapshotRepository( $wpdb );
+			}
+		);
+		$cloudflareOn = null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' );
+		$c->set(
+			CloudflareService::class,
+			static fn( Container $c ): CloudflareService => new CloudflareService(
+				$c->get( TokenVault::class ),
+				$c->get( CloudflareState::class ),
+				$c->get( CloudflareClient::class ),
+				SiteContext::fromRuntime( Runtime::$config, $c->get( Settings::class ), $dir . '/data/compat-matrix-v1.json' ),
+				$c->get( SnapshotRepository::class ),
+				$c->get( EventLog::class ),
+				$dir . '/data/cloudflare-limits.json',
+				$cloudflareOn
+			)
+		);
+		// Purga en el edge: Cloudflare si el módulo está activo y conectado; si no, nada.
+		$c->set(
+			EdgePurger::class,
+			static fn( Container $c ): EdgePurger => null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' ) && null === Runtime::$killReason && ! Runtime::$safeMode
+				? $c->get( CloudflareService::class )->purger()
+				: new NullEdgePurger()
+		);
 		$c->set( Purger::class, static fn( Container $c ): Purger => new Purger( $c->get( CacheAdapter::class ), $c->get( TagBuilder::class ), $c->get( PurgeQueueRepository::class ) ) );
 		$c->set(
 			Warmer::class,

@@ -20,9 +20,12 @@ interface EdgePurger {
 	public function supportsTags(): bool;
 
 	/**
+	 * Si no se pudo purgar todo (límite de la API), devuelve lo que falta y cuántos segundos esperar:
+	 * la cola lo reprograma sin repetir lo ya purgado.
+	 *
 	 * @param list<string> $tags Tags con prefijo.
 	 * @param list<string> $urls URLs absolutas.
-	 * @return array{ok: bool, error: string}
+	 * @return array{ok: bool, error: string, tags_left?: list<string>, urls_left?: list<string>, retry_after?: int}
 	 */
 	public function purge( array $tags, array $urls, bool $all ): array;
 }

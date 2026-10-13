@@ -159,6 +159,62 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	const cache = { disabled, missBefore, edgeAfter, edgeCart, inspectOutside, purgeAllUnconfirmed };
 	await anon.dispose();
 
+	// Cloudflare contra el simulador (ITB_CF_MOCK=http://127.0.0.1:8098 y ITB_CF_API_BASE en wp-config.php).
+	let cloudflare = null;
+	const MOCK = process.env.ITB_CF_MOCK || '';
+	if ( MOCK ) {
+		const TOKEN = 'cfut_PRUEBA0123456789abcdefghijklmnopqrstuvwxyz';
+		const mock = await pwRequest.newContext();
+		await mock.post( MOCK + '/__mock/reset', { data: { token: TOKEN, zone_name: new URL( BASE ).hostname, plan: 'free' } } );
+		const before = ( await ( await mock.get( MOCK + '/__mock/state' ) ).json() ).result;
+		await rest( 'cloudflare/connect', 'DELETE' );
+		await rest( 'modules/cloudflare', 'PUT', { enabled: true, confirm: true } );
+		await page.click( 'a[href="#/cloudflare"]' );
+		await page.waitForSelector( 'text=Conexión' );
+		await page.getByLabel( 'API Token' ).fill( 'cfut_tokenfalso0123456789abcdefghijklmnop' );
+		await page.getByRole( 'button', { name: 'Verificar y guardar' } ).click();
+		expected.push( { path: 'cloudflare/connect', status: 400 } );
+		await page.waitForSelector( 'text=Cloudflare rechazó el token' );
+		await page.getByLabel( 'API Token' ).fill( TOKEN );
+		await page.getByRole( 'button', { name: 'Verificar y guardar' } ).click();
+		await page.waitForSelector( 'text=Cambios propuestos', { timeout: 20000 } );
+		await page.waitForSelector( 'text=SSL/TLS está en Flexible' );
+		await page.waitForSelector( 'text=Caché de assets estáticos' );
+		// Por defecto solo vienen marcados los cambios seguros.
+		const preselected = await page.locator( 'li input[type="checkbox"]:checked' ).count();
+		await page.getByRole( 'checkbox', { name: 'Caché del HTML anónimo' } ).check();
+		await page.getByRole( 'button', { name: /Aplicar seleccionados/ } ).click();
+		await page.waitForSelector( 'text=¿Aplicar los cambios en Cloudflare?' );
+		await page.screenshot( { path: OUT + '/8-cloudflare-confirmacion.png' } );
+		await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Aplicar', exact: true } ).click();
+		await page.waitForSelector( 'text=Cambios aplicados. Snapshot previo', { timeout: 30000 } );
+		await page.waitForSelector( 'text=La zona ya está como se recomienda.', { state: 'detached', timeout: 1000 } ).catch( () => {} );
+		const applied = ( await ( await mock.get( MOCK + '/__mock/state' ) ).json() ).result;
+		await page.waitForSelector( 'text=88 %', { timeout: 20000 } );
+		await page.screenshot( { path: OUT + '/8-cloudflare.png', fullPage: true } );
+		// Restaurar el snapshot del cambio: la zona vuelve a estar como al principio.
+		const snapshots = page.locator( 'text=Snapshots >> xpath=ancestor::div[contains(@class,"itb:rounded-lg")]' );
+		await snapshots.getByRole( 'button', { name: 'Restaurar' } ).last().click();
+		await page.waitForSelector( 'text=¿Restaurar este snapshot?' );
+		await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Restaurar', exact: true } ).click();
+		await page.waitForSelector( 'text=Snapshot restaurado.', { timeout: 30000 } );
+		const restored = ( await ( await mock.get( MOCK + '/__mock/state' ) ).json() ).result;
+		const norm = ( st ) => JSON.stringify( { settings: st.settings, rules: Object.fromEntries( Object.entries( st.rulesets ).map( ( [ k, v ] ) => [ k, v.rules.map( ( { id, version, last_updated, ...r } ) => r ) ] ).filter( ( [ , v ] ) => v.length ) ) } );
+		await page.setViewportSize( { width: 390, height: 844 } );
+		const overflowCf = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+		await page.screenshot( { path: OUT + '/8b-movil-cloudflare.png', fullPage: true } );
+		await page.setViewportSize( { width: 1400, height: 1000 } );
+		cloudflare = {
+			preselected,
+			ownRules: ( applied.rulesets.http_request_cache_settings?.rules || [] ).map( ( r ) => r.ref ),
+			settingsApplied: applied.settings,
+			restoredEqualsBefore: norm( restored ) === norm( before ),
+			mobileOverflow: overflowCf,
+		};
+		await rest( 'modules/cloudflare', 'PUT', { enabled: false } );
+		await mock.dispose();
+	}
+
 	// Vista móvil.
 	await page.setViewportSize( { width: 390, height: 844 } );
 	await page.click( 'a[href="#/panel"]' );
@@ -178,6 +234,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

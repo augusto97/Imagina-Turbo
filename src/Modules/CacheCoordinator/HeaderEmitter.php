@@ -33,7 +33,7 @@ final class HeaderEmitter {
 	private ?array $verdict = null;
 
 	/**
-	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool} $settings Ajustes compilados.
+	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>} $settings Ajustes compilados.
 	 * @param list<string>                                                                               $bypassCookies Prefijos de cookies que impiden la caché.
 	 * @param callable(): void                                                                           $onCacheable   Se llama si la respuesta es cacheable (refresco de nonces).
 	 */
@@ -76,6 +76,7 @@ final class HeaderEmitter {
 				'search'            => is_search(),
 				'password_required' => is_singular() && post_password_required(),
 				'do_not_cache'      => defined( 'DONOTCACHEPAGE' ) && DONOTCACHEPAGE,
+				'bypass_path'       => [] !== $this->settings['bypass_paths'] && Cacheability::pathBypassed( $this->request->path, isset( $_SERVER['QUERY_STRING'] ) ? strtolower( (string) $_SERVER['QUERY_STRING'] ) : '', $this->settings['bypass_paths'] ), // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- solo se compara con patrones.
 			]
 		);
 

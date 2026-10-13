@@ -166,10 +166,12 @@ final class ConfigCompiler {
 			'multiple_page_caches' => false,
 		];
 		$matrixVersion = '';
+		$coreBypass    = [];
 		try {
 			$matrix        = Matrix::fromFile( $this->matrixFile );
 			$matrixVersion = $matrix->version();
 			$compat        = ( new Resolver() )->resolve( $matrix, $active, (string) ( $theme['stylesheet'] ?? '' ), (string) ( $theme['template'] ?? '' ) );
+			$coreBypass    = $matrix->coreList( 'bypass_paths' );
 			$overlap       = ( new OverlapGuard() )->evaluate( $matrix->overlapping(), $active );
 		} catch ( MatrixException $e ) {
 			$warnings[] = $e->getMessage();
@@ -217,7 +219,7 @@ final class ConfigCompiler {
 			],
 			'static_passthrough'          => array_map( 'strtolower', $compat['static_passthrough'] ?? [] ),
 			'integrations'                => $compat['integrations'] ?? [],
-			'cache'                       => $this->cacheConfig( $env, $compat ),
+			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
 			'profiler'                    => [
 				'rate'            => (float) $this->settings->get( 'profiler_sample_rate', Settings::DEFAULT_SAMPLE_RATE ),
 				'intensive_until' => (int) $this->settings->get( 'profiler_intensive_until', 0 ),
@@ -231,11 +233,13 @@ final class ConfigCompiler {
 	/**
 	 * Ajustes del coordinador de caché para el frontend y las tareas.
 	 *
-	 * @param array<string, mixed>      $env    Entorno detectado.
-	 * @param array<string, mixed>|null $compat Reglas de la matriz.
+	 * @param array<string, mixed>      $env         Entorno detectado.
+	 * @param array<string, mixed>|null $compat      Reglas de la matriz.
+	 * @param list<string>              $bypassPaths Rutas que nunca se cachean, de integraciones y páginas dinámicas
+	 *                                               (las del núcleo ya las cubren los tipos de request).
 	 * @return array<string, mixed>
 	 */
-	private function cacheConfig( array $env, ?array $compat ): array {
+	private function cacheConfig( array $env, ?array $compat, array $bypassPaths = [] ): array {
 		$plugin  = $env['cache_plugin'] ?? null;
 		$adapter = match ( $plugin ) {
 			'litespeed-cache' => 'litespeed',
@@ -257,6 +261,7 @@ final class ConfigCompiler {
 			'purge_all_hooks' => $compat['purge_all_hooks'] ?? [],
 			'sitemaps'        => $compat['sitemaps'] ?? [],
 			'preload_exclude' => $compat['preload_exclude'] ?? [],
+			'bypass_paths'    => array_values( array_unique( $bypassPaths ) ),
 		];
 	}
 

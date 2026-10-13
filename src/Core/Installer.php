@@ -25,15 +25,15 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 3;
+	public const DB_VERSION        = 4;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state' ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift' ];
 
 	/** Tablas propias sin prefijo. */
-	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue' ];
+	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots' ];
 
 	public function __construct(
 		private readonly Settings $settings,
@@ -179,6 +179,20 @@ final class Installer {
   PRIMARY KEY  (id),
   UNIQUE KEY item_hash (item_hash),
   KEY kind (kind,id)
+) {$charset};"
+		);
+
+		// Snapshots de Cloudflare: estado de la zona antes de cada cambio (fase 2b).
+		$snapshots = $wpdb->prefix . 'itb_cf_snapshots';
+		dbDelta(
+			"CREATE TABLE {$snapshots} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  created_at datetime NOT NULL,
+  zone_id varchar(64) NOT NULL,
+  reason varchar(100) NOT NULL,
+  payload longtext NOT NULL,
+  PRIMARY KEY  (id),
+  KEY zone (zone_id,id)
 ) {$charset};"
 		);
 

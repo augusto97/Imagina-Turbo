@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Core\Container;
+use ImaginaTurbo\Core\Installer;
 
 /**
  * Utilidades comunes.
@@ -37,6 +38,9 @@ abstract class Controller {
 				'methods'             => $methods,
 				'callback'            => static function ( \WP_REST_Request $request ) use ( $callback ): mixed {
 					self::noCache();
+					// El esquema se actualiza en admin_init; la API del admin puede llegar antes (tras una
+					// actualización, la primera visita puede ser a la REST).
+					Installer::maybeUpgrade();
 					return $callback( $request );
 				},
 				'permission_callback' => [ RestRegistrar::class, 'canManage' ],

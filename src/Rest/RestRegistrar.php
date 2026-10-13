@@ -34,6 +34,7 @@ final class RestRegistrar {
 			new ProfilerController( $this->container ),
 			new HubController( $this->container ),
 			new CacheController( $this->container ),
+			new CloudflareController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

@@ -1,0 +1,54 @@
+{
+	"version": "2026-10-13",
+	"source": "Documentación de Cloudflare y esquema OpenAPI de la API v4 (verificados el 2026-10-13). El hub puede reemplazar este archivo.",
+	"plans": {
+		"free": {
+			"cache_rules": 10,
+			"transform_rules": 10,
+			"waf_custom_rules": 5,
+			"ratelimit_rules": 1,
+			"regex": false,
+			"cache_key_query_lists": false,
+			"min_edge_ttl": 7200,
+			"purge_items_per_call": 100,
+			"purge_calls_per_run": 5,
+			"ratelimit": { "fields": [ "path", "verified_bot" ], "periods": [ 10 ], "mitigation_timeouts": [ 10 ] }
+		},
+		"pro": {
+			"cache_rules": 25,
+			"transform_rules": 25,
+			"waf_custom_rules": 20,
+			"ratelimit_rules": 2,
+			"regex": false,
+			"cache_key_query_lists": false,
+			"min_edge_ttl": 3600,
+			"purge_items_per_call": 100,
+			"purge_calls_per_run": 20,
+			"ratelimit": { "fields": [ "host", "uri", "path", "full_uri", "query", "verified_bot" ], "periods": [ 10, 60 ], "mitigation_timeouts": [ 10, 60, 120, 300, 600, 3600 ] }
+		},
+		"business": {
+			"cache_rules": 50,
+			"transform_rules": 50,
+			"waf_custom_rules": 100,
+			"ratelimit_rules": 5,
+			"regex": true,
+			"cache_key_query_lists": false,
+			"min_edge_ttl": 1,
+			"purge_items_per_call": 100,
+			"purge_calls_per_run": 40,
+			"ratelimit": { "fields": [ "host", "uri", "path", "full_uri", "query", "verified_bot", "method", "ip", "user_agent" ], "periods": [ 10, 60, 120, 300, 600 ], "mitigation_timeouts": [ 10, 60, 120, 300, 600, 3600, 86400 ] }
+		},
+		"enterprise": {
+			"cache_rules": 300,
+			"transform_rules": 300,
+			"waf_custom_rules": 1000,
+			"ratelimit_rules": 100,
+			"regex": true,
+			"cache_key_query_lists": true,
+			"min_edge_ttl": 1,
+			"purge_items_per_call": 500,
+			"purge_calls_per_run": 100,
+			"ratelimit": { "fields": [ "host", "uri", "path", "full_uri", "query", "verified_bot", "method", "ip", "user_agent" ], "periods": [ 10, 60, 120, 300, 600, 3600 ], "mitigation_timeouts": [ 10, 60, 120, 300, 600, 3600, 86400 ] }
+		}
+	}
+}

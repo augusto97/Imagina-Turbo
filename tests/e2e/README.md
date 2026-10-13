@@ -85,3 +85,9 @@ Requiere un producto simple, pago contra entrega activo y los módulos `woo_cart
 
 Para otros temas: `ITB_COUNT_SELECTOR` y `ITB_MENU_SELECTOR`. Astra: `'.ast-site-header-cart .ast-count-text'` y `'#ast-desktop-header .ast-site-header-cart'`. `ITB_POSTCODE` define un código postal válido para el país de la tienda.
 
+## Escudo, ajustes y firewall (fase 4)
+
+- `admin-e2e.js` recorre también **Ajustes rápidos** (prueba del escudo como visitante, confirmación de un ajuste moderado) y **Firewall** (con `ITB_CF_MOCK`: reglas propuestas, aplicar una, eventos del simulador, vista móvil). Las peticiones a hosts externos se bloquean para que el evento `load` no dependa de la red.
+- A mano: `curl -D -` a un asset inexistente, `/?author=1`, `POST /xmlrpc.php`, `/wp-json/wp/v2/users` y `/?rest_route=/wp/v2/users` → 404, 404, 403, 401, 401 con `X-ITB-Shield`. Con un plugin `jetpack/jetpack.php` activo (basta la cabecera) y la config recompilada, XML-RPC vuelve a 200.
+- `.htaccess` en OpenLiteSpeed: después de escribir las reglas hay que reiniciar (`lswsctrl restart`) para que las lea.
+

@@ -1,4 +1,4 @@
-import { Activity, Cloud, Gauge, Layers, ScrollText, Settings2, ShoppingCart, Zap } from 'lucide-react';
+import { Activity, Cloud, Gauge, Layers, ScrollText, Settings2, Shield, ShoppingCart, SlidersHorizontal, Zap } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge } from './ui/badge';
 import { config } from '@/lib/config';
@@ -13,6 +13,8 @@ const items: { route: Route; label: string; icon: typeof Gauge }[] = [
 	{ route: 'cache', label: __( 'Caché' ), icon: Layers },
 	{ route: 'cloudflare', label: __( 'Cloudflare' ), icon: Cloud },
 	{ route: 'woocommerce', label: __( 'WooCommerce' ), icon: ShoppingCart },
+	{ route: 'firewall', label: __( 'Firewall' ), icon: Shield },
+	{ route: 'ajustes', label: __( 'Ajustes rápidos' ), icon: SlidersHorizontal },
 	{ route: 'registro', label: __( 'Registro' ), icon: ScrollText },
 	{ route: 'avanzado', label: __( 'Avanzado' ), icon: Settings2 },
 ];
@@ -56,7 +58,7 @@ export function Layout( { children }: { children: ReactNode } ) {
 					) ) }
 				</nav>
 				<p className="itb:hidden itb:px-4 itb:pb-4 itb:text-[11px] itb:leading-snug itb:text-zinc-400 itb:md:block">
-					{ __( 'Fase 3 · WooCommerce. Los módulos llegan por fases.' ) }
+					{ __( 'Fase 4 · Escudo, ajustes y firewall. Los módulos llegan por fases.' ) }
 				</p>
 			</aside>
 			<main className="itb:min-w-0 itb:flex-1 itb:p-5 itb:md:p-8">

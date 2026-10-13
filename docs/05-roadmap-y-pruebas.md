@@ -32,7 +32,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Hub: registro y telemetría básica.
 - **Aceptación:** ranking de plugins coherente con Query Monitor (±15 %); overhead dentro del presupuesto; telemetría llega al hub y el sitio no se afecta si el hub está caído.
 
-### Fase 2 — Caché y Cloudflare (2a ✅ caché y nonces, ver "Estado de la fase 2a" al final · 2b Cloudflare pendiente)
+### Fase 2 — Caché y Cloudflare (2a ✅ y 2b ✅ contra un simulador de la API; la prueba con una zona real queda para el final, ver "Estado de la fase 2b")
 - `CacheCoordinator` completo (cabeceras, tags, mapa de purga, cola, adaptadores LSCache/WP Rocket/Null, recalentado).
 - Módulo Cloudflare: token, inspector, plantillas de caché, ajustes de zona, purga, diff, aplicar, snapshots, revertir, deriva.
 - Pantallas Caché y Cloudflare.
@@ -186,4 +186,36 @@ Decisiones que cambian los documentos (anotadas en `docs/02` y `docs/03`): lo no
 Calidad: 171 pruebas unitarias, PHPStan nivel 8 sin errores, PHPCS sin errores, TypeScript estricto, E2E del admin en Chromium con la pantalla Caché (activar con confirmación, cambiar de modo con confirmación, purgas, probar URLs, escritorio y móvil sin desbordes).
 
 Pendiente para 2b: el módulo Cloudflare (token, plantillas, purga en el edge, snapshots), y con él el criterio de > 85 % de aciertos del edge. WP Rocket en Apache con licencia real queda sin probar en vivo (el bloque de `.htaccess` se genera y se prueba en unitarias).
+
+## Estado de la fase 2b
+
+Completada el 2026-10-13 (versión 0.4.0, esquema de base de datos v4). **Por decisión del usuario, todas las fases se construyen primero y las pruebas con APIs reales (Cloudflare, hub, Imagina Search) se hacen al final.** Hasta entonces, la 2b está validada contra `tests/e2e/mock-cloudflare.php`, un simulador que reproduce la forma documentada de la API (verificada contra la documentación oficial y el esquema OpenAPI de Cloudflare del 2026-10-13: ver `docs/03`). El sitio de pruebas sigue en OpenLiteSpeed + LSCache.
+
+| Criterio | Resultado (simulador) |
+|---|---|
+| Token cifrado, nunca expuesto | En la base solo hay el cifrado y los últimos 4 caracteres. Si cambian las claves de `wp-config.php`, el token queda "reconectar" (prueba unitaria) |
+| Token rechazado / válido | Un token falso da un mensaje claro y no se guarda nada. Con un token válido se encuentran la zona y el plan, y se sondean los permisos de lectura |
+| Diff y aplicar | Plan con crear, modificar, eliminar, sin cambios, deriva y bloqueado. Por defecto solo vienen marcados los cambios seguros. Las reglas propias quedan antes de la del cliente, que sigue mandando |
+| Validación previa | Cada operación pasa antes por `?dry_run=true`. Con la fase llena (10 reglas en Free) la creación queda bloqueada antes de llamar |
+| Fallo a mitad | Con un error persistente en el cuarto cambio, se restaura el snapshot y la zona queda idéntica a la previa (comparación JSON) |
+| Revertir un snapshot deja la zona exactamente como estaba | Sí, en comparación JSON sin contar los `id` que asigna Cloudflare. Restaurar un snapshot más nuevo recrea las reglas en su posición |
+| Deriva | Una regla cambiada "a mano" en el simulador aparece como "Modificada a mano" y no se marca para aplicar. La tarea horaria la registra una vez |
+| Purga en el edge | Por tags desde la cola del coordinador. La sexta purga del minuto en Free recibe el 429 (código 1134): lo pendiente vuelve a la cola y se reintenta a los 60 s que pidió la API |
+| Analíticas | 24 h por estado de caché y rutas que más llegan al origen, renovadas cada hora |
+| Admin | E2E en escritorio y móvil, sin errores ni desbordes: conectar (token falso y válido), aplicar con confirmación, restaurar con confirmación |
+
+Hallazgos corregidos durante la validación:
+
+- **Fase 2a:** las rutas de bypass de la matriz (páginas dinámicas de integraciones, como EDD o `/wc-api/v*`) llegaban a la config compilada, pero el emisor de cabeceras no las consultaba. Ahora esas páginas salen con `no-store` para el edge. Las rutas del núcleo (admin, login, REST…) ya las cubren los tipos de request.
+- La API del admin no actualizaba el esquema de la base: si tras una actualización la primera visita era a la REST, el snapshot fallaba. Al fallar, no se aplicaba nada (lo correcto); ahora las rutas del admin aseguran el esquema.
+- Cada lectura de una fase sin ruleset (404 esperado) quedaba en el registro como error.
+- Con muchísimas cookies de bypass, la expresión de la regla del HTML no cabía en 4.096 caracteres. Recortar cookies sería inseguro: la regla queda bloqueada con el motivo.
+
+Calidad: 184 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, TypeScript estricto, E2E del admin con la pantalla Cloudflare.
+
+**Pendiente para la prueba con una zona real** (al final del proyecto):
+
+- Conectar un token real y aplicar las plantillas.
+- Confirmar con `dry_run` los puntos que la documentación no deja claros: el campo `http.request.uri.args.names` en la reescritura de parámetros, el filtro `clientRequestHTTPHost` en GraphQL y el código de error de un token de cuenta en `/user/tokens/verify`.
+- Medir el criterio de más del 85 % de aciertos del edge en tráfico anónimo.
 

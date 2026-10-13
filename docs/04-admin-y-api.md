@@ -47,12 +47,13 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`; `all` exige `confirm: true`) |
 | POST | `/cache/warm` | `seed` (recalentar el sitemap) / `stop` (vaciar la cola de recalentado) |
 | POST | `/cache/inspect` | Pide una URL del sitio como anónimo y devuelve sus cabeceras de caché |
-| POST | `/cloudflare/connect` | Guardar y verificar token |
-| GET | `/cloudflare/zone` | Plan, ajustes, reglas |
-| GET | `/cloudflare/plan` | Diff de cambios propuestos |
-| POST | `/cloudflare/apply` | Aplicar (todos o una selección) |
-| GET / POST | `/cloudflare/snapshots` · `/cloudflare/snapshots/{id}/restore` | Historial y reversión |
-| GET | `/cloudflare/analytics` | Métricas del edge |
+| GET | `/cloudflare/status` | Token (estado y últimos 4 caracteres), zona, plan, permisos de lectura detectados, bloqueo por staging o zona ajena, enlace de creación del token |
+| POST / DELETE | `/cloudflare/connect` | Verificar y guardar el token (busca la zona del host) · desconectar (borra token, estado y analíticas; las reglas aplicadas se quedan) |
+| GET | `/cloudflare/zone` | Ajustes actuales vs. recomendados, alertas (SSL Flexible, TTL mínimo del plan), reglas propias y del cliente por fase con el máximo del plan |
+| GET | `/cloudflare/plan` | Cambios propuestos: crear, modificar, eliminar, sin cambios, modificada a mano (deriva) o bloqueado (con el motivo) |
+| POST | `/cloudflare/apply` | `{ids, confirm}`: valida con `dry_run`, guarda snapshot, aplica y restaura solo si algo falla. Exige módulo activo y dominio permitido (409) y `confirm` (428) |
+| GET / POST | `/cloudflare/snapshots` · `/cloudflare/snapshots/{id}/restore` | Historial (50 por zona) · restaurar (`confirm`), guardando antes un snapshot del estado actual |
+| GET | `/cloudflare/analytics` | Peticiones de las últimas 24 h por estado de caché y rutas que más llegan al origen (se renueva cada hora) |
 | GET / PUT | `/firewall/rules` | Reglas y modo |
 | GET | `/firewall/origin-check` | Estado del cierre del origen |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
@@ -63,7 +64,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
 - `GET /imagina-turbo/v1/nonce?a[]=...&t=...&s=...` — refresco de nonces para formularios en páginas cacheadas (implementado en la fase 2a). Solo las acciones que la página imprimió firmadas con HMAC (`a` = acciones, `t` = momento de la página, `s` = firma; máximo 20 acciones y 8 días). 30 peticiones por minuto e IP (con APCu o caché de objetos persistente). Respuesta `Cache-Control: private, no-store` y `Cloudflare-CDN-Cache-Control: no-store`; LSCache recibe `no-cache`. Con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint inicializa la sesión de Woo para las acciones `woocommerce*`. Solo se registra con el módulo de caché activo y el refresco encendido.
 
-Todas las rutas del admin envían `litespeed_control_set_nocache`: LSCache, con sus valores por defecto, guardaría en caché privada sus GET.
+Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con sus valores por defecto, guardaría en caché privada sus GET) y aseguran el esquema de la base antes de responder.
 
 ## Datos
 
@@ -72,14 +73,16 @@ Todas las rutas del admin envían `litespeed_control_set_nocache`: LSCache, con 
 | Opción | Contenido |
 |---|---|
 | `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema) |
-| `itb_cf_token` | Token cifrado |
-| `itb_cf_state` | zone_id, plan, ids de rulesets, hashes de reglas propias |
+| `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
+| `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
 | `itb_hub` | Estado del hub: site_id, última hora enviada, fallos, próximo intento, último error |
 | `itb_profiler_rollup` | Última hora agregada en `metrics_hourly` |
 | `itb_audit_last` | Último resultado de la auditoría de cacheabilidad |
 | `itb_purge_state` | Última sincronización de purgas (hora, qué, resultado) |
 | `itb_warm_state` | Estado del recalentado (contadores, última pausa por carga) |
+| `itb_cf_analytics` | Últimas analíticas del edge (24 h) |
+| `itb_cf_drift` | Reglas propias detectadas como modificadas a mano (para avisar una sola vez) |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)
@@ -138,11 +141,13 @@ purge_queue (                         -- fase 2a, esquema v3
   UNIQUE KEY item_hash (item_hash), KEY kind (kind, id)
 )
 
-cf_snapshots (
+cf_snapshots (                        -- fase 2b, esquema v4; se conservan 50 por zona
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   created_at DATETIME NOT NULL,
+  zone_id VARCHAR(64) NOT NULL,
   reason VARCHAR(100) NOT NULL,
-  payload LONGTEXT NOT NULL           -- JSON: reglas propias por fase + ajustes tocados
+  payload LONGTEXT NOT NULL,          -- JSON: reglas propias por fase (con su posición) + ajustes editables
+  KEY zone (zone_id, id)
 )
 ```
 

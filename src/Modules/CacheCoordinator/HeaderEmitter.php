@@ -36,6 +36,7 @@ final class HeaderEmitter {
 	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>} $settings Ajustes compilados.
 	 * @param list<string>                                                                               $bypassCookies Prefijos de cookies que impiden la caché.
 	 * @param callable(): void                                                                           $onCacheable   Se llama si la respuesta es cacheable (refresco de nonces).
+	 * @param list<string>                                                                               $cartCookies   Prefijos de cookies de carrito: esa respuesta tampoco la guarda el plugin de caché.
 	 */
 	public function __construct(
 		private readonly array $settings,
@@ -44,10 +45,14 @@ final class HeaderEmitter {
 		private readonly CacheAdapter $adapter,
 		private readonly RequestContext $request,
 		private readonly mixed $onCacheable = null,
+		private readonly array $cartCookies = [],
 	) {
 	}
 
 	public function register(): void {
+		// Provisional: si algo termina el request antes de decidir (una redirección en template_redirect,
+		// como la de geolocalización de WooCommerce o redirect_canonical), sale con no-store para el edge.
+		add_action( 'template_redirect', [ $this, 'provisional' ], -10000 );
 		add_action( 'template_redirect', [ $this, 'emit' ], 99999 );
 		// La pantalla de login (también la de WPS Hide Login) termina antes de template_redirect.
 		add_action( 'login_init', [ $this, 'emit' ], 99999 );
@@ -59,6 +64,12 @@ final class HeaderEmitter {
 	 */
 	public function verdict(): ?array {
 		return $this->verdict;
+	}
+
+	public function provisional(): void {
+		if ( 'headers' === $this->settings['mode'] && $this->settings['edge_html'] && ! headers_sent() ) {
+			header( self::HEADER . ': no-store', true );
+		}
 	}
 
 	public function emit(): void {
@@ -79,6 +90,12 @@ final class HeaderEmitter {
 				'bypass_path'       => [] !== $this->settings['bypass_paths'] && Cacheability::pathBypassed( $this->request->path, isset( $_SERVER['QUERY_STRING'] ) ? strtolower( (string) $_SERVER['QUERY_STRING'] ) : '', $this->settings['bypass_paths'] ), // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- solo se compara con patrones.
 			]
 		);
+
+		// Quien tiene carrito puede leer de la caché, pero su página (con su mini-carrito) no se guarda
+		// en ningún nivel: LSCache, con sus valores por defecto, la guardaría como pública.
+		if ( ! $this->verdict['cacheable'] && 'cookie' === $this->verdict['reason'] && self::hasCookie( array_map( 'strval', array_keys( $_COOKIE ) ), $this->cartCookies ) ) {
+			$this->adapter->noCache( 'cart' );
+		}
 
 		$tags = $this->verdict['cacheable'] ? $this->tags->tags( TagBuilder::namesForCurrentQuery() ) : [];
 		// LSCache recibe nuestros tags aunque no emitamos cabeceras al edge: así purgar por tag también
@@ -143,6 +160,21 @@ final class HeaderEmitter {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * @param list<string> $cookies  Nombres de las cookies del request.
+	 * @param list<string> $prefixes Prefijos.
+	 */
+	public static function hasCookie( array $cookies, array $prefixes ): bool {
+		foreach ( $cookies as $cookie ) {
+			foreach ( $prefixes as $prefix ) {
+				if ( '' !== $prefix && str_starts_with( $cookie, $prefix ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	private static function status(): int {

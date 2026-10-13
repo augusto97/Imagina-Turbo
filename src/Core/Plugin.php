@@ -166,6 +166,13 @@ final class Plugin {
 			add_action( 'init', [ $this, 'notifySafeMode' ], 20 );
 		}
 
+		// Store API y wc-ajax responden por sesión (carrito, direcciones). LSCache, con sus valores por
+		// defecto, cachea la REST y servía el carrito de un visitante a otros: se le indica que no.
+		// Protección de privacidad: corre siempre, incluso con el kill switch (solo emite un hook).
+		if ( RequestType::StoreApi === $type || RequestType::WcAjax === $type ) {
+			add_action( 'init', [ self::class, 'noPageCache' ], 0 );
+		}
+
 		// Kill switch o modo seguro: solo queda el admin del plugin.
 		if ( null !== Runtime::$killReason || Runtime::$safeMode ) {
 			return;
@@ -210,6 +217,16 @@ final class Plugin {
 
 		$this->container->get( Jobs::class )->schedule();
 		$this->notifySafeMode();
+	}
+
+	/**
+	 * La respuesta de este request no se guarda en la caché de página (LSCache, WP Rocket y similares).
+	 */
+	public static function noPageCache(): void {
+		do_action( 'litespeed_control_set_nocache', 'imagina-turbo: respuesta por sesión' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- constante estándar de los plugins de caché.
+		}
 	}
 
 	public function notifySafeMode(): void {

@@ -25,7 +25,7 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 4;
+	public const DB_VERSION        = 5;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
@@ -97,6 +97,9 @@ final class Installer {
 			self::createTables();
 			// Hasta la 0.3 LSCache podía guardar en caché privada las respuestas del admin: se descartan.
 			do_action( 'litespeed_purge_private_all' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.
+			// Y podía guardar el carrito de la Store API de un visitante (fase 3): se descartan las
+			// respuestas REST guardadas (LSCache las etiqueta con "REST").
+			do_action( 'litespeed_purge', 'REST' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.
 		}
 	}
 

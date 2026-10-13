@@ -37,6 +37,9 @@ final class EarlyLoader {
 	/** Tipos de request donde puede haber reglas de carga condicional (docs/02 módulo 4). */
 	public const FILTERABLE = [ RequestType::WcAjax, RequestType::AdminAjax, RequestType::Rest, RequestType::StaticMiss ];
 
+	/** Igual que RumCollector::QUERY. */
+	public const RUM_QUERY = 'itb-rum';
+
 	/** Igual que ExperimentCookie::NAME. */
 	public const EXPERIMENT_COOKIE = 'itb_exp';
 
@@ -98,9 +101,22 @@ final class EarlyLoader {
 		Runtime::$config  = $config;
 		Runtime::$request = ( new RequestClassifier( $config->classifierConfig() ) )->classifyCurrent();
 
+		self::maybeRum( $config );
 		self::maybeShield( $config );
 		self::maybeFilterPlugins( $config, $startNs );
 		self::maybeStartProfiler( $config, $startNs, $startMem, $startWall );
+	}
+
+	/**
+	 * Beacon de RUM al endpoint local (POST /?itb-rum=1): se guarda y se responde antes de cargar plugins.
+	 */
+	private static function maybeRum( CompiledConfig $config ): void {
+		$request = Runtime::$request;
+		if ( null === $request || 'POST' !== $request->method || ! isset( $_GET[ self::RUM_QUERY ] ) || ! $config->moduleEnabled( 'rum' ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- beacon anónimo; se valida el origen.
+			return;
+		}
+		require_once Runtime::$pluginDir . '/src/Modules/Rum/RumCollector.php';
+		\ImaginaTurbo\Modules\Rum\RumCollector::handle();
 	}
 
 	/**

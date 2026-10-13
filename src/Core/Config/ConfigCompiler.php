@@ -20,7 +20,9 @@ use ImaginaTurbo\Core\Environment\OverlapGuard;
 use ImaginaTurbo\Core\ModuleCatalog;
 use ImaginaTurbo\Core\ModuleRegistry;
 use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Hub\HubClient;
 use ImaginaTurbo\Integrations\ImaginaSearch;
+use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Support\Filesystem;
 
@@ -252,6 +254,20 @@ final class ConfigCompiler {
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
+			'rum'                         => $this->rumConfig(),
+			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
+			'hints'                       => [
+				'lcp'     => (bool) $this->settings->get( 'hints_lcp', true ),
+				'facades' => (bool) $this->settings->get( 'hints_facades', true ),
+				'images'  => array_map(
+					static fn( array $i ): array => [
+						'kind' => $i['kind'],
+						'id'   => $i['id'],
+						'src'  => $i['src'],
+					],
+					RumService::stored()['lcp']
+				),
+			],
 			'profiler'                    => [
 				'rate'            => (float) $this->settings->get( 'profiler_sample_rate', Settings::DEFAULT_SAMPLE_RATE ),
 				'intensive_until' => (int) $this->settings->get( 'profiler_intensive_until', 0 ),
@@ -260,6 +276,59 @@ final class ConfigCompiler {
 
 		$data['hash'] = self::hash( $data );
 		return $data;
+	}
+
+	/**
+	 * RUM: tasa y destino de los beacons (el hub si el sitio está registrado; si no, el endpoint local).
+	 *
+	 * @return array{rate: float, endpoint: string}
+	 */
+	private function rumConfig(): array {
+		$endpoint = '';
+		$hub      = (string) $this->settings->get( 'hub_url', '' );
+		$state    = get_option( HubClient::STATE_OPTION, [] );
+		$siteId   = is_array( $state ) && is_string( $state['site_id'] ?? null ) ? $state['site_id'] : '';
+		if ( '' !== $hub && '' !== $siteId ) {
+			$endpoint = rtrim( $hub, '/' ) . '/v1/rum?site=' . rawurlencode( $siteId );
+		}
+		return [
+			'rate'     => (float) $this->settings->get( 'rum_rate', 0.05 ),
+			'endpoint' => $endpoint,
+		];
+	}
+
+	/**
+	 * Navegación instantánea: modo, exclusiones (solo se especula lo cacheable) y páginas predichas.
+	 *
+	 * @param array<string, list<string>> $paths  Rutas de Woo y login.
+	 * @param list<string>                $bypass Rutas que nunca se cachean.
+	 * @return array<string, mixed>
+	 */
+	private function speculationConfig( array $paths, array $bypass ): array {
+		$exclude = [];
+		foreach ( [ 'cart', 'checkout', 'account', 'login' ] as $key ) {
+			foreach ( $paths[ $key ] ?? [] as $path ) {
+				$path      = '/' . trim( (string) $path, '/' );
+				$exclude[] = $path;
+				$exclude[] = $path . '/*';
+			}
+		}
+		foreach ( $bypass as $path ) {
+			// El core ya excluye wp-admin, wp-*.php y toda URL con query.
+			if ( is_string( $path ) && str_starts_with( $path, '/' ) && ! str_starts_with( $path, '/wp-' ) && ! str_starts_with( $path, '/?' ) ) {
+				$exclude[] = $path;
+			}
+		}
+		$predicted = (bool) $this->settings->get( 'spec_predictive', true ) ? RumService::stored()['predicted'] : [];
+		return [
+			'mode'             => (string) $this->settings->get( 'spec_mode', 'prefetch' ),
+			'eagerness'        => (string) $this->settings->get( 'spec_eagerness', 'moderate' ),
+			'predictive'       => (bool) $this->settings->get( 'spec_predictive', true ),
+			'fallback'         => (bool) $this->settings->get( 'spec_fallback', true ),
+			'view_transitions' => (bool) $this->settings->get( 'view_transitions', false ),
+			'exclude'          => array_values( array_unique( $exclude ) ),
+			'predicted'        => $predicted,
+		];
 	}
 
 	/**

@@ -39,6 +39,7 @@ final class RestRegistrar {
 			new ShieldController( $this->container ),
 			new FirewallController( $this->container ),
 			new PluginFilterController( $this->container ),
+			new NavigationController( $this->container ),
 			new TweaksController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {

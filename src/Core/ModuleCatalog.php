@@ -31,6 +31,9 @@ final class ModuleCatalog {
 			'tweaks'            => \ImaginaTurbo\Modules\Tweaks\TweaksModule::class,
 			'firewall'          => \ImaginaTurbo\Modules\Firewall\FirewallModule::class,
 			'plugin_filter'     => \ImaginaTurbo\Modules\PluginFilter\PluginFilterModule::class,
+			'speculation'       => \ImaginaTurbo\Modules\Speculation\SpeculationModule::class,
+			'rum'               => \ImaginaTurbo\Modules\Rum\RumModule::class,
+			'frontend_hints'    => \ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule::class,
 		];
 	}
 

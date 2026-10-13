@@ -19,6 +19,7 @@ use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
+use ImaginaTurbo\Modules\Rum\RumInsights;
 use ImaginaTurbo\Support\Filesystem;
 use ImaginaTurbo\Support\Jobs;
 
@@ -27,15 +28,15 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 6;
+	public const DB_VERSION        = 7;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION ];
 
 	/** Tablas propias sin prefijo. */
-	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots' ];
+	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots', 'itb_rum_hist', 'itb_rum_events' ];
 
 	public function __construct(
 		private readonly Settings $settings,
@@ -204,6 +205,36 @@ final class Installer {
   payload longtext NOT NULL,
   PRIMARY KEY  (id),
   KEY zone (zone_id,id)
+) {$charset};"
+		);
+
+		// RUM (fase 6, esquema v7): solo contadores. Histogramas por métrica para calcular el p75 sin guardar
+		// cada medición, y eventos (LCP, transiciones, bfcache) con un mapa de 64 bits de IP-hash para
+		// estimar cuántos visitantes distintos los enviaron. Nunca se guarda una IP. Claves dentro de 767 bytes
+		// con utf8mb4 (MySQL 5.6 / COMPACT): plantilla de 40 y valor de 120 caracteres.
+		$hist = $wpdb->prefix . 'itb_rum_hist';
+		dbDelta(
+			"CREATE TABLE {$hist} (
+  hour datetime NOT NULL,
+  template varchar(40) NOT NULL,
+  device char(1) NOT NULL,
+  metric varchar(8) NOT NULL,
+  bucket smallint(5) unsigned NOT NULL,
+  n int(10) unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY  (hour,template,device,metric,bucket)
+) {$charset};"
+		);
+		$events = $wpdb->prefix . 'itb_rum_events';
+		dbDelta(
+			"CREATE TABLE {$events} (
+  day date NOT NULL,
+  kind varchar(8) NOT NULL,
+  template varchar(40) NOT NULL,
+  device char(1) NOT NULL,
+  value varchar(120) NOT NULL,
+  n int(10) unsigned NOT NULL DEFAULT 0,
+  ip_bits bigint(20) unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY  (day,kind,template,device,value)
 ) {$charset};"
 		);
 

@@ -47,6 +47,8 @@ use ImaginaTurbo\Modules\PluginFilter\FilterWatch;
 use ImaginaTurbo\Modules\PluginFilter\LoopbackClient;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
+use ImaginaTurbo\Modules\Rum\RumService;
+use ImaginaTurbo\Repository\RumRepository;
 use ImaginaTurbo\Modules\Profiler\Rollup;
 use ImaginaTurbo\Modules\Profiler\SampleWriter;
 use ImaginaTurbo\Repository\EventRepository;
@@ -165,6 +167,16 @@ final class Plugin {
 				}
 			)
 		);
+		add_action(
+			Jobs::DAILY_RUM,
+			fn() => $this->whenActive(
+				function (): void {
+					if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'rum' ) ) {
+						$this->container->get( RumService::class )->daily();
+					}
+				}
+			)
+		);
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
@@ -258,6 +270,7 @@ final class Plugin {
 		$this->container->get( EventLog::class )->purge();
 		$this->container->get( SampleRepository::class )->deleteOlderThan( SampleRepository::RETENTION_HOURS );
 		$this->container->get( MetricsRepository::class )->deleteOlderThan( MetricsRepository::RETENTION_DAYS );
+		$this->container->get( RumRepository::class )->deleteOlderThan( RumRepository::RETENTION_DAYS );
 	}
 
 	/**
@@ -511,6 +524,28 @@ final class Plugin {
 				$c->get( ImaginaUpdater::class ),
 				$c->get( EventLog::class )
 			)
+		);
+		$c->set(
+			RumRepository::class,
+			static function (): RumRepository {
+				global $wpdb;
+				return new RumRepository( $wpdb );
+			}
+		);
+		$c->set(
+			RumService::class,
+			static function ( Container $c ): RumService {
+				$excluded = Runtime::$config?->get( 'speculation', [] );
+				$excluded = is_array( $excluded ) && is_array( $excluded['exclude'] ?? null ) ? array_values( array_filter( $excluded['exclude'], 'is_string' ) ) : [];
+				return new RumService(
+					$c->get( RumRepository::class ),
+					$c->get( EventLog::class ),
+					$excluded,
+					static function () use ( $c ): void {
+						$c->get( ConfigCompiler::class )->compile();
+					}
+				);
+			}
 		);
 		$c->set( RuleStore::class, static fn(): RuleStore => new RuleStore() );
 		$c->set(

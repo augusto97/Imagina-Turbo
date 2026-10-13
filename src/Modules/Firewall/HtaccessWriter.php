@@ -86,6 +86,21 @@ final class HtaccessWriter {
 		return (string) preg_replace( $pattern, '', $content );
 	}
 
+	/**
+	 * Quita el bloque de un archivo sin autoprueba (al desactivar el plugin: quitar solo reglas
+	 * propias no puede romper el sitio). Devuelve true si había bloque y se quitó.
+	 */
+	public static function stripFile( string $file ): bool {
+		if ( ! is_file( $file ) ) {
+			return false;
+		}
+		$content = file_get_contents( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- archivo local.
+		if ( false === $content || ! self::hasBlock( $content ) ) {
+			return false;
+		}
+		return false !== file_put_contents( $file, self::withoutBlock( $content ), LOCK_EX ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- escritura con bloqueo; WP_Filesystem puede pedir credenciales FTP.
+	}
+
 	public static function hasBlock( string $content ): bool {
 		return str_contains( $content, self::BEGIN ) && str_contains( $content, self::END );
 	}

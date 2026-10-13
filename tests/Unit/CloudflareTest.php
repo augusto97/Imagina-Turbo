@@ -458,4 +458,44 @@ final class CloudflareTest extends TestCase {
 		);
 		$this->assertSame( 'bypass_path', $decision['reason'] );
 	}
+
+	public function test_state_keeps_originals_and_counts_footprint(): void {
+		$state = new \ImaginaTurbo\Cloudflare\State();
+		$state->update( [ 'zone_id' => 'z1' ] );
+		$state->rememberOriginal( 'rocket_loader', 'on' );
+		$state->rememberOriginal( 'rocket_loader', 'off' );
+		$state->rememberOriginal( 'http3', null );
+		$state->markApplied( 'itb-k7-cache-html', 'hash1' );
+		$state->update( [ 'checked_at' => 5 ] );
+		$this->assertSame(
+			[
+				'rocket_loader' => [
+					'value'  => 'on',
+					'active' => true,
+				],
+			],
+			$state->originals(),
+			'el primer valor manda y otras escrituras no lo borran'
+		);
+		$this->assertSame(
+			[
+				'rules'    => 1,
+				'settings' => 1,
+			],
+			$state->footprint()
+		);
+		$state->setOriginalActive( 'rocket_loader', false );
+		$state->markApplied( 'itb-k7-cache-html', null );
+		$this->assertSame(
+			[
+				'rules'    => 0,
+				'settings' => 0,
+			],
+			$state->footprint()
+		);
+		$this->assertSame( 'z1', $state->zoneId() );
+		$state->rememberOriginal( 'rocket_loader', 'off' );
+		$this->assertSame( 'on', $state->originals()['rocket_loader']['value'], 'volver a cambiarlo no pisa el original' );
+		$this->assertSame( 1, $state->footprint()['settings'] );
+	}
 }

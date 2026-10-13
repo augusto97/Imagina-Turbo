@@ -271,6 +271,8 @@ final class CacheTest extends TestCase {
 		$this->assertFalse( Warmer::overloaded( null, 4 ) );
 		$this->assertFalse( Warmer::overloaded( 2.8, 4 ) );
 		$this->assertTrue( Warmer::overloaded( 2.9, 4 ) );
+		$this->assertFalse( Warmer::slow( 900.0 ) );
+		$this->assertTrue( Warmer::slow( 5200.0 ), 'una página lenta pausa el recalentado' );
 		$this->assertTrue( Warmer::overloaded( 0.8, 0 ), 'sin núcleos conocidos se asume uno' );
 		$xml = '<?xml version="1.0"?><urlset><url><loc>https://a.test/</loc></url><url><loc> <![CDATA[https://a.test/b/?x=1&amp;y=2]]> </loc></url><url><loc>https://a.test/</loc></url></urlset>';
 		$this->assertSame( [ 'https://a.test/', 'https://a.test/b/?x=1&y=2' ], Warmer::parseSitemap( $xml ) );

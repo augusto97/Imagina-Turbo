@@ -18,6 +18,7 @@ use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
 use ImaginaTurbo\Modules\AssetManager\AssetRules;
+use ImaginaTurbo\Modules\Firewall\HtaccessWriter;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Modules\Rum\RumInsights;
@@ -83,6 +84,14 @@ final class Installer {
 		$this->jobs->unschedule();
 		$this->muLoader->uninstall();
 		$this->compiler->delete();
+
+		// Las reglas del firewall en .htaccess son del plugin: sin él no deben quedarse.
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		if ( HtaccessWriter::stripFile( get_home_path() . '.htaccess' ) ) {
+			$this->events->info( 'firewall', 'htaccess_removed', __( 'Reglas del firewall quitadas del .htaccess al desactivar el plugin. En OpenLiteSpeed, reinicia el servidor para que se apliquen.', 'imagina-turbo' ) );
+		}
 
 		foreach ( [ SafeMode::FLAG, SafeMode::COUNTER ] as $name ) {
 			$file = $this->dataDir . '/' . $name;

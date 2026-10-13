@@ -95,6 +95,7 @@ final class CloudflareService {
 			'error'             => $s['error'],
 			'token_url'         => self::tokenUrl(),
 			'token_permissions' => self::TOKEN_PERMISSIONS,
+			'footprint'         => $this->state->footprint(),
 		];
 	}
 
@@ -327,6 +328,24 @@ final class CloudflareService {
 	 */
 	public function restore( int $snapshotId ): array {
 		return $this->applier()->restore( $snapshotId );
+	}
+
+	/**
+	 * Quita de la zona todo lo del plugin (reglas propias y ajustes cambiados), con snapshot previo.
+	 *
+	 * @return array{applied: list<string>, failed: list<array{id: string, error: string}>, snapshot_id: int, rolled_back: bool}
+	 */
+	public function removeAll(): array {
+		return $this->applier()->removeAll();
+	}
+
+	/**
+	 * Lo que el plugin tiene en la zona según su estado (sin llamar a la API).
+	 *
+	 * @return array{rules: int, settings: int}
+	 */
+	public function footprint(): array {
+		return $this->state->footprint();
 	}
 
 	/**

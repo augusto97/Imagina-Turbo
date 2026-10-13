@@ -373,3 +373,13 @@ Pendiente para las pruebas reales:
 
 - El hub real (gestión de plantillas, grupos de sitios, orquestación de lotes con pausa ante errores).
 - Lotes contra zonas reales de Cloudflare con tokens de prueba.
+
+## Versión 0.10.1 — antes de las pruebas en producción
+
+Revisión de la regla 4 (todo cambio es reversible) antes de instalar en un sitio real:
+
+- **Cloudflare**: botón "Quitar todo lo de Imagina Turbo" (reglas propias fuera, ajustes devueltos a su valor original, con snapshot) y aviso en la pantalla de plugins y al desconectar el token si quedan cosas en la zona. Probado con el simulador: aplicar 7 reglas y 5 ajustes con una regla del cliente en la misma fase → quitar todo (la del cliente intacta, ajustes como al principio) → deshacer con el snapshot → quitar todo otra vez. El E2E compara la zona final con la inicial.
+- **`.htaccess`**: el bloque del firewall se quita al desactivar el plugin (en OpenLiteSpeed hace falta reiniciar para aplicarlo).
+- **Recalentado**: se pausa un minuto si una página tarda más de 5 s. En el servidor de pruebas (10 procesos PHP) hubo una saturación mientras recalentaba tras purgar todo; la carga de CPU no la detectaba.
+
+Lo que sigue sin ser reversible está en la pantalla correspondiente: purgas de caché (se rehace sola), "Limitar revisiones" (WordPress borra las sobrantes al guardar, sin respaldo) y respaldos de base de datos de más de 30 días.

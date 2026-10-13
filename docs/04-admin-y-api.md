@@ -56,6 +56,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/cloudflare/plan` | Cambios propuestos: crear, modificar, eliminar, sin cambios, modificada a mano (deriva) o bloqueado (con el motivo) |
 | POST | `/cloudflare/apply` | `{ids, confirm}`: valida con `dry_run`, guarda snapshot, aplica y restaura solo si algo falla. Exige módulo activo y dominio permitido (409) y `confirm` (428) |
 | GET / POST | `/cloudflare/snapshots` · `/cloudflare/snapshots/{id}/restore` | Historial (50 por zona) · restaurar (`confirm`), guardando antes un snapshot del estado actual |
+| POST | `/cloudflare/remove-all` | Quitar todo lo del plugin de la zona (`confirm`, 428): reglas propias y ajustes devueltos a su valor original, con snapshot previo. No exige el módulo activo. `DELETE /cloudflare/connect` exige `confirm` si quedan reglas o ajustes (`footprint` en `/cloudflare/status`) |
 | GET | `/cloudflare/analytics` | Peticiones de las últimas 24 h por estado de caché y rutas que más llegan al origen (se renueva cada hora) |
 | GET | `/firewall/status` | Reglas elegidas, cambios pendientes del firewall en la zona (fases WAF y rate limit), notas del plan, eventos guardados, origen cerrado (muestras de 7 días), IP real, estado del `.htaccess` y su bloque |
 | PUT | `/firewall/settings` | `{rules: {exploits, surface, bots}, ratelimit}` (recompila; se aplican desde `/cloudflare/apply`) |

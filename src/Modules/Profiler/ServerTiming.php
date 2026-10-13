@@ -39,6 +39,7 @@ final class ServerTiming {
 			return;
 		}
 		$this->sent = true;
+		self::doNotCache();
 		header( 'Server-Timing: ' . $this->value(), false );
 	}
 
@@ -51,9 +52,21 @@ final class ServerTiming {
 	public function addToRestResponse( mixed $response ): mixed {
 		if ( ! $this->sent && $response instanceof \WP_HTTP_Response ) {
 			$this->sent = true;
+			self::doNotCache();
 			$response->header( 'Server-Timing', $this->value(), false );
 		}
 		return $response;
+	}
+
+	/**
+	 * Una respuesta con Server-Timing no se guarda en la caché de página: la siguiente visita repetiría
+	 * tiempos viejos (y los serviría aunque la cookie ya se haya retirado).
+	 */
+	private static function doNotCache(): void {
+		do_action( 'litespeed_control_set_nocache', 'imagina-turbo diagnostico' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- hook público de LSCache.
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- constante estándar que respetan los plugins de caché.
+		}
 	}
 
 	/**

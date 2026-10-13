@@ -230,10 +230,16 @@ function SettingsCard() {
 	}, [ data, form ] );
 
 	const onSubmit = form.handleSubmit( ( values ) =>
-		action.mutate( {
-			debug: values.debug,
-			staging_domains: values.stagingDomains.split( /\s+/ ).map( ( d ) => d.trim().toLowerCase() ).filter( Boolean ),
-		} )
+		action.mutate(
+			{
+				debug: values.debug,
+				staging_domains: values.stagingDomains.split( /\s+/ ).map( ( d ) => d.trim().toLowerCase() ).filter( Boolean ),
+			},
+			{
+				// El servidor normaliza (minúsculas, sin duplicados): el formulario muestra lo que quedó guardado.
+				onSuccess: ( saved ) => form.reset( { debug: saved.debug, stagingDomains: saved.staging_domains.join( '\n' ) } ),
+			}
+		)
 	);
 
 	return (

@@ -116,6 +116,9 @@ imagina-turbo/
 | `Feed`, `Sitemap`, `Robots` | patrones de ruta conocidos |
 | `StaticMiss` | extensión de asset (`.jpg .jpeg .png .gif .webp .avif .css .js .woff .woff2 .ttf .svg .ico .map`) que llegó a PHP: el archivo no existe. **Excepciones** (se tratan como `FrontendHtml`): `/favicon.ico` (el core redirige al ícono del sitio desde WP 5.4) y las rutas que la matriz declara en `static_miss_passthrough` (plugins que generan imágenes o assets bajo demanda cuando el archivo no existe). |
 | `Checkout`, `Cart`, `Account` | rutas resueltas de las páginas de Woo (config compilada, incluye traducciones) |
+| `Other` | frontend con método distinto de GET/HEAD (formularios que envían a una página) y scripts del core que no son páginas (`wp-comments-post.php`, `wp-signup.php`…). Nunca se cachea ni se filtra |
+
+Orden de evaluación: CLI → cron → XML-RPC → admin-ajax → admin → login → wc-ajax → REST → scripts del core → checkout/carrito/cuenta (cualquier método) → `Other` (no GET/HEAD) → robots → sitemap → feed → `StaticMiss` → `FrontendHtml`. El namespace REST se toma hasta el segmento de versión (`wc/store/v1`, `wp/v2`, `oembed/1.0`).
 
 ## Configuración compilada
 
@@ -175,7 +178,22 @@ Cualquier otra escritura en el frontend es un error.
 | Plugin oficial de Cloudflare | Se coordina: nuestro módulo gestiona reglas y purga; recomendar desactivar APO del plugin oficial si está activo. |
 | Plugins que filtran `active_plugins` (Perfmatters MU, Plugin Organizer, Freesoul Deactivate Plugins, Asset CleanUp Pro con descarga de plugins) | Apaga `PluginFilter` sin excepción: solo un plugin puede filtrar `active_plugins`. Lista en `overlapping_plugins.plugin_filtering` de la matriz. |
 
+Mapeo de solapamientos (en `OverlapGuard`, curado): `plugin_filtering` → apaga `PluginFilter`; Perfmatters → `PluginFilter`, `AssetManager` y `Tweaks`; FlyingPress y NitroPack → `Speculation` y `FrontendHints`; el resto de plugins de caché y optimizadores antiguos solo generan aviso (no hacemos minificación ni caché de página). Más de un plugin de caché de página activo genera una alerta.
+
 `OverlapGuard` lee solo las listas de `overlapping_plugins` por módulo. LiteSpeed Cache y el plugin oficial de Cloudflare **nunca** se tratan como conflicto aunque aparezcan en listas heredadas: se coordinan.
+
+## Tareas en segundo plano
+
+Action Scheduler (incluido vía Composer) se carga solo en admin, admin-ajax (su ejecutor asíncrono), cron y CLI; en el frontend no se paga su costo. Si WooCommerce está activo, ya viene cargado por él. Si Action Scheduler no está disponible, se usa WP-Cron como respaldo y se migra solo cuando aparece.
+
+## Licencia (Imagina Updater)
+
+Verificado en `augusto97/imagina-updater` (commit 617d439): no hay SDK que integrar. Al subir el ZIP marcado como Premium, la extensión de licencias **inyecta un bloque de protección en el archivo principal**, justo después de la comprobación de `ABSPATH`; si la licencia no es válida, ese bloque hace `return` y el resto del archivo no se ejecuta. Consecuencias para este plugin:
+
+- `imagina-turbo.php` no declara `strict_types` ni `namespace`, conserva `if ( ! defined( 'ABSPATH' ) ) { exit; }` seguido de salto de línea, y es el único `.php` de la raíz con `Plugin Name:` (el injector toma el primero que encuentre). `uninstall.php` no debe contener esa cadena.
+- Slug = `Text Domain` (`imagina-turbo`); clase inyectada `ILP_8491d0eb`; licencia en la opción `ilp_license_8491d0eb`. `Licensing\ImaginaUpdater` solo lee ese estado.
+- Si el archivo principal no arranca (licencia, PHP antiguo), el loader MU lo detecta en el siguiente request de admin y borra la config compilada: deja de aplicar nada hasta que el plugin vuelva a arrancar.
+- **Costo a tener en cuenta (del lado de imagina-updater):** el código inyectado llama a `get_transient()` en cada request. Sin caché de objetos persistente, un transient con expiración no es autoload y cuesta consultas a la base en el frontend, en contra de la regla 1 de este proyecto. Conviene que imagina-updater use una opción autoload pequeña o la caché de objetos.
 
 ## Almacenamiento
 

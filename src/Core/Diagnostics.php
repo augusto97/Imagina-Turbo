@@ -138,9 +138,10 @@ final class Diagnostics {
 			}
 		}
 		return [
+			// Estado actual en disco/constante, no el del inicio del request (que puede haber cambiado en este mismo request).
 			'kill_switch'   => [
-				'active'   => null !== Runtime::$killReason || KillSwitch::constantActive() || KillSwitch::fileActive( $dataDir ),
-				'reason'   => Runtime::$killReason,
+				'active'   => KillSwitch::constantActive() || KillSwitch::fileActive( $dataDir ),
+				'reason'   => KillSwitch::constantActive() ? KillSwitch::REASON_CONSTANT : ( KillSwitch::fileActive( $dataDir ) ? KillSwitch::REASON_FILE : null ),
 				'constant' => KillSwitch::constantActive(),
 				'file'     => KillSwitch::fileActive( $dataDir ),
 			],

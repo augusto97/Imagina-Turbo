@@ -1,11 +1,13 @@
 /*
  * Tailwind v4 con prefijo "itb": las clases se escriben itb:flex, itb:text-sm...
- * No se importa el preflight global para no romper el admin de WordPress: hay un reset
- * mínimo limitado a .itb-root.
+ * - No se importa el preflight global para no romper el admin de WordPress: hay un reset
+ *   mínimo limitado a .itb-root.
+ * - Las utilidades llevan !important: el CSS del admin de WordPress no usa capas, y una regla
+ *   sin capa gana a cualquier regla en @layer aunque tenga menos especificidad.
  */
 @layer theme, base, components, utilities;
 @import 'tailwindcss/theme.css' layer(theme) prefix(itb);
-@import 'tailwindcss/utilities.css' layer(utilities) prefix(itb);
+@import 'tailwindcss/utilities.css' layer(utilities) prefix(itb) important;
 @import '@fontsource-variable/inter';
 
 @theme {
@@ -13,69 +15,68 @@
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-@layer base {
-	.itb-root,
-	.itb-root *,
-	.itb-root *::before,
-	.itb-root *::after {
-		box-sizing: border-box;
-		border-width: 0;
-		border-style: solid;
-		border-color: var(--itb-color-zinc-200);
-	}
+/* Reset sin capa y con especificidad .itb-root + elemento, para ganar al CSS del admin. */
+.itb-root,
+.itb-root *,
+.itb-root *::before,
+.itb-root *::after {
+	box-sizing: border-box;
+	border-width: 0;
+	border-style: solid;
+	border-color: var(--itb-color-zinc-200);
+}
 
-	.itb-root {
-		font-family: var(--itb-font-sans);
-		color: var(--itb-color-zinc-900);
-		font-size: 14px;
-		line-height: 1.5;
-		-webkit-font-smoothing: antialiased;
-	}
+.itb-root {
+	font-family: var(--itb-font-sans);
+	color: var(--itb-color-zinc-900);
+	font-size: 14px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+}
 
-	.itb-root :where(h1, h2, h3, h4, p, ul, ol, pre, figure) {
-		margin: 0;
-		padding: 0;
-		font-size: inherit;
-		font-weight: inherit;
-		color: inherit;
-	}
+.itb-root :is(h1, h2, h3, h4, p, ul, ol, pre, figure) {
+	margin: 0;
+	padding: 0;
+	font-size: inherit;
+	font-weight: inherit;
+	color: inherit;
+}
 
-	.itb-root :where(ul, ol) {
-		list-style: none;
-	}
+.itb-root :is(ul, ol) {
+	list-style: none;
+}
 
-	.itb-root :where(button, input, select, textarea) {
-		font: inherit;
-		color: inherit;
-		margin: 0;
-		box-shadow: none;
-	}
+.itb-root :is(button, input, select, textarea) {
+	font: inherit;
+	color: inherit;
+	margin: 0;
+	box-shadow: none;
+}
 
-	.itb-root :where(button) {
-		background: transparent;
-		cursor: pointer;
-	}
+.itb-root button {
+	background: transparent;
+	cursor: pointer;
+}
 
-	.itb-root :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
-		min-height: 0;
-		line-height: 1.4;
-		border-radius: 0;
-		background-color: transparent;
-	}
+.itb-root :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+	min-height: 0;
+	line-height: 1.4;
+	border-radius: 0;
+	background-color: transparent;
+}
 
-	.itb-root :where(a) {
-		color: inherit;
-		text-decoration: inherit;
-	}
+.itb-root a {
+	color: inherit;
+	text-decoration: inherit;
+}
 
-	.itb-root :where(table) {
-		border-collapse: collapse;
-	}
+.itb-root table {
+	border-collapse: collapse;
+}
 
-	.itb-root :where(:focus-visible) {
-		outline: 2px solid var(--itb-color-zinc-900);
-		outline-offset: 2px;
-	}
+.itb-root :focus-visible {
+	outline: 2px solid var(--itb-color-zinc-900);
+	outline-offset: 2px;
 }
 
 /* El contenedor de WordPress agrega márgenes; la app ocupa todo el ancho útil. */
@@ -85,6 +86,6 @@
 
 @media (max-width: 782px) {
 	.itb-wrap {
-		margin-left: -10px;
-	}
+	margin-left: -10px;
+}
 }

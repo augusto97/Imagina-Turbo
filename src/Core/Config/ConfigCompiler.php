@@ -26,6 +26,8 @@ final class ConfigCompiler {
 
 	private bool $pending = false;
 
+	private bool $halted = false;
+
 	/** @var array<string, mixed>|null Último resultado. */
 	private ?array $lastResult = null;
 
@@ -56,7 +58,7 @@ final class ConfigCompiler {
 	 * Pide recompilar al final del request (agrupa varios cambios en una sola compilación).
 	 */
 	public function schedule(): void {
-		if ( $this->pending ) {
+		if ( $this->pending || $this->halted ) {
 			return;
 		}
 		$this->pending = true;
@@ -64,17 +66,20 @@ final class ConfigCompiler {
 	}
 
 	/**
-	 * Cancela una compilación pendiente (al desactivar el plugin en el mismo request).
+	 * Cancela la compilación pendiente y bloquea nuevas durante el resto del request. Se usa al
+	 * desactivar el plugin: después del hook de desactivación WordPress dispara deactivated_plugin,
+	 * que volvería a programar la compilación y recrearía el archivo recién borrado.
 	 */
-	public function cancelScheduled(): void {
+	public function halt(): void {
 		$this->pending = false;
+		$this->halted  = true;
 	}
 
 	/**
 	 * Callback de shutdown.
 	 */
 	public function runScheduled(): void {
-		if ( $this->pending ) {
+		if ( $this->pending && ! $this->halted ) {
 			$this->pending = false;
 			$this->compile();
 		}

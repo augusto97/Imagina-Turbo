@@ -202,7 +202,7 @@ final class Plugin {
 	}
 
 	public function onDeactivate(): void {
-		$this->container->get( ConfigCompiler::class )->cancelScheduled();
+		$this->container->get( ConfigCompiler::class )->halt();
 		$this->container->get( Installer::class )->deactivate();
 	}
 

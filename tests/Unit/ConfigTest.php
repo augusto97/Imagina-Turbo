@@ -266,13 +266,23 @@ final class ConfigTest extends TestCase {
 		$this->assertStringNotContainsString( 'echo 1', $code );
 	}
 
-	public function test_scheduled_compile_runs_once_and_can_be_cancelled(): void {
+	public function test_scheduled_compile_runs_once_and_halt_blocks_rescheduling(): void {
 		Functions\expect( 'add_action' )->once();
 		$compiler = $this->compiler( $this->tmp );
 		$compiler->schedule();
 		$compiler->schedule();
-		$compiler->cancelScheduled();
+		$compiler->halt();
+		// Como deactivated_plugin después del hook de desactivación.
+		$compiler->schedule();
 		$compiler->runScheduled();
 		$this->assertFileDoesNotExist( $this->tmp . '/config.php' );
+	}
+
+	public function test_scheduled_compile_writes_file(): void {
+		Functions\when( 'add_action' )->justReturn( true );
+		$compiler = $this->compiler( $this->tmp );
+		$compiler->schedule();
+		$compiler->runScheduled();
+		$this->assertFileExists( $this->tmp . '/config.php' );
 	}
 }

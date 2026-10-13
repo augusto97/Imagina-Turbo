@@ -13,7 +13,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - **Hub**: servicio aparte, sin especificación de servidor todavía (solo el protocolo en `docs/04`). La fase 1 envía telemetría; hasta que el hub exista, el cliente se construye contra un servidor simulado y la telemetría queda desactivada. Ninguna fase del plugin se bloquea por el hub (regla 7).
 - **Verificador**: servicio aparte (Node + Playwright). Se necesita desde la fase 3 (WooCart) y es obligatorio en la fase 5. Debe especificarse y construirse en paralelo a las fases 1–2. Mientras no exista, la verificación es manual y queda registrada como tal.
 
-### Fase 0 — Fundaciones
+### Fase 0 — Fundaciones ✅ (completada, ver "Estado de la fase 0" al final)
 - Bootstrap, Composer, contenedor, `ModuleInterface`, registro de módulos.
 - MU loader (instalación/actualización/desinstalación automáticas y seguras).
 - `ConfigCompiler` + `CompiledConfig` con escritura atómica.
@@ -93,9 +93,37 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Devuelve pasa/falla con evidencia. El plugin revierte automáticamente lo probado si falla.
 - Autenticación con firma HMAC; nunca guarda credenciales del sitio.
 
+### Herramientas
+
+| Comando | Qué hace |
+|---|---|
+| `composer test` | Pruebas unitarias (PHPUnit + Brain Monkey) |
+| `composer analyse` | PHPStan nivel 8 con stubs de WordPress |
+| `composer lint` | PHPCS con WordPress Coding Standards (nombres camelCase y PSR-4 permitidos) |
+| `composer bench` | Benchmark de la etapa temprana; falla si supera 0,3 ms o 150 KB |
+| `cd admin && npm run build` | Typecheck y build del admin |
+| `bin/build.sh` | ZIP de distribución (dependencias sin dev, `classmap-authoritative`, admin compilado) |
+| `tests/e2e/` | Procedimiento y prueba E2E en un WordPress real |
+
 ### Métricas de éxito del proyecto
 - TTFB p75 de páginas anónimas < 100 ms en Colombia/México (desde el edge).
 - LCP p75 móvil < 2,0 s en las plantillas principales.
 - Requests que llegan a PHP: −70 % frente a la línea base.
 - Memoria media por request en `wc-ajax`/REST: −40 %.
 - Cero incidentes de funcionalidad rota sin reversión automática.
+
+## Estado de la fase 0
+
+Completada el 2026-10-13. Criterios de aceptación:
+
+| Criterio | Resultado |
+|---|---|
+| Loader < 0,3 ms y < 150 KB | 0,04 ms y 17 KB con OPcache; 0,04 ms y 137 KB sin OPcache (`composer bench`) |
+| Activar/desactivar sin residuos | Verificado en WordPress real: al desactivar no quedan loader, config ni directorio; al desinstalar no quedan tablas, opciones, capacidad ni tareas |
+| 3 fatales activan el modo seguro | Verificado en pruebas aisladas y en WordPress real; los fatales de otros plugins no cuentan |
+| La matriz compila solo las reglas de plugins activos | Verificado (pruebas y config real: solo WooCommerce y WPS Hide Login) |
+| Loader huérfano sin errores | Verificado (plugin borrado por FTP: sitio y admin responden 200) |
+
+Calidad: 117 pruebas unitarias, PHPStan nivel 8 sin errores, PHPCS sin errores, TypeScript estricto, E2E del admin en Chromium.
+
+Pendiente fuera del alcance de la fase 0: el hub (fase 1) y el verificador (servicios aparte), y las pruebas en OpenLiteSpeed/LSPHP reales (la instancia de prueba usó el servidor integrado de PHP).

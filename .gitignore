@@ -1,0 +1,10 @@
+/vendor/
+/node_modules/
+/admin/dist/
+/build/
+.DS_Store
+*.log
+.phpunit.result.cache
+.phpunit.cache/
+/admin/node_modules/
+/dist/

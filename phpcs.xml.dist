@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<ruleset name="Imagina Turbo">
+	<description>WordPress Coding Standards para seguridad, hooks y formato. Nombres en camelCase y archivos PSR-4.</description>
+
+	<file>src</file>
+	<file>imagina-turbo.php</file>
+	<file>uninstall.php</file>
+	<file>mu-loader</file>
+
+	<arg name="extensions" value="php"/>
+	<arg name="colors"/>
+	<arg value="sp"/>
+
+	<config name="minimum_wp_version" value="6.4"/>
+	<config name="testVersion" value="8.1-"/>
+
+	<rule ref="WordPress-Extra">
+		<!-- PSR-4: archivos con el nombre de la clase. -->
+		<exclude name="WordPress.Files.FileName"/>
+		<!-- Convención del proyecto: métodos y variables en camelCase. -->
+		<exclude name="WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid"/>
+		<exclude name="WordPress.NamingConventions.ValidVariableName"/>
+		<!-- Sintaxis corta de arrays y PHP 8.1 moderno. -->
+		<exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+		<exclude name="Universal.Operators.DisallowShortTernary"/>
+		<exclude name="Universal.NamingConventions.NoReservedKeywordParameterNames"/>
+		<exclude name="Generic.CodeAnalysis.UnusedFunctionParameter"/>
+	</rule>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="imagina-turbo"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<!-- El prefijo itb_/ITB_ lo fija CLAUDE.md; WPCS lo considera corto. -->
+		<exclude name="WordPress.NamingConventions.PrefixAllGlobals.ShortPrefixPassed"/>
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="itb"/>
+				<element value="ImaginaTurbo"/>
+			</property>
+		</properties>
+	</rule>
+</ruleset>

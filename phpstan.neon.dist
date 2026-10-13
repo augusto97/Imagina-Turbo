@@ -1,0 +1,27 @@
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+    level: 8
+    paths:
+        - src
+        - imagina-turbo.php
+        - uninstall.php
+        - mu-loader
+    bootstrapFiles:
+        - tests/phpstan/bootstrap.php
+    treatPhpDocTypesAsCertain: false
+    scanFiles:
+        - vendor/woocommerce/action-scheduler/functions.php
+    scanDirectories:
+        - vendor/woocommerce/action-scheduler/classes
+    ignoreErrors:
+        # Guardas de versión de PHP: deben existir aunque PHPStan analice con PHP >= 8.1.
+        -
+            identifier: smaller.alwaysFalse
+            paths:
+                - imagina-turbo.php
+                - uninstall.php
+        -
+            identifier: greaterOrEqual.alwaysTrue
+            path: mu-loader/imagina-turbo-loader.php

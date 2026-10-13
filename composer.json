@@ -1,0 +1,52 @@
+{
+    "name": "imaginawp/imagina-turbo",
+    "description": "Plugin de rendimiento para WordPress y WooCommerce: complementa a LiteSpeed Cache o WP Rocket y orquesta Cloudflare.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "Imagina WP"
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "woocommerce/action-scheduler": "^3.9"
+    },
+    "require-dev": {
+        "brain/monkey": "^2.6",
+        "phpunit/phpunit": "^10.5",
+        "phpstan/phpstan": "^2.1",
+        "szepeviktor/phpstan-wordpress": "^2.0",
+        "php-stubs/wordpress-stubs": "^6.8",
+        "wp-coding-standards/wpcs": "^3.1",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "ImaginaTurbo\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ImaginaTurbo\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.1.0"
+        },
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testsuite unit",
+        "test:integration": "phpunit --testsuite integration",
+        "bench": "php -d opcache.enable_cli=1 tests/Performance/loader-benchmark.php",
+        "analyse": "phpstan analyse --memory-limit=1G",
+        "lint": "phpcs",
+        "build": "bash bin/build.sh"
+    }
+}

@@ -1,0 +1,33 @@
+import { type ClassValue, clsx } from 'clsx';
+import { extendTailwindMerge } from 'tailwind-merge';
+
+// tailwind-merge necesita conocer el prefijo para resolver conflictos entre clases "itb:".
+const twMerge = extendTailwindMerge( { prefix: 'itb' } );
+
+export function cn( ...inputs: ClassValue[] ): string {
+	return twMerge( clsx( inputs ) );
+}
+
+export function formatDate( value: string | number | null | undefined, locale: string ): string {
+	if ( value === null || value === undefined || value === '' || value === 0 ) {
+		return '—';
+	}
+	// Las fechas de la base vienen en UTC sin zona ("2026-10-13 10:00:00").
+	const date = typeof value === 'number' ? new Date( value * 1000 ) : new Date( value.replace( ' ', 'T' ) + 'Z' );
+	if ( Number.isNaN( date.getTime() ) ) {
+		return String( value );
+	}
+	return new Intl.DateTimeFormat( locale, { dateStyle: 'medium', timeStyle: 'short' } ).format( date );
+}
+
+export function downloadFile( name: string, content: string, type: string ): void {
+	const blob = new Blob( [ content ], { type } );
+	const url = URL.createObjectURL( blob );
+	const link = document.createElement( 'a' );
+	link.href = url;
+	link.download = name;
+	document.body.appendChild( link );
+	link.click();
+	link.remove();
+	URL.revokeObjectURL( url );
+}

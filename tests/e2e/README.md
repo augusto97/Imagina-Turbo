@@ -1,6 +1,6 @@
 # Pruebas en un WordPress real
 
-Procedimiento con el que se validó la fase 0 (WordPress 7.1.3, WooCommerce 11.2.1, LiteSpeed Cache, WPS Hide Login, PHP 8.3, MariaDB 10.11, OPcache activo).
+Procedimiento con el que se validaron las fases 0 y 1 (WordPress 7.1.3, WooCommerce 11.2.1, LiteSpeed Cache, WPS Hide Login, PHP 8.3, MariaDB 10.11, OPcache activo).
 
 ## Preparación
 
@@ -23,7 +23,13 @@ Procedimiento con el que se validó la fase 0 (WordPress 7.1.3, WooCommerce 11.2
 | Desactivar | Admin → Desactivar | Sin loader, sin config y sin directorio de datos (se respeta un `disable` puesto a mano) |
 | Loader huérfano | Borrar la carpeta del plugin por FTP | El sitio y el admin siguen respondiendo 200, sin errores |
 | Desinstalar | Admin → Borrar | Sin tablas `itb_*`, sin opciones `itb_*`, sin capacidad `itb_manage`, sin tareas pendientes, sin loader ni directorio de datos |
-| Admin | `node admin-e2e.js <carpeta_capturas>` | Panel, Registro y Avanzado sin errores de consola; kill switch con confirmación; validación de formularios |
+| Admin | `node admin-e2e.js <carpeta_capturas>` | Panel, Diagnóstico, Registro y Avanzado sin errores de consola; kill switch con confirmación; validación de formularios; cookie de diagnóstico emite y retira `Server-Timing`; sin desborde horizontal en móvil |
+| Actualización 0.1 → 0.2 | Reemplazar la carpeta del plugin y abrir el admin | Esquema v2 (tablas `itb_route_samples` e `itb_metrics_hourly`), config recompilada con el perfilador |
+| Muestreo | Muestreo intensivo desde Diagnóstico y navegar | Muestras de todos los tipos de request; kill switch o módulo apagado: ninguna |
+| Costo propio | Columna `overhead_us` de las muestras | < 1 ms en páginas de WooCommerce |
+| Ranking vs A/B | Muestreo intensivo con y sin el plugin activo, comparar la columna `ms` | Costo atribuido dentro de ±15 % del A/B en plugins que superan el ruido |
+| Auditoría | Diagnóstico → Revisar ahora, con un mu-plugin que envía `Set-Cookie` a anónimos | La página aparece con la cookie y la pista del plugin probable |
+| Hub | `php -S 127.0.0.1:8099 tests/e2e/mock-hub.php` y URL `http://127.0.0.1:8099` en Avanzado | Registro, envío, lote en `ITB_HUB_DIR`; con el archivo `fail` en ese directorio (503) o el hub parado, el sitio sigue en 200 y se programa el reintento |
 
 ## Ejecutar la prueba del admin
 

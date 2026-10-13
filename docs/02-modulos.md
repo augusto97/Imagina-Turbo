@@ -14,9 +14,17 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
   - Marcas en `muplugins_loaded`, `plugins_loaded`, `after_setup_theme`, `init`, `wp_loaded`, `template_redirect`, `shutdown`.
   - Consultas: `$wpdb->num_queries` (nunca activar `SAVEQUERIES` en producción).
   - Memoria pico: `memory_get_peak_usage()`.
-  - `Server-Timing` solo para admins con la cookie de diagnóstico o con `?itb_debug=1` válido (nonce).
-  - Muestras al 1 %: se guardan en `route_samples` (tipo de request, plantilla, ms, MB, consultas, top 10 plugins por costo) y un job horario las agrega en `metrics_hourly`.
-- **Aceptación:** overhead < 0,2 ms sin muestreo y < 1 ms en request muestreado; ranking de plugins por costo visible por tipo de request; datos consistentes con Query Monitor en un sitio de prueba (±15 %).
+  - `Server-Timing` solo para admins con la cookie de diagnóstico (`itb_diag`, firmada como la de bypass pero con clave derivada distinta, HttpOnly, hasta 8 h). *(Se descartó `?itb_debug=1` con nonce: un parámetro en la URL rompe la caché de página y el nonce caduca.)* La cabecera solo puede llevar lo ocurrido hasta `send_headers`; el desglose completo queda en la pantalla Diagnóstico. Descripciones en ASCII (las cabeceras son Latin-1).
+  - Muestras al 1 %: se guardan en `route_samples` (tipo de request, plantilla, ms, MB, consultas, top 15 componentes por costo, fases, cookies enviadas y `Cache-Control`) y un job horario las agrega en `metrics_hourly`. Las muestras de la cookie de diagnóstico no entran en los informes ni en los agregados (las de un admin sesgan).
+  - **Muestreo intensivo:** desde el admin, todos los requests durante 15 minutos (sitios con poco tráfico o antes de comparar). Se apaga solo.
+- **Qué es "costo por plugin" (implementado en la fase 1):**
+  - **Carga:** tiempo y memoria entre eventos `plugin_loaded` / `mu_plugin_loaded`.
+  - **Hooks clave:** tiempo *exclusivo* (sin contar envoltorios anidados) de los callbacks de cada plugin en `plugins_loaded`, `after_setup_theme`, `init`, `wp_loaded`, `rest_api_init`, `admin_init`, `wp`, `template_redirect`, `wp_enqueue_scripts`, `wp_head`, `wp_footer` y, según el request, `wp_ajax_{acción}` / `wc_ajax_{acción}`. Los callbacks se envuelven solo mientras corre su hook (mismas claves en `WP_Hook::callbacks`, así que `remove_action` y `has_action` siguen funcionando) y se restauran al terminar.
+  - **Render de bloques dinámicos:** el `render_callback` de los bloques de plugins y temas se envuelve en `register_block_type_args` (los de `block.json` se atribuyen por su `render.php`). En una tienda con bloques es una parte grande del costo de WooCommerce y no pasa por ningún hook.
+  - **Núcleo:** sus callbacks no se envuelven (el ranking es por plugin y duplicaban el costo de medir). Las funciones y clases internas de PHP cuentan como núcleo.
+  - **Atribución:** por el archivo donde está definida la función o la clase. El resultado se guarda en `profiler-symbols.php` (OPcache), atado al hash de la config y con caducidad de 24 h: sin esa caché, resolver ~400 callbacks repartidos en ~170 archivos era la mayor parte del costo de una muestra.
+  - **Fuera del alcance:** callbacks de buffers de salida (corren después de las funciones de `shutdown`, igual que para Query Monitor), filtros de contenido de alta frecuencia (`the_content`, `render_block`) y trabajo que un plugin dispara en hooks no listados. Por eso la cifra es un mínimo; el A/B de la fase 1 mostró que cubre ~90 % del costo real de WooCommerce.
+- **Aceptación:** overhead < 0,2 ms sin muestreo y < 1 ms en request muestreado; ranking de plugins por costo visible por tipo de request; datos consistentes con Query Monitor en un sitio de prueba (±15 %). Resultados en `docs/05`, "Estado de la fase 1".
 
 ---
 

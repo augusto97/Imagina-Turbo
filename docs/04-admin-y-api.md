@@ -35,7 +35,11 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 |---|---|---|
 | GET | `/status` | Estado general, entorno detectado, alertas |
 | GET / PUT | `/modules` · `/modules/{id}` | Leer/cambiar estado y ajustes de un módulo |
-| GET | `/profiler/summary` · `/profiler/plugins` · `/profiler/routes` | Datos del perfilador |
+| GET | `/profiler/summary` · `/profiler/plugins` · `/profiler/routes` | Datos del perfilador (`period`: 1h, 24h, 48h desde muestras; 7d, 30d desde agregados · `type`: tipo de request) |
+| PUT / POST | `/profiler/settings` · `/profiler/intensive` | Tasa de muestreo · muestreo intensivo de 15 min |
+| GET / POST | `/diagnostics/audit` | Última auditoría de cacheabilidad · ejecutarla ahora (loopback) |
+| GET / PUT / DELETE | `/hub` | Estado · URL del hub · olvidar el registro |
+| POST | `/hub/register` · `/hub/send` | Registrar el sitio · enviar telemetría ahora |
 | GET / POST / DELETE | `/plugin-filter/rules` | Reglas de carga condicional |
 | POST | `/plugin-filter/experiments` | Lanzar experimento de una regla |
 | POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`) |
@@ -51,7 +55,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
 | GET / POST | `/db/audit` · `/db/actions/{task}` | Auditoría y acciones |
 | GET | `/events` | Registro |
-| POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
+| POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/diag-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
 
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
 - `GET /imagina-turbo/v1/nonce?action=...` — refresco de nonces para formularios en páginas cacheadas. Solo acciones en lista blanca (formularios detectados). Respuesta `Cache-Control: private, no-store`. Ojo: con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint debe inicializar la sesión de Woo antes de generar el nonce.
@@ -66,6 +70,9 @@ Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
 | `itb_cf_token` | Token cifrado |
 | `itb_cf_state` | zone_id, plan, ids de rulesets, hashes de reglas propias |
 | `itb_site_key` | Clave del sitio para el hub |
+| `itb_hub` | Estado del hub: site_id, última hora enviada, fallos, próximo intento, último error |
+| `itb_profiler_rollup` | Última hora agregada en `metrics_hourly` |
+| `itb_audit_last` | Último resultado de la auditoría de cacheabilidad |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)
@@ -82,21 +89,29 @@ events (
   KEY created_at (created_at), KEY module_type (module, type)
 )
 
-route_samples (                       -- crudo, retención 48 h
+route_samples (                       -- crudo, retención 48 h (implementada en la fase 1, esquema v2)
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   created_at DATETIME NOT NULL,
   request_type VARCHAR(20) NOT NULL,
-  route_key VARCHAR(191) NOT NULL,    -- plantilla/endpoint normalizado
+  route_key VARCHAR(150) NOT NULL,    -- plantilla/endpoint normalizado; 150 para que el índice compuesto
+                                      -- quepa en 767 bytes con utf8mb4 (MySQL 5.6 / COMPACT)
   path_hash CHAR(16) NOT NULL,
-  ms SMALLINT UNSIGNED, mem_kb INT UNSIGNED, queries SMALLINT UNSIGNED,
+  status SMALLINT UNSIGNED,
+  ms MEDIUMINT UNSIGNED, mem_kb INT UNSIGNED, queries SMALLINT UNSIGNED,
+                                      -- ms MEDIUMINT: SMALLINT se queda corto en requests de admin o cron lentos
   cacheable TINYINT, via_cf TINYINT,
-  plugins_cost TEXT NULL,             -- JSON top 10
+  source TINYINT UNSIGNED,            -- 0 aleatoria, 1 intensiva, 2 cookie de diagnóstico (fuera de informes)
+  overhead_us INT UNSIGNED,           -- costo propio de la medición
+  set_cookies VARCHAR(255) NULL,      -- nombres de las cookies enviadas (auditoría pasiva)
+  cache_control VARCHAR(100) NULL,
+  phases TEXT NULL,                   -- JSON fase → ms
+  plugins_cost TEXT NULL,             -- JSON top 15: [{c: componente, l: carga ms, h: hooks ms, k: KB}]
   KEY created_at (created_at), KEY route (request_type, route_key)
 )
 
 metrics_hourly (                      -- retención 30 días
-  hour DATETIME NOT NULL, request_type VARCHAR(20) NOT NULL, route_key VARCHAR(191) NOT NULL,
-  n INT UNSIGNED, ms_p50 SMALLINT, ms_p95 SMALLINT, mem_p50 INT, mem_p95 INT, queries_avg SMALLINT,
+  hour DATETIME NOT NULL, request_type VARCHAR(20) NOT NULL, route_key VARCHAR(150) NOT NULL,
+  n INT UNSIGNED, ms_p50 MEDIUMINT, ms_p95 MEDIUMINT, mem_p50 INT, mem_p95 INT, queries_avg SMALLINT,
   PRIMARY KEY (hour, request_type, route_key)
 )
 
@@ -137,3 +152,11 @@ El hub es un servicio aparte (puede extender el servidor de Imagina Updater). El
 | GET | `/v1/verify/{id}` | Resultado del verificador |
 
 - **Privacidad**: nunca enviar datos de clientes finales, correos, pedidos, IPs ni contenido de formularios. Solo agregados técnicos.
+
+### Implementación de la fase 1 (cliente)
+
+- **Apagado por defecto**: sin URL del hub no hay ninguna petición. `https` obligatorio salvo `localhost`/`127.0.0.1` (pruebas).
+- **Registro** (`POST /v1/sites/register`, sin firma): cuerpo `{site_url, plugin_version, wp_version, php_version}` y cabecera `X-ITB-License`. Respuesta esperada `{site_id, site_key}` (`site_id` de 4–64 caracteres `[A-Za-z0-9_-]`, `site_key` de 32–256). El primer lote lleva las últimas 24 h ya agregadas. Cambiar la URL del hub borra el registro anterior.
+- **Telemetría** (`POST /v1/telemetry`, firmada, cuerpo gzip): `{schema: 1, site_id, plugin_version, generated_at, window: {from, to}, environment, inventory: {plugins: [{slug, version}], theme}, modules: {id: bool}, metrics: [filas de metrics_hourly], events: [{created_at, module, type, severity, message}]}`. Los eventos van **sin contexto** (puede llevar rutas o datos del sitio). Solo horas completas que ya pasaron por el agregado horario (si el agregado lleva más de 2 h parado, no frena el resto del lote).
+- **Fallos**: tiempo de espera de 8 s; reintento a 1, 2, 4 y 6 h (máximo); lo que queda fuera de la ventana de 24 h se descarta. Un fallo nunca afecta al sitio: todo corre en Action Scheduler o desde el admin.
+- **Hub simulado** para pruebas: `tests/e2e/mock-hub.php` (verifica firma, ventana de 5 min y nonces repetidos; guarda cada lote en JSON).

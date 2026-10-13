@@ -6,7 +6,7 @@ Plugin de rendimiento para WordPress y WooCommerce que complementa a LiteSpeed C
 - Documentación técnica: [`docs/`](docs)
 - Matriz de compatibilidad: [`data/`](data)
 
-Estado: **fase 0 (fundaciones) completada**. Las siguientes fases siguen `docs/05-roadmap-y-pruebas.md`. Para continuar con Claude Code, usa [`PRIMER-PROMPT.md`](PRIMER-PROMPT.md).
+Estado: **fases 0 (fundaciones) y 1 (perfilador y diagnóstico) completadas**. Las siguientes fases siguen `docs/05-roadmap-y-pruebas.md`. Para continuar con Claude Code, usa [`PRIMER-PROMPT.md`](PRIMER-PROMPT.md).
 
 ## Requisitos
 

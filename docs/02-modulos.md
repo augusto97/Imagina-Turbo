@@ -99,6 +99,29 @@ Formato de cada módulo: **riesgo**, **por defecto**, **qué hace**, **cómo imp
   - Nunca cachear: carrito, checkout (con cualquier query string), cuenta (con cualquier query string), `?add-to-cart=`, `wc-ajax`, Store API.
 - **Aceptación:** con un producto en el carrito, la home, categorías y productos devuelven `cf-cache-status: HIT`; el contador del carrito es correcto en < 300 ms tras cargar; agregar/quitar productos actualiza el contador sin recargar; el checkout funciona con las pasarelas instaladas.
 
+### Implementación (fase 3)
+
+Verificado en el código de WooCommerce 11.2.1 y de los temas Astra, Kadence, Blocksy, Storefront, OceanWP, GeneratePress y Hello Elementor (wordpress.org, 2026-10-13).
+
+- **Reemplazo de `wc-cart-fragments`**: se desregistra y se registra `itb-cart.js` con el mismo handle. WooCommerce solo lo encola con el widget del carrito, pero los temas lo encolan por su cuenta (Storefront, Kadence, Blocksy, OceanWP). Ningún tema lo declara como dependencia de sus scripts. El pedido a `wc-ajax=get_refreshed_fragments` desaparece de todas las páginas.
+- **`itb-cart.js` (3,0 KB minificado)**:
+  - Sin la cookie `woocommerce_items_in_cart` no hace ninguna petición.
+  - Con carrito, pinta lo guardado en `localStorage` y pide `GET /wc/store/v1/cart`, que no necesita nonce.
+  - Muestra el **subtotal de artículos** (`total_items` más `total_items_tax` si la tienda muestra precios con impuestos), que es lo que enseñan los encabezados de los temas, no el total con envío.
+  - En el contador actualiza el texto y los atributos `data-cart-total` (Astra con iconos), `data-count` (Blocksy) y `data-counter` (Elementor). Si el contador lleva texto («3 items» en Storefront), usa las formas singular y plural traducidas del tema.
+  - Se actualiza con `added_to_cart`, `removed_from_cart`, `wc_cart_emptied`, `updated_cart_totals` (jQuery), `wc-blocks_added_to_cart` y `wc-blocks_removed_from_cart`, al volver a la pestaña (como mucho cada 10 s) y al volver del bfcache.
+  - En prerender no pide nada hasta `prerenderingchange`.
+- **Nonce de la Store API**: WooCommerce Blocks guarda el nonce en `localStorage` (`storeApiNonce`) y se queda con el más reciente por marca de tiempo. La respuesta del carrito trae `Nonce` y `Nonce-Timestamp`: el script los deja ahí (y llama a `wp.apiFetch.setNonce` si existe). El nonce viejo de una página cacheada deja de romper el carrito y el checkout de bloques.
+- **Desplegable del mini-carrito**: el HTML de la lista de productos es del tema y no se puede reconstruir sin él. Cuando alguien con carrito pasa el cursor, enfoca o toca el contenedor del mini-carrito (selector por tema), se piden una vez los fragments de WooCommerce (`get_refreshed_fragments`) y se reemplazan. Así se respeta el HTML exacto del tema, solo bajo demanda.
+- **Selectores por tema**: verificados en el código para Astra, Kadence (su `.header-cart-total` es la CANTIDAD; no muestra precio en el botón), Blocksy, Storefront y OceanWP (que renombra `.woocommerce-Price-amount` en su estilo normal). Flatsome, Woodmart y el widget de Elementor Pro son de pago: sus selectores están marcados como **no verificados** hasta probarlos en un sitio real. Cada sitio puede añadir los suyos en la pantalla WooCommerce.
+- **Cookies de carrito** — la regla es asimétrica:
+  - Edge: con el módulo activo, la regla de Cloudflare deja de excluirlas, así que quien tiene carrito recibe páginas cacheadas.
+  - Origen: la respuesta generada para alguien con carrito siempre sale con `no-store` y el plugin de caché recibe `no-cache`. Su HTML puede llevar sus productos en el mini-carrito (Kadence lo imprime en el servidor).
+  - Comprobado en el sitio de pruebas: LSCache, con sus valores por defecto, guardaba esas páginas como públicas y se las servía a visitantes anónimos.
+- **Productos vistos**: con el widget activo, `wc_track_product_view` envía `Set-Cookie` en cada producto y la página deja de ser cacheable. Se quita esa acción y un script en línea, solo en esas páginas, escribe la cookie `woocommerce_recently_viewed` en el navegador con la misma lógica (el último al final, máximo 15). El widget sigue funcionando y la página ya no envía cookies.
+- **Geolocalización con caché**: WooCommerce redirige con 307 desde `template_redirect` (prioridad 10) para añadir `?v=`. Cloudflare incluye el query en la llave por defecto y la reescritura de campañas no toca `v`. En modo cabeceras, el coordinador pone un `no-store` provisional al empezar `template_redirect`: cualquier redirección o salida temprana queda fuera del edge, y el emisor lo reemplaza si la página es cacheable.
+- **Store API y `wc-ajax` nunca se cachean en el origen**: LSCache, con sus valores por defecto, cachea la REST, y en el sitio de pruebas servía a cualquier visitante el carrito de otra persona (con su dirección). Es una protección de privacidad que corre siempre, incluso con el kill switch: solo emite `litespeed_control_set_nocache` y `DONOTCACHEPAGE`. Al actualizar, se descartan las respuestas REST que LSCache tenía guardadas (tag `REST`).
+
 ---
 
 ## 4. Carga condicional de plugins (`PluginFilter`)

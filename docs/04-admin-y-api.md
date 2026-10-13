@@ -56,6 +56,8 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/cloudflare/analytics` | Peticiones de las últimas 24 h por estado de caché y rutas que más llegan al origen (se renueva cada hora) |
 | GET / PUT | `/firewall/rules` | Reglas y modo |
 | GET | `/firewall/origin-check` | Estado del cierre del origen |
+| GET / PUT | `/woo/status` · `/woo/settings` | Carrito por Store API: tema y selectores en uso (verificados o no), selectores propios, productos vistos, geolocalización · guardar selectores propios y productos vistos (recompila la config) |
+| POST | `/woo/inspect` | Pide la portada sin carrito y con carrito: cabecera del edge, script del carrito, cart-fragments original y Set-Cookie |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
 | GET / POST | `/db/audit` · `/db/actions/{task}` | Auditoría y acciones |
 | GET | `/events` | Registro |
@@ -72,7 +74,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema) |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed` |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |

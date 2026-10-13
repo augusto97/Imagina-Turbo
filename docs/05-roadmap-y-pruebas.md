@@ -40,7 +40,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Verificar si LSCache y WP Rocket conservan las cabeceras propias en sus respuestas cacheadas (ver `docs/02`, módulo 2) y elegir el plan B si no.
 - **Aceptación:** en el sitio WooCommerce de prueba, > 85 % de aciertos del edge en tráfico anónimo; edición de producto reflejada en < 60 s; revertir un snapshot deja la zona exactamente como estaba (comparación JSON).
 
-### Fase 3 — WooCommerce
+### Fase 3 — WooCommerce ✅ (ver "Estado de la fase 3" al final; `cf-cache-status: HIT` y los temas de pago quedan para las pruebas reales)
 - `WooCart` (Store API, fragments fuera, cookies neutralizadas, geolocalización).
 - **Aceptación:** criterios del módulo 3 en `docs/02-modulos.md`, probados en Astra, Flatsome y Woodmart (o los temas reales de los clientes).
 
@@ -218,4 +218,32 @@ Calidad: 184 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, TypeScript 
 - Conectar un token real y aplicar las plantillas.
 - Confirmar con `dry_run` los puntos que la documentación no deja claros: el campo `http.request.uri.args.names` en la reescritura de parámetros, el filtro `clientRequestHTTPHost` en GraphQL y el código de error de un token de cuenta en `/user/tokens/verify`.
 - Medir el criterio de más del 85 % de aciertos del edge en tráfico anónimo.
+
+## Estado de la fase 3
+
+Completada el 2026-10-13 (versión 0.5.0). Probada en OpenLiteSpeed + LSCache 7.9.1 + WooCommerce 11.2.1 con los temas **Storefront** y **Astra** (`tests/e2e/woo-e2e.js`, Chromium, visitante anónimo, checkout de bloques con pago contra entrega).
+
+| Criterio | Resultado |
+|---|---|
+| Contador correcto en < 300 ms tras cargar | 55–143 ms desde `DOMContentLoaded`, con una sola petición a la Store API |
+| Sin carrito: ninguna petición | 0 peticiones a la Store API y 0 a fragments |
+| Agregar y quitar sin recargar | Agregar desde la tienda (AJAX) y quitar desde el desplegable actualizan contador y total |
+| Sin `get_refreshed_fragments` al navegar | 0. Solo una petición al pasar el cursor por el mini-carrito, para el desplegable con los productos |
+| El checkout funciona | Pedido completado con el checkout de bloques |
+| Páginas con carrito cacheables en el edge | El origen marca `no-store` en la respuesta generada para quien tiene carrito y cacheable en la anónima. Con WooCart, la regla de Cloudflare deja de excluir las cookies de carrito. **`cf-cache-status: HIT` con carrito queda pendiente de la zona real** |
+| Productos vistos | La página de producto ya no envía `Set-Cookie`; el navegador escribe `woocommerce_recently_viewed` |
+
+Hallazgos corregidos durante la validación (los tres son de privacidad):
+
+- **LSCache cacheaba la Store API**: con sus valores por defecto, `GET /wc/store/v1/cart` quedaba guardado y se servía a cualquier visitante con el carrito (y la dirección) de otra persona. Ahora Store API y `wc-ajax` nunca se guardan en la caché de página. Corre siempre, incluso con el kill switch, y al actualizar se descartan las respuestas REST guardadas.
+- **LSCache guardaba como pública la página de quien tiene carrito**: con temas que imprimen el mini-carrito en el servidor, otros visitantes verían sus productos. Ahora esa respuesta no se guarda en ningún nivel; leer de la caché sigue permitido.
+- **Redirecciones antes del emisor**: una salida temprana en `template_redirect` (geolocalización de WooCommerce, `redirect_canonical`) quedaba sin cabecera del edge. Ahora lleva un `no-store` provisional.
+
+Calidad: 190 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, E2E del admin con la pantalla WooCommerce.
+
+Pendiente para las pruebas reales:
+
+- `cf-cache-status: HIT` con un producto en el carrito.
+- Flatsome, Woodmart y el widget de carrito de Elementor Pro (selectores marcados como no verificados).
+- Pasarelas reales de LATAM.
 

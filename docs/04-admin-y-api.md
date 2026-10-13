@@ -9,7 +9,7 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Panel** | Estado general (plugin de caché detectado, Cloudflare conectado, modo seguro). Métricas clave antes/después: TTFB p75, LCP p75 móvil, tasa de aciertos del edge, memoria media por request, requests a PHP por hora, bloqueos del firewall. Alertas pendientes. |
 | **Diagnóstico** | Perfilador: ranking de plugins por costo (ms y MB) por tipo de request; fases del request; consultas; endpoints más pesados. Auditoría de `Set-Cookie` en páginas cacheables. Causas de bfcache. |
 | **Módulos** | Tarjetas por módulo con interruptor, riesgo, descripción, estado de verificación y enlace a su configuración. |
-| **Carga condicional** | Reglas por tipo de request/endpoint. Candidatos sugeridos con su ahorro estimado. Experimentos en curso y su evidencia. Botón "probar regla" (lanza el verificador). |
+| **Carga condicional** | Reglas por endpoint con su estado y evidencia (pares, tiempo y memoria con y sin la regla, la diferencia si la hubo). Candidatos del perfilador con su ahorro estimado. Editor de reglas (plugins, todos los métodos, peticiones de prueba) y experimento con progreso. |
 | **Caché** | Adaptador activo, TTL, tags, mapa de purga, cola de purgas, recalentado (fuentes, progreso, pausa por carga), purga manual por URL/tag/todo. |
 | **Cloudflare** | Conexión del token (asistente), zona y plan, ajustes de zona, reglas propias y de terceros (solo lectura), **diff** de cambios propuestos, aplicar, historial de snapshots con revertir, deriva detectada. |
 | **Firewall** | Reglas del edge que se proponen (ataques en la URL, superficie de WordPress, escáneres) y límite de peticiones a login y checkout; sus cambios pendientes en la zona con el mismo ciclo de aplicar y snapshot que Cloudflare; eventos de las últimas 24 h por regla; verificación de origen cerrado e IP real; reglas en `.htaccess` con respaldo y autoprueba. |
@@ -40,8 +40,10 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET / POST | `/diagnostics/audit` | Última auditoría de cacheabilidad · ejecutarla ahora (loopback) |
 | GET / PUT / DELETE | `/hub` | Estado · URL del hub · olvidar el registro |
 | POST | `/hub/register` · `/hub/send` | Registrar el sitio · enviar telemetría ahora |
-| GET / POST / DELETE | `/plugin-filter/rules` | Reglas de carga condicional |
-| POST | `/plugin-filter/experiments` | Lanzar experimento de una regla |
+| GET | `/plugin-filter/status` | Módulo (y si otro plugin lo apaga), plugins activos, reglas con su evidencia, candidatos del perfilador, Imagina Search, fallos pendientes |
+| POST | `/plugin-filter/rules` | `{key, plugins, all_methods?, probes?}`: guarda la regla en prueba y recompila. 409 con el módulo apagado; 400 si la clave está excluida o un plugin está protegido o inactivo |
+| POST | `/plugin-filter/rules/{id}/step` · `/recheck` | Avanza el experimento (presupuesto de ~12 s; se repite hasta terminar) · revisa una regla activa con 5 pares |
+| POST / DELETE | `/plugin-filter/rules/{id}/disable` · `/plugin-filter/rules/{id}` | Desactivar · eliminar (recompila y registra) |
 | GET | `/cache/status` | Adaptador detectado, ajustes, cola, última sincronización, recalentado |
 | PUT | `/cache/settings` | Modo (`sync` / `headers`), TTL, SWR, SIE, refresco de nonces, recalentado. Pasar a `headers` exige `confirm: true` (428 sin ella) |
 | POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`; `all` exige `confirm: true`) |
@@ -95,6 +97,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |
 | `itb_htaccess_backup` | Copia completa del `.htaccess` antes del último cambio |
+| `itb_filter_rules` | Reglas de carga condicional: clave, plugins, métodos, peticiones de prueba, estado (`testing`, `active`, `failed`, `disabled`), motivo y evidencia |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)

@@ -407,3 +407,64 @@ export interface FirewallStatus {
 	origin: { samples: number; cloudflare: number; direct: number; local: number; proxy_ip: number; state: 'unknown' | 'no_cloudflare' | 'open' | 'closed'; message: string; real_ip_missing: boolean; ranges_url: string };
 	htaccess: { server: string; applicable: boolean; ols: boolean; block: string; exists: boolean; writable: boolean; active: boolean; backup_at: number };
 }
+
+export interface FilterProbe {
+	method: 'GET' | 'POST';
+	path: string;
+	body: string;
+}
+
+export interface FilterSide {
+	n: number;
+	ms: number;
+	kb: number;
+	errors: number;
+}
+
+export interface FilterRule {
+	id: string;
+	key: string;
+	label: string;
+	plugins: string[];
+	all_methods: boolean;
+	probes: FilterProbe[];
+	status: 'testing' | 'active' | 'failed' | 'disabled';
+	reason: string;
+	created_at: number;
+	updated_at: number;
+	checked_at: number;
+	inactive: string[];
+	protected: string[];
+	evidence: {
+		pairs: number;
+		required: number;
+		modes: Record<string, 'exact' | 'structural'>;
+		baseline: FilterSide;
+		filtered: FilterSide;
+		hidden: number;
+		mismatch: { probe: number; field: string; baseline: string; filtered: string } | null;
+	};
+}
+
+export interface FilterCandidate {
+	key: string;
+	label: string;
+	samples: number;
+	ms_avg: number;
+	mem_avg_mb: number;
+	plugins: { plugin: string; total_ms: number; kb: number }[];
+	saving_ms: number;
+	blocked: string;
+}
+
+export interface FilterStatus {
+	enabled: boolean;
+	forced_off: string;
+	plugins: { file: string; name: string }[];
+	self: string;
+	rules: FilterRule[];
+	candidates: FilterCandidate[];
+	imagina_search: { active: boolean; key: string };
+	faults_pending: boolean;
+	required_pairs: number;
+}

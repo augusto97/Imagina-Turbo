@@ -36,6 +36,16 @@ final class Runtime {
 	/** Se quitaron plugins de active_plugins en este request (fase 5). */
 	public static bool $pluginsFiltered = false;
 
+	/** Regla de carga condicional aplicada en este request ("WcAjax:get_refreshed_fragments"), o vacío. */
+	public static string $filterKey = '';
+
+	/**
+	 * Experimento de carga condicional de este request (cookie firmada), o null.
+	 *
+	 * @var array{id: string, mode: int, nonce: string}|null
+	 */
+	public static ?array $experiment = null;
+
 	/** El archivo principal del plugin llegó a arrancar (no lo detuvo la licencia, la versión de PHP ni un error). */
 	public static bool $mainBooted = false;
 
@@ -56,6 +66,8 @@ final class Runtime {
 		self::$config          = null;
 		self::$request         = null;
 		self::$pluginsFiltered = false;
+		self::$filterKey       = '';
+		self::$experiment      = null;
 		self::$mainBooted      = false;
 		self::$dataDir         = '';
 		self::$pluginDir       = '';

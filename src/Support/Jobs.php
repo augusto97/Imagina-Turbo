@@ -36,6 +36,9 @@ final class Jobs {
 	/** Cloudflare: analíticas y deriva de reglas (solo lectura de la zona). */
 	public const HOURLY_CLOUDFLARE = 'itb_cf_hourly';
 
+	/** Vigilancia de la carga condicional: fatales y revisión diaria de cada regla. */
+	public const HOURLY_FILTER_WATCH = 'itb_filter_watch';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -43,11 +46,12 @@ final class Jobs {
 	 */
 	public static function recurring(): array {
 		return [
-			self::DAILY_CLEANUP     => DAY_IN_SECONDS,
-			self::HOURLY_ROLLUP     => HOUR_IN_SECONDS,
-			self::HOURLY_TELEMETRY  => HOUR_IN_SECONDS,
-			self::DAILY_AUDIT       => DAY_IN_SECONDS,
-			self::HOURLY_CLOUDFLARE => HOUR_IN_SECONDS,
+			self::DAILY_CLEANUP       => DAY_IN_SECONDS,
+			self::HOURLY_ROLLUP       => HOUR_IN_SECONDS,
+			self::HOURLY_TELEMETRY    => HOUR_IN_SECONDS,
+			self::DAILY_AUDIT         => DAY_IN_SECONDS,
+			self::HOURLY_CLOUDFLARE   => HOUR_IN_SECONDS,
+			self::HOURLY_FILTER_WATCH => HOUR_IN_SECONDS,
 		];
 	}
 

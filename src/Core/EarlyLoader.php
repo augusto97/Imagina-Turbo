@@ -34,6 +34,15 @@ final class EarlyLoader {
 	/** Tipos fatales (igual que SafeMode::FATAL_TYPES). */
 	private const FATAL_TYPES = E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR;
 
+	/** Tipos de request donde puede haber reglas de carga condicional (docs/02 módulo 4). */
+	public const FILTERABLE = [ RequestType::WcAjax, RequestType::AdminAjax, RequestType::Rest, RequestType::StaticMiss ];
+
+	/** Igual que ExperimentCookie::NAME. */
+	public const EXPERIMENT_COOKIE = 'itb_exp';
+
+	/** Registro de fatales en requests filtrados (lo lee la vigilancia de reglas). */
+	public const FILTER_FAULTS = 'filter-faults.log';
+
 	private static bool $shutdownRegistered = false;
 
 	/**
@@ -90,9 +99,62 @@ final class EarlyLoader {
 		Runtime::$request = ( new RequestClassifier( $config->classifierConfig() ) )->classifyCurrent();
 
 		self::maybeShield( $config );
+		self::maybeFilterPlugins( $config, $startNs );
 		self::maybeStartProfiler( $config, $startNs, $startMem, $startWall );
+	}
 
-		// Fase 5: aquí se ejecutará el filtro de active_plugins.
+	/**
+	 * Carga condicional de plugins. En el camino normal cuesta un isset sobre la config: los archivos
+	 * solo se cargan si hay una regla para este endpoint o una cookie de experimento.
+	 */
+	private static function maybeFilterPlugins( CompiledConfig $config, int $startNs ): void {
+		$request = Runtime::$request;
+		if ( null === $request || ! $config->moduleEnabled( 'plugin_filter' ) || ! in_array( $request->type, self::FILTERABLE, true ) ) {
+			return;
+		}
+		// Con sesión iniciada no se filtra: el editor y el admin usan REST y admin-ajax.
+		foreach ( array_keys( $_COOKIE ) as $name ) {
+			if ( is_string( $name ) && str_starts_with( $name, 'wordpress_logged_in_' ) ) {
+				return;
+			}
+		}
+		$key     = $request->ruleKey();
+		$remove  = null;
+		$methods = false;
+		$probe   = null;
+		if ( isset( $_COOKIE[ self::EXPERIMENT_COOKIE ] ) ) {
+			$experiments = $config->get( 'experiments', [] );
+			if ( is_array( $experiments ) && [] !== $experiments ) {
+				require_once Runtime::$pluginDir . '/src/Modules/PluginFilter/ExperimentCookie.php';
+				$secret = \ImaginaTurbo\Modules\PluginFilter\ExperimentCookie::key();
+				$cookie = null === $secret ? null : \ImaginaTurbo\Modules\PluginFilter\ExperimentCookie::validate( $_COOKIE[ self::EXPERIMENT_COOKIE ], $secret, time() ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- se valida con HMAC.
+				$entry  = null === $cookie ? null : ( $experiments[ $cookie['id'] ] ?? null );
+				if ( null !== $cookie && is_array( $entry ) && ( $entry['k'] ?? '' ) === $key && is_array( $entry['p'] ?? null ) ) {
+					Runtime::$experiment = $cookie;
+					$probe               = $cookie;
+					$remove              = 1 === $cookie['mode'] ? $entry['p'] : [];
+				}
+			}
+		}
+		if ( null === $probe ) {
+			$filter = $config->get( 'filter', [] );
+			$rule   = is_array( $filter ) ? ( $filter[ $key ] ?? null ) : null;
+			if ( ! is_array( $rule ) || ! is_array( $rule['p'] ?? null ) ) {
+				return;
+			}
+			$methods = true === ( $rule['w'] ?? false );
+			if ( ! $methods && ! in_array( $request->method, [ 'GET', 'HEAD' ], true ) ) {
+				return;
+			}
+			$remove             = $rule['p'];
+			Runtime::$filterKey = $key;
+		}
+		require_once Runtime::$pluginDir . '/src/Modules/PluginFilter/EarlyFilter.php';
+		\ImaginaTurbo\Modules\PluginFilter\EarlyFilter::install( array_values( array_filter( (array) $remove, 'is_string' ) ), null === $probe );
+		if ( null !== $probe ) {
+			require_once Runtime::$pluginDir . '/src/Modules/PluginFilter/ExperimentProbe.php';
+			\ImaginaTurbo\Modules\PluginFilter\ExperimentProbe::start( $probe, Runtime::$dataDir, $startNs, \Closure::fromCallable( [ \ImaginaTurbo\Modules\PluginFilter\EarlyFilter::class, 'hidden' ] ) );
+		}
 	}
 
 	/**
@@ -179,6 +241,21 @@ final class EarlyLoader {
 				require_once Runtime::$pluginDir . '/src/Core/Safety/SafeMode.php';
 			}
 			( new SafeMode( Runtime::$dataDir, Runtime::$pluginDir ) )->handleShutdown( Runtime::$pluginsFiltered );
+			// La regla que estaba activa se desactiva en el siguiente request de admin o cron.
+			if ( '' !== Runtime::$filterKey && Runtime::$pluginsFiltered && '' !== Runtime::$dataDir ) {
+				$message = strtok( (string) $error['message'], "\n" );
+				file_put_contents( // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- shutdown del loader MU.
+					Runtime::$dataDir . '/' . self::FILTER_FAULTS,
+					json_encode( // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- shutdown del loader MU.
+						[
+							'k' => Runtime::$filterKey,
+							't' => time(),
+							'm' => substr( str_replace( defined( 'ABSPATH' ) ? (string) ABSPATH : "\0", '', false === $message ? '' : $message ), 0, 200 ),
+						]
+					) . "\n",
+					FILE_APPEND | LOCK_EX
+				);
+			}
 		}
 
 		self::disarmIfMainDidNotBoot();

@@ -246,6 +246,22 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	const feedsStillOff = ( await page.getByRole( 'switch', { name: 'Desactivar feeds RSS' } ).getAttribute( 'aria-checked' ) ) === 'false';
 	await page.screenshot( { path: OUT + '/10-ajustes.png', fullPage: true } );
 
+	// Carga condicional: reglas con su evidencia (si el sitio ya tiene alguna) y revisión de una activa.
+	await page.click( 'a[href="#/carga"]' );
+	await page.waitForSelector( 'text=Protecciones' );
+	const filterRules = await page.locator( 'text=/Pares iguales: \\d+ \\/ \\d+/' ).count();
+	let filterRecheck = null;
+	const recheck = page.getByRole( 'button', { name: 'Revisar ahora' } ).first();
+	if ( await recheck.count() > 0 ) {
+		await recheck.click();
+		await page.getByRole( 'button', { name: 'Revisando…' } ).waitFor( { state: 'detached', timeout: 60000 } );
+		filterRecheck = await page.locator( 'text=Revisada:' ).count() > 0;
+	}
+	await page.screenshot( { path: OUT + '/12-carga-condicional.png', fullPage: true } );
+	await page.setViewportSize( { width: 390, height: 844 } );
+	const filterMobileOverflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+	await page.setViewportSize( { width: 1400, height: 1000 } );
+
 	// Firewall: reglas propuestas para la zona (con el simulador) y .htaccess.
 	await page.click( 'a[href="#/firewall"]' );
 	await page.waitForSelector( 'text=Origen cerrado' );
@@ -298,6 +314,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

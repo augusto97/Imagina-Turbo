@@ -38,6 +38,7 @@ final class RestRegistrar {
 			new WooController( $this->container ),
 			new ShieldController( $this->container ),
 			new FirewallController( $this->container ),
+			new PluginFilterController( $this->container ),
 			new TweaksController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {

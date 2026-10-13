@@ -30,6 +30,7 @@ final class ModuleCatalog {
 			'shield'            => \ImaginaTurbo\Modules\Shield\ShieldModule::class,
 			'tweaks'            => \ImaginaTurbo\Modules\Tweaks\TweaksModule::class,
 			'firewall'          => \ImaginaTurbo\Modules\Firewall\FirewallModule::class,
+			'plugin_filter'     => \ImaginaTurbo\Modules\PluginFilter\PluginFilterModule::class,
 		];
 	}
 

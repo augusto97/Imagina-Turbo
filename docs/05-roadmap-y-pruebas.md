@@ -49,7 +49,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Migración desde Perfmatters (detección, mapeo de sus ajustes equivalentes, aviso).
 - **Aceptación:** requests de basura (404 de assets, XML-RPC, escáneres) no cargan plugins ni tema; ningún webhook de pasarela de pago bloqueado en pruebas; el firewall en desafío no afecta navegación ni checkout de usuarios reales.
 
-### Fase 5 — Carga condicional de plugins
+### Fase 5 — Carga condicional de plugins ✅ (ver "Estado de la fase 5" al final; WPML, Freemius real y el verificador externo quedan para las pruebas reales)
 - `PluginFilter` con todas las protecciones (lecciones de Perfmatters MU).
 - Experimentos con el verificador, promoción y vigilancia automática de reglas.
 - Integración con Imagina Search.
@@ -273,4 +273,27 @@ Pendiente para las pruebas reales:
 - `url_decode()` con `%2e%2e` y `+` en el query, y `dry_run` en las fases WAF y rate limit.
 - Autoprueba del `.htaccess` en Apache (Plesk).
 - Origen cerrado con tráfico directo real.
+
+## Estado de la fase 5
+
+Completada el 2026-10-13 (versión 0.7.0). Probada en OpenLiteSpeed + LSCache + WooCommerce 11.2.1 con Imagina Search 6.0.2 (código del repositorio) y plugins de prueba que reproducen las trampas conocidas.
+
+| Criterio | Resultado |
+|---|---|
+| Reducción de memoria y tiempo | `get_refreshed_fragments`: −41 % de memoria (15,0 → 8,9 MB), 108 → 84 ms. Imagina Search: −28 % (23,7 → 17,0 MB), 182 → 151 ms, quitando los 7 plugins ajenos de un sitio ligero |
+| Cero desactivaciones permanentes (Freemius) | Un plugin que guarda `active_plugins` en `init` y `shutdown`: 31 requests filtrados sin perder ninguno. Contraprueba: sin la protección, un solo request los desactivaba |
+| `rewrite_rules` intactas tras un flush | Flush forzado en `wp_loaded` durante un request filtrado: ruta del plugin oculto intacta. Contraprueba: sin la protección, se perdía |
+| Las diferencias se detectan | Quitar el plugin que agrega un fragmento al carrito: el experimento falla en el primer par con la diferencia |
+| Vigilancia | Un fatal en un request filtrado desactiva la regla en el siguiente request de admin, con evento |
+| Experimentos | 20 pares iguales promueven; revisión diaria con 5 pares; el límite de búsquedas de Imagina Search no interfiere |
+
+Decisión resuelta: los filtros de lectura y de escritura se mantienen todo el request (ver docs/02, módulo 4).
+
+Calidad: 213 pruebas unitarias, PHPStan nivel 8 y PHPCS sin errores, E2E del admin con la pantalla Carga condicional (revisión de una regla activa, móvil sin desborde), benchmark de la etapa temprana 0,096 ms.
+
+Pendiente para las pruebas reales:
+
+- WPML y un plugin con Freemius real (prueba de estrés del documento).
+- Sitios con Elementor, SEO y constructores, para medir el −40 % en condiciones reales.
+- El verificador externo con Playwright (páginas completas). Mientras tanto, los experimentos son loopback y comparan respuestas, no efectos fuera de ellas.
 

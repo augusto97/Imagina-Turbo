@@ -158,6 +158,8 @@ La regla "sin consultas en el frontend" admite solo estas excepciones, todas mue
 - Endpoint RUM local (solo sin hub): `SHORTINIT`, un `INSERT ... ON DUPLICATE KEY UPDATE`.
 - Cola de purga (fase 2a): solo cuando un request del frontend **cambia contenido** (un pedido en el checkout que baja el stock, un comentario aprobado automáticamente). Se agrupa todo en `shutdown` en un `INSERT IGNORE` por tipo. Ver una página nunca escribe.
 
+- Experimentos de carga condicional (fase 5): una línea en `experiments/{id}.log` por request firmado con la cookie `itb_exp` (solo los que hace el propio sitio). Y `filter-faults.log` cuando un request filtrado termina en fatal.
+
 Cualquier otra escritura en el frontend es un error.
 
 ## Modo seguro y kill switch

@@ -18,6 +18,7 @@ use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
+use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Support\Filesystem;
 use ImaginaTurbo\Support\Jobs;
 
@@ -31,7 +32,7 @@ final class Installer {
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION ];
 
 	/** Tablas propias sin prefijo. */
 	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots' ];
@@ -95,7 +96,7 @@ final class Installer {
 	 */
 	public static function maybeUpgrade(): void {
 		$previous = (int) get_option( self::DB_VERSION_OPTION, 0 );
-		if ( $previous !== self::DB_VERSION ) {
+		if ( self::DB_VERSION !== $previous ) {
 			// Desde la versión 6 de la base, via_cf distingue tráfico directo de local: las muestras
 			// anteriores no sirven para saber si el origen está cerrado.
 			if ( $previous < 6 ) {

@@ -53,6 +53,19 @@ final class Settings {
 			'woo_count_selectors'      => [],
 			'woo_total_selectors'      => [],
 			'woo_recently_viewed'      => true,
+			'shield_static'            => true,
+			'shield_author'            => true,
+			'shield_xmlrpc'            => true,
+			'shield_rest_users'        => true,
+			'shield_heartbeat'         => true,
+			'shield_heartbeat_admin'   => 60,
+			'shield_heartbeat_editor'  => 15,
+			'shield_filter_limit'      => 3,
+			'tweaks'                   => [],
+			'tweak_revisions'          => 5,
+			'tweak_autosave'           => 120,
+			'firewall_rules'           => [],
+			'firewall_ratelimit'       => true,
 		];
 	}
 
@@ -214,7 +227,29 @@ final class Settings {
 				$out[ $key ] = self::selectors( $input[ $key ] );
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed' ] as $key ) {
+		foreach ( [
+			'shield_heartbeat_admin'  => [ 15, 120 ],
+			'shield_heartbeat_editor' => [ 15, 120 ],
+			'shield_filter_limit'     => [ 0, 20 ],
+			'tweak_revisions'         => [ 0, 100 ],
+			'tweak_autosave'          => [ 30, DAY_IN_SECONDS ],
+		] as $key => [ $min, $max ] ) {
+			if ( isset( $input[ $key ] ) && is_numeric( $input[ $key ] ) ) {
+				$out[ $key ] = (int) max( $min, min( $max, (int) $input[ $key ] ) );
+			}
+		}
+		foreach ( [ 'tweaks', 'firewall_rules' ] as $key ) {
+			if ( isset( $input[ $key ] ) && is_array( $input[ $key ] ) ) {
+				$map = [];
+				foreach ( $input[ $key ] as $id => $enabled ) {
+					if ( is_string( $id ) && 1 === preg_match( '/^[a-z_]{2,40}$/', $id ) && is_bool( $enabled ) ) {
+						$map[ $id ] = $enabled;
+					}
+				}
+				$out[ $key ] = $map;
+			}
+		}
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}

@@ -15,7 +15,7 @@ import { useAction } from '@/lib/queries';
 import type { CfAction, CfAnalytics, CfApplyResult, CfChange, CfPlan, CfSnapshot, CfStatus, CfZone } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
-const ACTIONS: Record<CfAction, { label: string; tone: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }> = {
+export const ACTIONS: Record<CfAction, { label: string; tone: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }> = {
 	create: { label: __( 'Crear' ), tone: 'blue' },
 	update: { label: __( 'Modificar' ), tone: 'blue' },
 	delete: { label: __( 'Eliminar' ), tone: 'red' },
@@ -24,13 +24,14 @@ const ACTIONS: Record<CfAction, { label: string; tone: 'neutral' | 'green' | 'am
 	blocked: { label: __( 'Bloqueado' ), tone: 'neutral' },
 };
 
-const RISK_LABELS = { safe: __( 'Seguro' ), moderate: __( 'Moderado' ), invasive: __( 'Invasivo' ) };
+export const RISK_LABELS = { safe: __( 'Seguro' ), moderate: __( 'Moderado' ), invasive: __( 'Invasivo' ) };
 
 const PERMISSIONS: Record<string, string> = {
 	zone_read: __( 'Zona: leer' ),
 	settings_read: __( 'Ajustes de zona: leer' ),
 	rulesets_read: __( 'Reglas: leer' ),
 	analytics_read: __( 'Analíticas: leer' ),
+	waf_read: __( 'Firewall: leer' ),
 };
 
 function show( value: unknown ): string {
@@ -305,7 +306,7 @@ function PlanCard( { status }: { status: CfStatus } ) {
 	);
 }
 
-function ChangeRow( { change, checked, onToggle, disabled }: { change: CfChange; checked: boolean; onToggle: () => void; disabled: boolean } ) {
+export function ChangeRow( { change, checked, onToggle, disabled }: { change: CfChange; checked: boolean; onToggle: () => void; disabled: boolean } ) {
 	const a = ACTIONS[ change.action ];
 	return (
 		<li className="itb:rounded-md itb:border itb:border-zinc-200 itb:p-3">

@@ -339,3 +339,71 @@ export interface WooInspect {
 	empty: WooInspectCase;
 	cart: WooInspectCase;
 }
+
+export interface ShieldStatus {
+	enabled: boolean;
+	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
+	required: { xmlrpc: boolean; rest_users: boolean };
+	cron: { disabled: boolean; command: string; wp_cli: string };
+}
+
+export interface ShieldTestCase {
+	error?: string;
+	status?: number;
+	shield?: string;
+	ms?: number;
+	url?: string;
+}
+
+export interface Tweak {
+	id: string;
+	label: string;
+	description: string;
+	risk: 'safe' | 'moderate' | 'invasive';
+	default: boolean;
+	enabled: boolean;
+}
+
+export interface TweaksStatus {
+	enabled: boolean;
+	forced_off: string;
+	tweaks: Tweak[];
+	revisions: number;
+	autosave: number;
+	perfmatters: boolean;
+	imported?: number;
+}
+
+export interface PerfmattersReport {
+	found: boolean;
+	active: boolean;
+	mapped: { from: string; to: string; value: string }[];
+	unmapped: { from: string; where: string }[];
+}
+
+export interface FirewallEvents {
+	available: boolean;
+	error: string;
+	fetched_at?: number;
+	total: number;
+	events: { rule: string; action: string; count: number; top_path: string; top_country: string }[];
+}
+
+export interface HtaccessResult {
+	ok: boolean;
+	error: string;
+	checks: { url: string; status: number }[];
+	restored: boolean;
+}
+
+export interface FirewallStatus {
+	enabled: boolean;
+	settings: { rules: { exploits: boolean; surface: boolean; bots: boolean }; ratelimit: boolean };
+	cloudflare: { connected: boolean; module_enabled: boolean; plan: string; waf_permission: boolean | null };
+	changes: CfChange[];
+	notes: string[];
+	error: string;
+	events: FirewallEvents;
+	origin: { samples: number; cloudflare: number; direct: number; local: number; proxy_ip: number; state: 'unknown' | 'no_cloudflare' | 'open' | 'closed'; message: string; real_ip_missing: boolean; ranges_url: string };
+	htaccess: { server: string; applicable: boolean; ols: boolean; block: string; exists: boolean; writable: boolean; active: boolean; backup_at: number };
+}

@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Modules\Profiler;
 
 use ImaginaTurbo\Core\Request\RequestContext;
+use ImaginaTurbo\Modules\Firewall\OriginLock;
 use ImaginaTurbo\Repository\SampleRepository;
 use ImaginaTurbo\Support\Filesystem;
 
@@ -84,7 +85,7 @@ final class SampleWriter {
 			'mem_kb'        => (int) round( memory_get_peak_usage() / 1024 ),
 			'queries'       => min( 65535, $queries ),
 			'cacheable'     => self::looksCacheable( $request, $status, $response ) ? 1 : 0,
-			'via_cf'        => isset( $_SERVER['HTTP_CF_RAY'] ) ? 1 : 0,
+			'via_cf'        => OriginLock::classify( $_SERVER ),
 			'source'        => $collector->source,
 			'overhead_us'   => $collector->overheadUs(),
 			'set_cookies'   => [] === $response['cookies'] ? null : substr( implode( ',', $response['cookies'] ), 0, 255 ),

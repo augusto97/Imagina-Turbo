@@ -21,6 +21,8 @@ final class Analytics {
 
 	public const OPTION = 'itb_cf_analytics';
 
+	public const FIREWALL_OPTION = 'itb_cf_firewall';
+
 	public const WINDOW_HOURS = 24;
 
 	/** Estados que se sirvieron desde la caché del edge. */
@@ -63,6 +65,87 @@ final class Analytics {
 			]
 		);
 		return $this->store( self::parse( $byStatus->resultArray(), $topPaths->ok() ? $topPaths->resultArray() : [] ) );
+	}
+
+	/**
+	 * Eventos del firewall (firewallEventsAdaptive, todos los planes) de las últimas 24 h, agrupados por
+	 * regla y acción. Sin datos de visitantes: solo conteos, ruta y país más frecuentes.
+	 *
+	 * @return array{available: bool, error: string, fetched_at: int, total: int, events: list<array{rule: string, action: string, count: int, top_path: string, top_country: string}>}
+	 */
+	public function firewall(): array {
+		$response = $this->client->post(
+			'/graphql',
+			[
+				'query'     => 'query($z:string!,$s:Time!,$u:Time!){viewer{zones(filter:{zoneTag:$z}){firewallEventsAdaptive(limit:1000,orderBy:[datetime_DESC],filter:{datetime_geq:$s,datetime_lt:$u}){action source ruleId description clientRequestPath clientCountryName}}}}',
+				'variables' => [
+					'z' => $this->zoneId,
+					's' => gmdate( 'Y-m-d\TH:i:s\Z', time() - self::WINDOW_HOURS * HOUR_IN_SECONDS ),
+					'u' => gmdate( 'Y-m-d\TH:i:s\Z' ),
+				],
+			]
+		);
+		$data     = $response->ok() ? self::parseFirewall( $response->resultArray() ) : [
+			'available'  => false,
+			'error'      => $response->message(),
+			'fetched_at' => time(),
+			'total'      => 0,
+			'events'     => [],
+		];
+		update_option( self::FIREWALL_OPTION, $data, false );
+		return $data;
+	}
+
+	/**
+	 * @param array<mixed> $data Respuesta de GraphQL.
+	 * @return array{available: bool, error: string, fetched_at: int, total: int, events: list<array{rule: string, action: string, count: int, top_path: string, top_country: string}>}
+	 */
+	public static function parseFirewall( array $data ): array {
+		$zones  = $data['viewer']['zones'] ?? null;
+		$list   = is_array( $zones ) && isset( $zones[0]['firewallEventsAdaptive'] ) && is_array( $zones[0]['firewallEventsAdaptive'] ) ? $zones[0]['firewallEventsAdaptive'] : [];
+		$groups = [];
+		foreach ( $list as $event ) {
+			if ( ! is_array( $event ) ) {
+				continue;
+			}
+			$rule   = is_string( $event['description'] ?? null ) && '' !== $event['description'] ? $event['description'] : ( is_string( $event['source'] ?? null ) ? $event['source'] : '?' );
+			$action = is_string( $event['action'] ?? null ) ? $event['action'] : '?';
+			$key    = $rule . '|' . $action;
+			if ( ! isset( $groups[ $key ] ) ) {
+				$groups[ $key ] = [
+					'rule'      => substr( $rule, 0, 120 ),
+					'action'    => $action,
+					'count'     => 0,
+					'paths'     => [],
+					'countries' => [],
+				];
+			}
+			++$groups[ $key ]['count'];
+			$path                                    = is_string( $event['clientRequestPath'] ?? null ) ? substr( $event['clientRequestPath'], 0, 120 ) : '';
+			$country                                 = is_string( $event['clientCountryName'] ?? null ) ? $event['clientCountryName'] : '';
+			$groups[ $key ]['paths'][ $path ]        = ( $groups[ $key ]['paths'][ $path ] ?? 0 ) + 1;
+			$groups[ $key ]['countries'][ $country ] = ( $groups[ $key ]['countries'][ $country ] ?? 0 ) + 1;
+		}
+		$events = [];
+		foreach ( $groups as $g ) {
+			arsort( $g['paths'] );
+			arsort( $g['countries'] );
+			$events[] = [
+				'rule'        => $g['rule'],
+				'action'      => $g['action'],
+				'count'       => $g['count'],
+				'top_path'    => (string) array_key_first( $g['paths'] ),
+				'top_country' => (string) array_key_first( $g['countries'] ),
+			];
+		}
+		usort( $events, static fn( array $a, array $b ): int => $b['count'] <=> $a['count'] );
+		return [
+			'available'  => true,
+			'error'      => '',
+			'fetched_at' => time(),
+			'total'      => count( $list ),
+			'events'     => array_slice( $events, 0, 20 ),
+		];
 	}
 
 	/**

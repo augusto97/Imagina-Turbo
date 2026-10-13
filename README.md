@@ -35,4 +35,4 @@ Si algo sale mal y no tienes acceso al admin: agrega `define( 'ITB_DISABLE', tru
 
 ## Licencia
 
-GPLv2 o posterior. Incluye datos de compatibilidad derivados de WP Rocket y Perfmatters (ambos GPLv2+). Las reglas de firewall se inspiran en 8G de Jeff Starr (Perishable Press); revisar su licencia antes de incorporar patrones.
+GPLv2 o posterior. Incluye datos de compatibilidad derivados de WP Rocket y Perfmatters (ambos GPLv2+). Las reglas de firewall (Cloudflare y `.htaccess`) se inspiran en el firewall 8G de Jeff Starr (Perishable Press, https://perishablepress.com/8g-firewall/): los patrones están reescritos y reducidos, no se copia su código.

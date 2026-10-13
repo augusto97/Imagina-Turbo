@@ -421,7 +421,12 @@ final class Plugin {
 				$c->get( SnapshotRepository::class ),
 				$c->get( EventLog::class ),
 				$dir . '/data/cloudflare-limits.json',
-				$cloudflareOn
+				$cloudflareOn,
+				[
+					'enabled'   => null !== Runtime::$config && Runtime::$config->moduleEnabled( 'firewall' ),
+					'rules'     => (array) $c->get( Settings::class )->get( 'firewall_rules', [] ),
+					'ratelimit' => (bool) $c->get( Settings::class )->get( 'firewall_ratelimit', true ),
+				]
 			)
 		);
 		// Purga en el edge: Cloudflare si el módulo está activo y conectado; si no, nada.

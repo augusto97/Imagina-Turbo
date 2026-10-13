@@ -165,9 +165,10 @@ final class ConfigTest extends TestCase {
 		$this->assertContains( 'itb_bypass', $data['bypass_cookies'] );
 		$this->assertFalse( $data['requires']['xmlrpc'] );
 
-		// Solo los módulos implementados y seguros quedan activos (fase 1: el perfilador).
+		// Solo los módulos implementados y seguros quedan activos. Ajustes rápidos se apaga porque
+		// Perfmatters está activo (solapamiento).
 		$this->assertTrue( $data['modules']['profiler'] );
-		$this->assertSame( [ 'profiler' ], array_keys( array_filter( $data['modules'] ) ) );
+		$this->assertSame( [ 'profiler', 'shield' ], array_keys( array_filter( $data['modules'] ) ) );
 		$this->assertSame( 0.01, $data['profiler']['rate'] );
 		$this->assertSame( 0, $data['profiler']['intensive_until'] );
 		$this->assertArrayHasKey( 'plugin_filter', $data['modules'] );

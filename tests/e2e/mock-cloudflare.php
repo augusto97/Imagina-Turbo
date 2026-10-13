@@ -107,7 +107,8 @@ function validate_rule( string $phase, array $rule, string $plan ): ?string {
 	if ( 'http_ratelimit' === $phase && ! is_array( $rule['ratelimit'] ?? null ) ) {
 		return 'ratelimit is required';
 	}
-	if ( substr_count( $rule['expression'], '(' ) !== substr_count( $rule['expression'], ')' ) ) {
+	$bare = (string) preg_replace( '/"(?:[^"\\\\]|\\\\.)*"/', '""', $rule['expression'] );
+	if ( substr_count( $bare, '(' ) !== substr_count( $bare, ')' ) ) {
 		return 'filter parsing error: unbalanced parentheses';
 	}
 	return null;
@@ -424,6 +425,17 @@ if ( 'POST' === $method && '/purge_cache' === $rest ) {
 // GraphQL: datos fijos con la forma de httpRequestsAdaptiveGroups.
 if ( '/graphql' === $path ) {
 	$vars = $body['variables'] ?? [];
+	if ( str_contains( (string) ( $body['query'] ?? '' ), 'firewallEventsAdaptive' ) ) {
+		$events = [];
+		foreach ( [ [ '[imagina-turbo] Firewall: ataques en la URL', 'managed_challenge', '/?id=../../etc/passwd', 12 ], [ '[imagina-turbo] Firewall: superficie de WordPress', 'managed_challenge', '/xmlrpc.php', 30 ], [ '', 'block', '/wp-login.php', 5 ] ] as [ $description, $action, $path, $n ] ) {
+			for ( $i = 0; $i < $n; $i++ ) {
+				$events[] = [ 'action' => $action, 'source' => '' === $description ? 'ratelimit' : 'firewallCustom', 'ruleId' => md5( $description ), 'description' => $description, 'clientRequestPath' => $path, 'clientCountryName' => 0 === $i % 3 ? 'RU' : 'CN' ];
+			}
+		}
+		header( 'Content-Type: application/json' );
+		echo json_encode( [ 'data' => [ 'viewer' => [ 'zones' => [ [ 'firewallEventsAdaptive' => $events ] ] ] ], 'errors' => null ] );
+		exit;
+	}
 	if ( str_contains( (string) ( $body['query'] ?? '' ), 'zoneTag}}}' ) || ! str_contains( (string) ( $body['query'] ?? '' ), 'httpRequestsAdaptiveGroups' ) ) {
 		echo json_encode( [ 'data' => [ 'viewer' => [ 'zones' => [ [ 'zoneTag' => $vars['z'] ?? '' ] ] ] ], 'errors' => null ] );
 		exit;

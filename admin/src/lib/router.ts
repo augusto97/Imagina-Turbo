@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 
-export type Route = 'panel' | 'diagnostico' | 'cache' | 'cloudflare' | 'woocommerce' | 'registro' | 'avanzado';
+export type Route = 'panel' | 'diagnostico' | 'cache' | 'cloudflare' | 'woocommerce' | 'firewall' | 'ajustes' | 'registro' | 'avanzado';
 
-const ROUTES: Route[] = [ 'panel', 'diagnostico', 'cache', 'cloudflare', 'woocommerce', 'registro', 'avanzado' ];
+const ROUTES: Route[] = [ 'panel', 'diagnostico', 'cache', 'cloudflare', 'woocommerce', 'firewall', 'ajustes', 'registro', 'avanzado' ];
 
 function fromHash(): Route {
 	const value = window.location.hash.replace( /^#\/?/, '' ) as Route;

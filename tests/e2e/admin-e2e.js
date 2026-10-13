@@ -11,11 +11,11 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	const page = await browser.newPage( { viewport: { width: 1400, height: 1000 } } );
 	const problems = [];
 	// Los 4xx/5xx de la API se registran (o se esperan) en el listener de respuestas.
-	page.on( 'console', ( m ) => { if ( ( m.type() === 'error' || m.type() === 'warning' ) && ! m.text().startsWith( 'Failed to load resource: the server responded' ) ) problems.push( `${ m.type() }: ${ m.text() }` ); } );
+	page.on( 'console', ( m ) => { if ( ( m.type() === 'error' || m.type() === 'warning' ) && ! m.text().startsWith( 'Failed to load resource: the server responded' ) && ! m.text().includes( 'ERR_BLOCKED_BY_CLIENT' ) ) problems.push( `${ m.type() }: ${ m.text() }` ); } );
 	// Errores que la prueba provoca a propósito (validación, confirmación requerida).
 	const expected = [];
 	// ERR_ABORTED: peticiones en curso que el navegador cancela al cambiar de página (no son fallos).
-	page.on( 'requestfailed', ( r ) => { if ( r.failure()?.errorText !== 'net::ERR_ABORTED' ) problems.push( 'failed: ' + r.url().slice( 0, 90 ) + ' ' + ( r.failure()?.errorText || '' ) ); } );
+	page.on( 'requestfailed', ( r ) => { if ( ! /^net::ERR_(ABORTED|BLOCKED_BY_CLIENT)/.test( r.failure()?.errorText || '' ) ) problems.push( 'failed: ' + r.url().slice( 0, 90 ) + ' ' + ( r.failure()?.errorText || '' ) ); } );
 	page.on( 'pageerror', ( e ) => problems.push( 'pageerror: ' + e.message ) );
 	page.on( 'response', ( r ) => {
 		if ( ! r.url().includes( 'imagina-turbo' ) || r.status() < 400 ) return;
@@ -23,6 +23,10 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 		if ( i >= 0 ) expected.splice( i, 1 );
 		else problems.push( `HTTP ${ r.status() } ${ r.url() }` );
 	} );
+
+	// Sin red externa (gravatar, fuentes): en entornos aislados esas peticiones cuelgan el evento load.
+	const host = new URL( BASE ).host;
+	await page.route( ( url ) => url.host !== host, ( route ) => route.abort( 'blockedbyclient' ) );
 
 	// Login (ITB_LOGIN_PATH si el sitio usa una URL de acceso personalizada).
 	await page.goto( BASE + LOGIN );
@@ -194,7 +198,8 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 		await page.screenshot( { path: OUT + '/8-cloudflare.png', fullPage: true } );
 		// Restaurar el snapshot del cambio: la zona vuelve a estar como al principio.
 		const snapshots = page.locator( 'text=Snapshots >> xpath=ancestor::div[contains(@class,"itb:rounded-lg")]' );
-		await snapshots.getByRole( 'button', { name: 'Restaurar' } ).last().click();
+		// El más reciente (la lista va de nuevo a viejo): el del cambio recién aplicado.
+		await snapshots.getByRole( 'button', { name: 'Restaurar' } ).first().click();
 		await page.waitForSelector( 'text=¿Restaurar este snapshot?' );
 		await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Restaurar', exact: true } ).click();
 		await page.waitForSelector( 'text=Snapshot restaurado.', { timeout: 30000 } );
@@ -209,6 +214,7 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 			ownRules: ( applied.rulesets.http_request_cache_settings?.rules || [] ).map( ( r ) => r.ref ),
 			settingsApplied: applied.settings,
 			restoredEqualsBefore: norm( restored ) === norm( before ),
+			...( norm( restored ) === norm( before ) ? {} : { before: norm( before ), restored: norm( restored ) } ),
 			mobileOverflow: overflowCf,
 		};
 		await rest( 'modules/cloudflare', 'PUT', { enabled: false } );
@@ -227,6 +233,51 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 		noFragments: await wooCart.locator( 'text=Sin cart-fragments' ).count() > 0,
 	};
 	await page.screenshot( { path: OUT + '/9-woocommerce.png', fullPage: true } );
+
+	// Ajustes rápidos: escudo (prueba como visitante) y un ajuste moderado que pide confirmación.
+	await page.click( 'a[href="#/ajustes"]' );
+	await page.waitForSelector( 'text=Escudo del servidor' );
+	await page.getByRole( 'button', { name: 'Probar como visitante' } ).click();
+	await page.waitForSelector( 'text=Escudo: static_miss', { timeout: 30000 } );
+	const shieldHits = await page.locator( 'text=/^Escudo: /' ).count();
+	await page.getByRole( 'switch', { name: 'Desactivar feeds RSS' } ).click();
+	await page.waitForSelector( 'text=¿Desactivar feeds RSS?' );
+	await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Cancelar' } ).click();
+	const feedsStillOff = ( await page.getByRole( 'switch', { name: 'Desactivar feeds RSS' } ).getAttribute( 'aria-checked' ) ) === 'false';
+	await page.screenshot( { path: OUT + '/10-ajustes.png', fullPage: true } );
+
+	// Firewall: reglas propuestas para la zona (con el simulador) y .htaccess.
+	await page.click( 'a[href="#/firewall"]' );
+	await page.waitForSelector( 'text=Origen cerrado' );
+	let firewall = { htaccessCard: await page.getByText( 'Reglas en el servidor (.htaccess)' ).waitFor( { timeout: 10000 } ).then( () => true, () => false ) };
+	if ( MOCK ) {
+		const mock = await pwRequest.newContext();
+		await mock.post( MOCK + '/__mock/reset', { data: { token: 'cfut_PRUEBA0123456789abcdefghijklmnopqrstuvwxyz', zone_name: new URL( BASE ).hostname, plan: 'free' } } );
+		await rest( 'modules/cloudflare', 'PUT', { enabled: true, confirm: true } );
+		await rest( 'modules/firewall', 'PUT', { enabled: true, confirm: true } );
+		await page.getByRole( 'button', { name: 'Actualizar' } ).click();
+		await page.waitForSelector( 'text=Firewall: ataques en la URL >> nth=0', { timeout: 30000 } );
+		await page.getByRole( 'checkbox', { name: 'Firewall: ataques en la URL' } ).check();
+		await page.getByRole( 'button', { name: /Aplicar seleccionados/ } ).click();
+		await page.waitForSelector( 'text=¿Aplicar las reglas del firewall?' );
+		await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Aplicar', exact: true } ).click();
+		await page.waitForSelector( 'text=Cambios aplicados. Snapshot previo', { timeout: 30000 } );
+		const state = ( await ( await mock.get( MOCK + '/__mock/state' ) ).json() ).result;
+		await page.getByRole( 'button', { name: 'Consultar' } ).click();
+		await page.locator( 'code', { hasText: /^\/xmlrpc\.php$/ } ).waitFor( { timeout: 20000 } );
+		await page.screenshot( { path: OUT + '/11-firewall.png', fullPage: true } );
+		await page.setViewportSize( { width: 390, height: 844 } );
+		firewall = {
+			...firewall,
+			waf: ( state.rulesets.http_request_firewall_custom?.rules || [] ).map( ( r ) => `${ r.ref }:${ r.action }` ),
+			mobileOverflow: await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 ),
+		};
+		await page.screenshot( { path: OUT + '/11b-movil-firewall.png', fullPage: true } );
+		await page.setViewportSize( { width: 1400, height: 1000 } );
+		await rest( 'modules/firewall', 'PUT', { enabled: false } );
+		await rest( 'modules/cloudflare', 'PUT', { enabled: false } );
+		await mock.dispose();
+	}
 
 	// Vista móvil.
 	await page.setViewportSize( { width: 390, height: 844 } );
@@ -247,6 +298,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

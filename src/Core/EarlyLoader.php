@@ -89,9 +89,39 @@ final class EarlyLoader {
 		Runtime::$config  = $config;
 		Runtime::$request = ( new RequestClassifier( $config->classifierConfig() ) )->classifyCurrent();
 
+		self::maybeShield( $config );
 		self::maybeStartProfiler( $config, $startNs, $startMem, $startWall );
 
-		// Fases 4 y 5: aquí se ejecutarán la guardia PHP del escudo y el filtro de active_plugins.
+		// Fase 5: aquí se ejecutará el filtro de active_plugins.
+	}
+
+	/**
+	 * Guardia del escudo. El archivo solo se carga si el request es candidato (asset inexistente,
+	 * XML-RPC, ?author=, ruta de usuarios de la REST): en una página normal cuesta unas comparaciones.
+	 */
+	private static function maybeShield( CompiledConfig $config ): void {
+		$request = Runtime::$request;
+		if ( null === $request || ! $config->moduleEnabled( 'shield' ) ) {
+			return;
+		}
+		$type      = $request->type;
+		$candidate = RequestType::StaticMiss === $type
+			|| RequestType::XmlRpc === $type
+			|| ( RequestType::FrontendHtml === $type && isset( $_GET['author'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+			|| ( RequestType::Rest === $type && ( str_contains( $request->path, '/users' ) || isset( $_GET['rest_route'] ) ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+		if ( ! $candidate ) {
+			return;
+		}
+		$shield = $config->get( 'shield' );
+		if ( ! is_array( $shield ) ) {
+			return;
+		}
+		require_once Runtime::$pluginDir . '/src/Modules/Shield/EarlyGuard.php';
+		$rest     = $config->get( 'rest_prefix', 'wp-json' );
+		$response = \ImaginaTurbo\Modules\Shield\EarlyGuard::decide( $type, $request->path, is_string( $rest ) ? $rest : 'wp-json', $shield, $_GET, $_COOKIE, $_SERVER ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo lectura para decidir un bloqueo.
+		if ( null !== $response ) {
+			\ImaginaTurbo\Modules\Shield\EarlyGuard::respond( $response );
+		}
 	}
 
 	/**

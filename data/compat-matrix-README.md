@@ -32,6 +32,7 @@ Versión de los datos: 1.1.0 (2026-10-13).
 | `requires.xmlrpc` | El plugin necesita `xmlrpc.php` (Jetpack). El Shield y la regla `itb-fw-wp-surface` no lo bloquean. |
 | `requires.rest_users` | El plugin necesita `/wp-json/wp/v2/users` en anónimo. |
 | `requires.webhook_paths` | Rutas de webhooks para `itb-fw-skip-webhooks`. **Pendiente**: pasarelas de LATAM (Wompi, ePayco, PayU, Mercado Pago), Stripe y WooPayments, verificando la ruta real. Las que usan `/wc-api/` o `?wc-api=` ya quedan cubiertas. |
+| `detect.plugin_dir` | Detección por carpeta exacta cuando la fuente no da el archivo principal (`dg-divi-carousel`, `the-post-grid`). |
 | `static_miss_passthrough` | Rutas de assets generados bajo demanda: el Shield no les responde 404. |
 | `overlapping_plugins.plugin_filtering` | Plugins que filtran `active_plugins`. Si alguno está activo, `PluginFilter` se apaga. |
 | `overlapping_plugins.*[].coordinate` | `true` = se coordina, nunca es conflicto (LiteSpeed Cache, plugin oficial de Cloudflare). |

@@ -1129,7 +1129,7 @@
       "type": "plugin",
       "title": "Divi",
       "detect": {
-        "plugin_file": "dg-divi-carousel"
+        "plugin_dir": "dg-divi-carousel"
       },
       "delay_js": {
         "exclude_regex": [
@@ -4933,7 +4933,7 @@
       "type": "plugin",
       "title": "The Post Grid",
       "detect": {
-        "plugin_file": "the-post-grid/"
+        "plugin_dir": "the-post-grid"
       },
       "delay_js": {
         "exclude_regex": [
@@ -9640,7 +9640,7 @@
       {
         "slug": "perfmatters",
         "plugin_file": "perfmatters/perfmatters.php",
-        "note": "Solo cuenta si su MU plugin está activo (opción perfmatters_options.assets.mu_mode)."
+        "note": "Perfmatters solo filtra active_plugins con su modo MU activo; mientras no se verifique cómo detectarlo, se trata como conflicto siempre que esté activo (conservador)."
       },
       {
         "slug": "plugin-organizer",
@@ -9663,6 +9663,7 @@
     "requires.rest_users": "El plugin necesita /wp-json/wp/v2/users en anónimo.",
     "requires.webhook_paths": "Rutas de webhooks (p. ej. pasarelas de pago) que van en la regla itb-fw-skip-webhooks. Pendiente: pasarelas de LATAM (Wompi, ePayco, PayU, Mercado Pago) y Stripe/WooPayments, verificando la ruta real en cada plugin. Las que usan la API de WooCommerce (/wc-api/ o ?wc-api=) ya quedan cubiertas por la regla genérica.",
     "static_miss_passthrough": "Patrones de ruta de assets que el plugin genera bajo demanda cuando el archivo no existe; el Shield no les responde 404.",
-    "coordinate": "En overlapping_plugins: plugin que se coordina, nunca conflicto."
+    "coordinate": "En overlapping_plugins: plugin que se coordina, nunca conflicto.",
+    "detect.plugin_dir": "Detección por carpeta del plugin cuando la fuente no da el archivo principal (2 entradas heredadas de WP Rocket). Coincide con cualquier plugin activo de esa carpeta exacta."
   }
 }

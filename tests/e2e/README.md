@@ -67,3 +67,21 @@ El simulador reproduce la forma documentada de la API: zonas, verificación de t
 
 La prueba del admin incluye Cloudflare si se define `ITB_CF_MOCK=http://127.0.0.1:8098`.
 
+## Carrito por Store API (fase 3)
+
+```bash
+ITB_BASE_URL=http://127.0.0.1:8080 node tests/e2e/woo-e2e.js /tmp/capturas
+```
+
+Requiere un producto simple, pago contra entrega activo y los módulos `woo_cart` y `cache_coordinator` (modo cabeceras). Recorre, como visitante anónimo:
+
+1. Carga sin carrito, sin peticiones.
+2. Agregar desde la tienda.
+3. Contador en otra página y tiempo de actualización.
+4. Desplegable bajo demanda.
+5. Quitar desde el desplegable.
+6. Producto con el widget de vistos, sin `Set-Cookie`.
+7. Checkout de bloques.
+
+Para otros temas: `ITB_COUNT_SELECTOR` y `ITB_MENU_SELECTOR`. Astra: `'.ast-site-header-cart .ast-count-text'` y `'#ast-desktop-header .ast-site-header-cart'`. `ITB_POSTCODE` define un código postal válido para el país de la tienda.
+

@@ -14,6 +14,7 @@ use ImaginaTurbo\Compat\MatrixException;
 use ImaginaTurbo\Compat\Resolver;
 use ImaginaTurbo\Core\EarlyLoader;
 use ImaginaTurbo\Core\Environment\Detector;
+use ImaginaTurbo\Modules\WooCart\ThemeSelectors;
 use ImaginaTurbo\Core\Environment\OverlapGuard;
 use ImaginaTurbo\Core\ModuleCatalog;
 use ImaginaTurbo\Core\ModuleRegistry;
@@ -219,6 +220,7 @@ final class ConfigCompiler {
 			],
 			'static_passthrough'          => array_map( 'strtolower', $compat['static_passthrough'] ?? [] ),
 			'integrations'                => $compat['integrations'] ?? [],
+			'woo'                         => $this->wooConfig( $theme ),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
 			'profiler'                    => [
 				'rate'            => (float) $this->settings->get( 'profiler_sample_rate', Settings::DEFAULT_SAMPLE_RATE ),
@@ -262,6 +264,32 @@ final class ConfigCompiler {
 			'sitemaps'        => $compat['sitemaps'] ?? [],
 			'preload_exclude' => $compat['preload_exclude'] ?? [],
 			'bypass_paths'    => array_values( array_unique( $bypassPaths ) ),
+		];
+	}
+
+	/**
+	 * Carrito por Store API: selectores del mini-carrito del tema, más los propios.
+	 *
+	 * @param array<string, mixed> $theme Tema detectado.
+	 * @return array<string, mixed>
+	 */
+	private function wooConfig( array $theme ): array {
+		$count    = $this->settings->get( 'woo_count_selectors', [] );
+		$total    = $this->settings->get( 'woo_total_selectors', [] );
+		$resolved = ThemeSelectors::resolve(
+			strtolower( (string) ( $theme['template'] ?? '' ) ),
+			strtolower( (string) ( $theme['stylesheet'] ?? '' ) ),
+			is_array( $count ) ? Settings::selectors( $count ) : [],
+			is_array( $total ) ? Settings::selectors( $total ) : []
+		);
+		return [
+			'count'           => $resolved['count'],
+			'total'           => $resolved['total'],
+			'menu'            => $resolved['menu'],
+			'theme'           => $resolved['theme'],
+			'verified'        => $resolved['verified'],
+			'recently_viewed' => (bool) $this->settings->get( 'woo_recently_viewed', true ),
+			'tax_incl'        => 'incl' === get_option( 'woocommerce_tax_display_cart', 'excl' ),
 		];
 	}
 

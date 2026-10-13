@@ -215,6 +215,19 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 		await mock.dispose();
 	}
 
+	// WooCommerce: estado y prueba de la portada sin y con carrito.
+	await page.click( 'a[href="#/woocommerce"]' );
+	await page.waitForSelector( 'text=Mini-carrito del tema' );
+	await page.getByRole( 'button', { name: 'Probar la portada' } ).click();
+	await page.getByRole( 'button', { name: 'Probar la portada' } ).waitFor( { timeout: 30000 } );
+	const wooCart = page.locator( 'p', { hasText: /^Con carrito$/ } ).locator( 'xpath=..' );
+	await wooCart.waitFor( { timeout: 30000 } );
+	const woo = {
+		cartNotStored: await wooCart.locator( 'text=El edge no la guarda' ).count() > 0,
+		noFragments: await wooCart.locator( 'text=Sin cart-fragments' ).count() > 0,
+	};
+	await page.screenshot( { path: OUT + '/9-woocommerce.png', fullPage: true } );
+
 	// Vista móvil.
 	await page.setViewportSize( { width: 390, height: 844 } );
 	await page.click( 'a[href="#/panel"]' );
@@ -234,6 +247,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

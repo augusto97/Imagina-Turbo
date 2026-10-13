@@ -42,8 +42,10 @@ final class CacheModule implements ModuleInterface {
 		// la regla de Cloudflare, que ya los excluye).
 		if ( in_array( $type, [ RequestType::FrontendHtml, RequestType::Feed, RequestType::Sitemap, RequestType::Cart, RequestType::Checkout, RequestType::Account, RequestType::Login ], true ) ) {
 			$bypass = Runtime::$config?->get( 'bypass_cookies', [] );
-			$cart   = Runtime::$config?->get( 'cart_cookies', [] );
-			$vary   = Runtime::$config?->get( 'vary_cookies', [] );
+			// Quien tiene carrito nunca genera la copia que se guarda (su HTML puede llevar sus productos en el
+			// mini-carrito). Con WooCart sí puede RECIBIR páginas cacheadas: eso lo decide la regla del edge.
+			$cart = Runtime::$config?->get( 'cart_cookies', [] );
+			$vary = Runtime::$config?->get( 'vary_cookies', [] );
 			// Una cookie de variación (moneda, idioma) o de carrito se trata como bypass en el edge.
 			$cookies = array_values( array_filter( array_merge( is_array( $bypass ) ? $bypass : [], is_array( $cart ) ? $cart : [], is_array( $vary ) ? $vary : [] ), 'is_string' ) );
 
@@ -53,7 +55,8 @@ final class CacheModule implements ModuleInterface {
 					$container->get( NonceRefresh::class )->start();
 				};
 			}
-			( new HeaderEmitter( $settings, $cookies, $container->get( TagBuilder::class ), $container->get( CacheAdapter::class ), $request, $onCacheable ) )->register();
+			$cartCookies = array_values( array_filter( is_array( $cart ) ? $cart : [], 'is_string' ) );
+			( new HeaderEmitter( $settings, $cookies, $container->get( TagBuilder::class ), $container->get( CacheAdapter::class ), $request, $onCacheable, $cartCookies ) )->register();
 		}
 
 		// Purgas: los cambios llegan desde admin, REST, AJAX, cron y, en tiendas, desde el checkout.

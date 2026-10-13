@@ -42,6 +42,10 @@ use ImaginaTurbo\Modules\CacheCoordinator\Purger;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
 use ImaginaTurbo\Modules\CacheCoordinator\TagBuilder;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
+use ImaginaTurbo\Modules\PluginFilter\ExperimentRunner;
+use ImaginaTurbo\Modules\PluginFilter\FilterWatch;
+use ImaginaTurbo\Modules\PluginFilter\LoopbackClient;
+use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
 use ImaginaTurbo\Modules\Profiler\Rollup;
 use ImaginaTurbo\Modules\Profiler\SampleWriter;
@@ -151,6 +155,16 @@ final class Plugin {
 				}
 			)
 		);
+		add_action(
+			Jobs::HOURLY_FILTER_WATCH,
+			fn() => $this->whenActive(
+				function (): void {
+					if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'plugin_filter' ) ) {
+						$this->container->get( FilterWatch::class )->hourly( $this->container->get( ExperimentRunner::class ) );
+					}
+				}
+			)
+		);
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
@@ -217,6 +231,10 @@ final class Plugin {
 
 		$this->container->get( Jobs::class )->schedule();
 		$this->notifySafeMode();
+		// Una regla que provocó un fatal se apaga en el siguiente request de admin, sin esperar a la tarea.
+		if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'plugin_filter' ) ) {
+			$this->container->get( FilterWatch::class )->processFaults();
+		}
 	}
 
 	/**
@@ -492,6 +510,30 @@ final class Plugin {
 				$c->get( TelemetryBuilder::class ),
 				$c->get( ImaginaUpdater::class ),
 				$c->get( EventLog::class )
+			)
+		);
+		$c->set( RuleStore::class, static fn(): RuleStore => new RuleStore() );
+		$c->set(
+			ExperimentRunner::class,
+			static fn( Container $c ): ExperimentRunner => new ExperimentRunner(
+				$c->get( RuleStore::class ),
+				\Closure::fromCallable( [ LoopbackClient::class, 'request' ] ),
+				$dataDir,
+				$c->get( EventLog::class ),
+				static function () use ( $c ): void {
+					$c->get( ConfigCompiler::class )->compile();
+				}
+			)
+		);
+		$c->set(
+			FilterWatch::class,
+			static fn( Container $c ): FilterWatch => new FilterWatch(
+				$c->get( RuleStore::class ),
+				$dataDir,
+				$c->get( EventLog::class ),
+				static function () use ( $c ): void {
+					$c->get( ConfigCompiler::class )->compile();
+				}
 			)
 		);
 		$c->set( MuLoaderInstaller::class, static fn(): MuLoaderInstaller => new MuLoaderInstaller( $dir, WPMU_PLUGIN_DIR ) );

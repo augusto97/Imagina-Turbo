@@ -19,6 +19,9 @@ use ImaginaTurbo\Modules\WooCart\ThemeSelectors;
 use ImaginaTurbo\Core\Environment\OverlapGuard;
 use ImaginaTurbo\Core\ModuleCatalog;
 use ImaginaTurbo\Core\ModuleRegistry;
+use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Integrations\ImaginaSearch;
+use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Support\Filesystem;
 
 /**
@@ -96,6 +99,20 @@ final class ConfigCompiler {
 		$errors   = [];
 		$warnings = [];
 		$file     = $this->file();
+
+		// Con plugins ocultos (carga condicional o experimento) la lista de activos está recortada:
+		// compilar ahora dejaría fuera sus integraciones y sus reglas. Se compila en otro request.
+		if ( Runtime::$pluginsFiltered || null !== Runtime::$experiment ) {
+			$result           = [
+				'ok'       => false,
+				'hash'     => '',
+				'file'     => $file,
+				'errors'   => [ __( 'Compilación aplazada: este request tiene plugins ocultos.', 'imagina-turbo' ) ],
+				'warnings' => [],
+			];
+			$this->lastResult = $result;
+			return $result;
+		}
 
 		try {
 			$data = $this->build( $warnings );
@@ -191,6 +208,14 @@ final class ConfigCompiler {
 			$modules[ $id ] = $state['enabled'];
 		}
 
+		// Carga condicional: solo con el módulo activo (también lo apaga otro plugin que filtre active_plugins).
+		$filter = true === ( $modules['plugin_filter'] ?? false )
+			? ( new RuleStore() )->compile( $active )
+			: [
+				'filter'      => [],
+				'experiments' => [],
+			];
+
 		$bypassCookies   = $compat['bypass_cookies'] ?? [ 'wordpress_logged_in_', 'wp-postpass_', 'comment_author_' ];
 		$bypassCookies[] = 'itb_bypass';
 
@@ -207,7 +232,9 @@ final class ConfigCompiler {
 			'lang_prefixes'               => $this->sitePaths->languagePrefixes(),
 			'paths'                       => $dynamic['paths'],
 			'modules'                     => $modules,
-			'filter'                      => [],
+			'filter'                      => $filter['filter'],
+			'experiments'                 => $filter['experiments'],
+			'imagina_search'              => ImaginaSearch::config( $active ),
 			'tags'                        => [ 'prefix' => (string) $this->settings->get( 'tag_prefix', '' ) ],
 			'bypass_cookies'              => array_values( array_unique( $bypassCookies ) ),
 			'bypass_paths'                => array_values( array_unique( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ) ),

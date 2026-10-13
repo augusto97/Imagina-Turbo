@@ -246,7 +246,7 @@ function QueueCard( { status, onDone }: { status: CacheStatus; onDone: ( s: Cach
 						{ status.queue.all ? __( 'Purga completa' ) : `${ status.queue.tags } ${ __( 'tags' ) } · ${ status.queue.urls } URLs` }
 					</KeyValue>
 					<KeyValue label={ __( 'Última sincronización' ) }>
-						{ last.at ? `${ formatDate( last.at, config.locale ) } · ${ last.all ? __( 'todo' ) : `${ last.tags ?? 0 } ${ __( 'tags' ) }, ${ last.urls ?? 0 } URLs` }` : '—' }
+						{ typeof last.at === 'number' && last.at > 0 ? `${ formatDate( last.at, config.locale ) } · ${ last.all ? __( 'todo' ) : `${ last.tags ?? 0 } ${ __( 'tags' ) }, ${ last.urls ?? 0 } URLs` }` : '—' }
 					</KeyValue>
 					<KeyValue label={ __( 'En cola para recalentar' ) }>{ status.queue.warm }</KeyValue>
 					<KeyValue label={ __( 'Recalentadas' ) }>

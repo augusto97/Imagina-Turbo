@@ -140,3 +140,11 @@ PHP_CLI_SERVER_WORKERS=4 ITB_HUB_DIR=/tmp/hub php -S 127.0.0.1:8099 tests/e2e/mo
 3. `POST /__mock/fleet/push {"dry_run": true, "replay": true}`: estado de cada sitio y 401 al repetir la petición.
 4. `POST /__mock/fleet/push {}`: 403 sin autorización; con `PUT /fleet/settings {"fleet_remote": true, "confirm": true}`, aplica.
 5. Con `touch $ITB_HUB_DIR/bad-signature`, la consulta falla y se conserva la plantilla anterior.
+
+## Todas las pantallas (0.10.3)
+
+```bash
+ITB_BASE_URL=http://127.0.0.1:8070 ITB_USER=admin ITB_PASS=... [ITB_LOGIN_PATH=/acceso/] node tests/e2e/screens-e2e.js
+```
+
+Abre cada pantalla del admin en una carga nueva y falla si alguna lanza un error de JavaScript, devuelve un 5xx o queda vacía. Correrla también en un WordPress limpio (sin LSCache ni WooCommerce): ahí aparecen los estados vacíos que el sitio de pruebas nunca tiene.

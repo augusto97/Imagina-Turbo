@@ -35,6 +35,11 @@ done
 echo "→ Dependencias de producción"
 ( cd "$BUILD" && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --classmap-authoritative --no-interaction --no-progress --quiet )
 rm -f "$BUILD/composer.json" "$BUILD/composer.lock"
+# Solo lo que se ejecuta: sin repositorios git, pruebas, documentación ni archivos de desarrollo de las
+# dependencias (un .git dentro de un plugin hace saltar los escáneres de seguridad de los hostings).
+find "$BUILD/vendor" \( -name .git -o -name .github -o -name tests -o -name docs \) -type d -prune -exec rm -rf {} +
+find "$BUILD/vendor" -maxdepth 3 \( -name 'package*.json' -o -name 'composer.lock' -o -name '.editorconfig' -o -name '.gitattributes' -o -name '.gitignore' -o -name 'phpcs.xml*' -o -name 'phpunit.xml*' -o -name 'Gruntfile.js' -o -name 'codecov.yml' \) -type f -delete
+if find "$BUILD" -name .git | grep -q .; then echo "✗ Quedó un .git en el paquete"; exit 1; fi
 
 echo "→ Verificando sintaxis"
 find "$BUILD/src" "$BUILD/mu-loader" "$BUILD"/*.php -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null

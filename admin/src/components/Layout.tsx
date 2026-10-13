@@ -55,7 +55,7 @@ export function Layout( { children }: { children: ReactNode } ) {
 					) ) }
 				</nav>
 				<p className="itb:hidden itb:px-4 itb:pb-4 itb:text-[11px] itb:leading-snug itb:text-zinc-400 itb:md:block">
-					{ __( 'Fase 2 · Caché. Los módulos llegan por fases.' ) }
+					{ __( 'Fase 2 · Caché y Cloudflare. Los módulos llegan por fases.' ) }
 				</p>
 			</aside>
 			<main className="itb:min-w-0 itb:flex-1 itb:p-5 itb:md:p-8">

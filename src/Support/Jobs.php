@@ -39,6 +39,9 @@ final class Jobs {
 	/** Vigilancia de la carga condicional: fatales y revisión diaria de cada regla. */
 	public const HOURLY_FILTER_WATCH = 'itb_filter_watch';
 
+	/** RUM: páginas predichas, imágenes LCP y limpieza. */
+	public const DAILY_RUM = 'itb_rum_daily';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -52,6 +55,7 @@ final class Jobs {
 			self::DAILY_AUDIT         => DAY_IN_SECONDS,
 			self::HOURLY_CLOUDFLARE   => HOUR_IN_SECONDS,
 			self::HOURLY_FILTER_WATCH => HOUR_IN_SECONDS,
+			self::DAILY_RUM           => DAY_IN_SECONDS,
 		];
 	}
 

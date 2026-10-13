@@ -66,6 +66,14 @@ final class Settings {
 			'tweak_autosave'           => 120,
 			'firewall_rules'           => [],
 			'firewall_ratelimit'       => true,
+			'rum_rate'                 => 0.05,
+			'spec_mode'                => 'prefetch',
+			'spec_eagerness'           => 'moderate',
+			'spec_predictive'          => true,
+			'spec_fallback'            => true,
+			'view_transitions'         => false,
+			'hints_lcp'                => true,
+			'hints_facades'            => true,
 		];
 	}
 
@@ -208,6 +216,16 @@ final class Settings {
 			$out['hub_url'] = self::sanitizeHubUrl( $input['hub_url'] );
 		}
 
+		if ( isset( $input['rum_rate'] ) && is_numeric( $input['rum_rate'] ) ) {
+			$out['rum_rate'] = round( max( 0.0, min( 1.0, (float) $input['rum_rate'] ) ), 4 );
+		}
+		if ( isset( $input['spec_mode'] ) && in_array( $input['spec_mode'], [ 'prefetch', 'prerender' ], true ) ) {
+			$out['spec_mode'] = $input['spec_mode'];
+		}
+		if ( isset( $input['spec_eagerness'] ) && in_array( $input['spec_eagerness'], [ 'conservative', 'moderate', 'eager' ], true ) ) {
+			$out['spec_eagerness'] = $input['spec_eagerness'];
+		}
+
 		if ( isset( $input['cache_mode'] ) && in_array( $input['cache_mode'], [ 'sync', 'headers' ], true ) ) {
 			$out['cache_mode'] = $input['cache_mode'];
 		}
@@ -249,7 +267,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}

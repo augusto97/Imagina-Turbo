@@ -246,6 +246,24 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	const feedsStillOff = ( await page.getByRole( 'switch', { name: 'Desactivar feeds RSS' } ).getAttribute( 'aria-checked' ) ) === 'false';
 	await page.screenshot( { path: OUT + '/10-ajustes.png', fullPage: true } );
 
+	// Navegación: ajustes, resumen del RUM, insights y bfcache; el prerender pide confirmación.
+	await page.click( 'a[href="#/navegacion"]' );
+	await page.waitForSelector( 'text=Lo que el RUM decidió' );
+	await page.selectOption( 'select:near(:text("Modo"))', 'prerender' );
+	await page.getByRole( 'button', { name: 'Guardar' } ).first().click();
+	expected.push( { path: 'navigation/settings', status: 428 } );
+	await page.waitForSelector( 'text=¿Activar el prerender?' );
+	await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Cancelar' } ).click();
+	const navigation = {
+		prerenderConfirm: true,
+		vitalsRows: await page.locator( 'table tbody tr' ).count(),
+		bfcacheCard: await page.getByText( 'Páginas propias con Cache-Control: no-store (48 h)' ).count() > 0,
+	};
+	await page.screenshot( { path: OUT + '/13-navegacion.png', fullPage: true } );
+	await page.setViewportSize( { width: 390, height: 844 } );
+	navigation.mobileOverflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+	await page.setViewportSize( { width: 1400, height: 1000 } );
+
 	// Carga condicional: reglas con su evidencia (si el sitio ya tiene alguna) y revisión de una activa.
 	await page.click( 'a[href="#/carga"]' );
 	await page.waitForSelector( 'text=Protecciones' );
@@ -314,6 +332,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, navigation, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

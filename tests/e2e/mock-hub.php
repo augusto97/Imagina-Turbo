@@ -74,6 +74,25 @@ if ( 'POST' === $method && '/v1/sites/register' === $path ) {
 	return;
 }
 
+// Beacons de RUM directos desde el navegador: sin firma; el hub valida el sitio y el origen.
+if ( 'POST' === $method && '/v1/rum' === $path ) {
+	$sites  = itb_hub_read( $dir . '/sites.json' );
+	$siteId = (string) ( $_GET['site'] ?? '' );
+	$origin = (string) ( $_SERVER['HTTP_ORIGIN'] ?? '' );
+	if ( ! isset( $sites[ $siteId ] ) || ( '' !== $origin && parse_url( $origin, PHP_URL_HOST ) !== parse_url( (string) $sites[ $siteId ]['url'], PHP_URL_HOST ) ) ) {
+		itb_hub_reply( 403, [ 'error' => 'sitio u origen no válido' ] );
+		return;
+	}
+	if ( strlen( $body ) > 2048 || ! is_array( json_decode( $body, true ) ) ) {
+		itb_hub_reply( 400, [ 'error' => 'beacon no válido' ] );
+		return;
+	}
+	file_put_contents( $dir . '/rum-' . $siteId . '.jsonl', $body . "\n", FILE_APPEND );
+	header( 'Access-Control-Allow-Origin: ' . ( '' !== $origin ? $origin : '*' ) );
+	http_response_code( 204 );
+	return;
+}
+
 if ( 'POST' === $method && '/v1/telemetry' === $path ) {
 	$sites  = itb_hub_read( $dir . '/sites.json' );
 	$siteId = (string) ( $_SERVER['HTTP_X_ITB_SITE'] ?? '' );

@@ -1,5 +1,5 @@
 // Prueba E2E del admin de Imagina Turbo en la instancia local.
-const { chromium } = require( 'playwright' );
+const { chromium, request: pwRequest } = require( 'playwright' );
 const OUT = process.argv[ 2 ] || '.';
 const BASE = process.env.ITB_BASE_URL || 'http://127.0.0.1:8080';
 const USER = process.env.ITB_USER || 'admin';
@@ -10,10 +10,19 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	const browser = await chromium.launch( { executablePath: process.env.ITB_CHROMIUM || undefined } );
 	const page = await browser.newPage( { viewport: { width: 1400, height: 1000 } } );
 	const problems = [];
-	page.on( 'console', ( m ) => { if ( m.type() === 'error' || m.type() === 'warning' ) problems.push( `${ m.type() }: ${ m.text() }` ); } );
-	page.on( 'requestfailed', ( r ) => problems.push( 'failed: ' + r.url().slice( 0, 90 ) ) );
+	// Los 4xx/5xx de la API se registran (o se esperan) en el listener de respuestas.
+	page.on( 'console', ( m ) => { if ( ( m.type() === 'error' || m.type() === 'warning' ) && ! m.text().startsWith( 'Failed to load resource: the server responded' ) ) problems.push( `${ m.type() }: ${ m.text() }` ); } );
+	// Errores que la prueba provoca a propósito (validación, confirmación requerida).
+	const expected = [];
+	// ERR_ABORTED: peticiones en curso que el navegador cancela al cambiar de página (no son fallos).
+	page.on( 'requestfailed', ( r ) => { if ( r.failure()?.errorText !== 'net::ERR_ABORTED' ) problems.push( 'failed: ' + r.url().slice( 0, 90 ) + ' ' + ( r.failure()?.errorText || '' ) ); } );
 	page.on( 'pageerror', ( e ) => problems.push( 'pageerror: ' + e.message ) );
-	page.on( 'response', ( r ) => { if ( r.url().includes( 'imagina-turbo' ) && r.status() >= 400 ) problems.push( `HTTP ${ r.status() } ${ r.url() }` ); } );
+	page.on( 'response', ( r ) => {
+		if ( ! r.url().includes( 'imagina-turbo' ) || r.status() < 400 ) return;
+		const i = expected.findIndex( ( e ) => r.url().includes( e.path ) && r.status() === e.status );
+		if ( i >= 0 ) expected.splice( i, 1 );
+		else problems.push( `HTTP ${ r.status() } ${ r.url() }` );
+	} );
 
 	// Login (ITB_LOGIN_PATH si el sitio usa una URL de acceso personalizada).
 	await page.goto( BASE + LOGIN );
@@ -84,6 +93,72 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.waitForSelector( 'text=Ajustes guardados.' );
 	await page.screenshot( { path: OUT + '/4-avanzado.png', fullPage: true } );
 
+	// Caché: se parte del módulo apagado para recorrer la activación con confirmación.
+	const rest = ( path, method, body ) => page.evaluate( async ( [ p, m, b ] ) => {
+		const r = await fetch( window.itbAdmin.restUrl + p, { method: m, headers: { 'X-WP-Nonce': window.itbAdmin.nonce, 'Content-Type': 'application/json' }, body: b ? JSON.stringify( b ) : undefined } );
+		await r.text();
+		return r.status;
+	}, [ path, method, body ] );
+	const disabled = await rest( 'modules/cache_coordinator', 'PUT', { enabled: false } );
+	await page.click( 'a[href="#/cache"]' );
+	await page.waitForSelector( 'text=Caché de origen' );
+	await page.getByRole( 'button', { name: 'Activar', exact: true } ).click();
+	await page.waitForSelector( 'text=¿Activar el coordinador de caché?' );
+	await page.getByRole( 'dialog' ).getByRole( 'button', { name: 'Activar', exact: true } ).click();
+	await page.waitForSelector( 'text=El coordinador de caché está apagado', { state: 'detached' } );
+	// Volver a «solo sincronizar» y luego emitir cabeceras: exige confirmación.
+	const settingsCard = page.locator( 'text=Modo >> xpath=ancestor::div[contains(@class,"itb:rounded-lg")]' );
+	if ( await page.getByLabel( 'Solo sincronizar purgas' ).isChecked() === false ) {
+		await page.getByLabel( 'Solo sincronizar purgas' ).check();
+		await settingsCard.getByRole( 'button', { name: 'Guardar' } ).click();
+		await page.waitForFunction( () => [ ...document.querySelectorAll( 'button' ) ].some( ( b ) => b.textContent === 'Guardar' && b.disabled ) );
+	}
+	// Cabeceras vistas por un visitante anónimo (contexto sin cookies).
+	const anon = await pwRequest.newContext();
+	const edgeHeader = async ( path ) => ( await anon.get( BASE + path ) ).headers()[ 'cloudflare-cdn-cache-control' ] || null;
+	const missBefore = await edgeHeader( '/?itb_e2e=' + Date.now() );
+	await page.getByLabel( 'Emitir cabeceras para el edge' ).check();
+	await settingsCard.getByRole( 'button', { name: 'Guardar' } ).click();
+	await page.waitForSelector( 'text=¿Emitir cabeceras para el edge?' );
+	await page.screenshot( { path: OUT + '/7-cache-confirmacion.png' } );
+	await page.getByRole( 'button', { name: 'Emitir cabeceras', exact: true } ).click();
+	await page.waitForSelector( 'text=¿Emitir cabeceras para el edge?', { state: 'detached' } );
+	await page.waitForFunction( () => [ ...document.querySelectorAll( 'button' ) ].some( ( b ) => b.textContent === 'Guardar' && b.disabled ) );
+	const edgeAfter = await edgeHeader( '/?itb_e2e=' + Date.now() );
+	const edgeCart = await edgeHeader( '/carrito/' );
+
+	// Probar una URL: la portada se puede guardar, el carrito no.
+	const inspectCard = page.locator( 'text=Probar una URL >> xpath=ancestor::div[contains(@class,"itb:rounded-lg")]' );
+	await inspectCard.getByLabel( 'URL' ).fill( BASE + '/?itb_e2e_home=' + Date.now() );
+	await inspectCard.getByRole( 'button', { name: 'Probar' } ).click();
+	await inspectCard.locator( 'text=El edge la puede guardar' ).waitFor( { timeout: 20000 } );
+	await inspectCard.getByLabel( 'URL' ).fill( BASE + '/carrito/' );
+	await inspectCard.getByRole( 'button', { name: 'Probar' } ).click();
+	await inspectCard.locator( 'text=El edge no la guarda' ).waitFor( { timeout: 20000 } );
+	expected.push( { path: 'cache/inspect', status: 400 } );
+	const inspectOutside = await rest( 'cache/inspect', 'POST', { url: 'https://example.com/' } );
+
+	// Purga manual por tag, tag inválido y purga completa con confirmación.
+	const purgeCard = page.locator( 'text=Purga manual >> xpath=ancestor::div[contains(@class,"itb:rounded-lg")]' );
+	await purgeCard.getByLabel( 'Tipo de purga' ).selectOption( 'tag' );
+	await purgeCard.getByLabel( 'Qué purgar' ).fill( 'no válido' );
+	expected.push( { path: 'cache/purge', status: 400 } );
+	await purgeCard.getByRole( 'button', { name: 'Purgar' } ).click();
+	await purgeCard.locator( 'text=Tag no válido' ).waitFor();
+	await purgeCard.getByLabel( 'Qué purgar' ).fill( 'home' );
+	await purgeCard.getByRole( 'button', { name: 'Purgar' } ).click();
+	await purgeCard.locator( 'text=Purgado.' ).waitFor( { timeout: 30000 } );
+	await purgeCard.getByLabel( 'Tipo de purga' ).selectOption( 'all' );
+	await purgeCard.getByRole( 'button', { name: 'Purgar' } ).click();
+	await page.waitForSelector( 'text=¿Purgar toda la caché?' );
+	await page.getByRole( 'button', { name: 'Purgar todo', exact: true } ).click();
+	await page.waitForSelector( 'text=¿Purgar toda la caché?', { state: 'detached', timeout: 30000 } );
+	expected.push( { path: 'cache/purge', status: 428 } );
+	const purgeAllUnconfirmed = await rest( 'cache/purge', 'POST', { type: 'all' } );
+	await page.screenshot( { path: OUT + '/7-cache.png', fullPage: true } );
+	const cache = { disabled, missBefore, edgeAfter, edgeCart, inspectOutside, purgeAllUnconfirmed };
+	await anon.dispose();
+
 	// Vista móvil.
 	await page.setViewportSize( { width: 390, height: 844 } );
 	await page.click( 'a[href="#/panel"]' );
@@ -93,12 +168,16 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.waitForSelector( 'text=Costo por plugin' );
 	const overflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
 	await page.screenshot( { path: OUT + '/5b-movil-diagnostico.png', fullPage: true } );
+	await page.click( 'a[href="#/cache"]' );
+	await page.waitForSelector( 'text=Caché de origen' );
+	const overflowCache = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+	await page.screenshot( { path: OUT + '/5c-movil-cache.png', fullPage: true } );
 
 	// El admin de WordPress no debe verse alterado fuera de nuestra página.
 	await page.setViewportSize( { width: 1400, height: 900 } );
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

@@ -1,6 +1,6 @@
 # Pruebas en un WordPress real
 
-Procedimiento con el que se validaron las fases 0 y 1 (WordPress 7.1.3, WooCommerce 11.2.1, LiteSpeed Cache, WPS Hide Login, PHP 8.3, MariaDB 10.11, OPcache activo).
+Procedimiento con el que se validaron las fases 0, 1 y 2a (WordPress 7.1.3, WooCommerce 11.2.1, LiteSpeed Cache 7.9.1, WPS Hide Login, PHP 8.3, MariaDB 10.11, OPcache activo). Desde la fase 2a el sitio corre en **OpenLiteSpeed** (ver abajo), igual que los servidores de producción.
 
 ## Preparación
 
@@ -23,7 +23,11 @@ Procedimiento con el que se validaron las fases 0 y 1 (WordPress 7.1.3, WooComme
 | Desactivar | Admin → Desactivar | Sin loader, sin config y sin directorio de datos (se respeta un `disable` puesto a mano) |
 | Loader huérfano | Borrar la carpeta del plugin por FTP | El sitio y el admin siguen respondiendo 200, sin errores |
 | Desinstalar | Admin → Borrar | Sin tablas `itb_*`, sin opciones `itb_*`, sin capacidad `itb_manage`, sin tareas pendientes, sin loader ni directorio de datos |
-| Admin | `node admin-e2e.js <carpeta_capturas>` | Panel, Diagnóstico, Registro y Avanzado sin errores de consola; kill switch con confirmación; validación de formularios; cookie de diagnóstico emite y retira `Server-Timing`; sin desborde horizontal en móvil |
+| Admin | `node admin-e2e.js <carpeta_capturas>` | Panel, Diagnóstico, Caché, Registro y Avanzado sin errores de consola; kill switch con confirmación; validación de formularios; cookie de diagnóstico emite y retira `Server-Timing`; Caché: activar el módulo y pasar a cabeceras con confirmación, la portada anónima sale cacheable y el carrito con `no-store`, purga por tag, tag inválido rechazado, purga completa con confirmación; sin desborde horizontal en móvil |
+| Caché: cabeceras | `curl -D -` a portada, página, producto, carrito, cuenta, login, búsqueda y un 404, como anónimo, dos veces | Cacheables: `Cloudflare-CDN-Cache-Control` y `Cache-Tag` en el fallo y en el acierto de LSCache. Resto: `no-store` para el edge |
+| Caché: purga | Cambiar el stock de un producto (o purgar el tag `p-ID` desde la pantalla) | Producto, categoría, tienda y portada pasan a `miss` al instante; tras el vaciado de la cola (30 s) y el recalentado vuelven a `hit` en < 60 s |
+| Caché: nonces | Página cacheada con un formulario con nonce; adelantar el reloj del navegador 11 h | Una petición a `/nonce` y los valores reemplazados. Firma o acciones alteradas → 400 |
+| Caché: WP Rocket | Instalar WP Rocket desde su código (sin licencia basta para el adaptador) | Purgar un post llama a `rocket_clean_files` una vez; `rocket_clean_domain` se replica como "todo"; fuera de Apache, la config compila `edge_html = false` |
 | Actualización 0.1 → 0.2 | Reemplazar la carpeta del plugin y abrir el admin | Esquema v2 (tablas `itb_route_samples` e `itb_metrics_hourly`), config recompilada con el perfilador |
 | Muestreo | Muestreo intensivo desde Diagnóstico y navegar | Muestras de todos los tipos de request; kill switch o módulo apagado: ninguna |
 | Costo propio | Columna `overhead_us` de las muestras | < 1 ms en páginas de WooCommerce |
@@ -39,3 +43,15 @@ ITB_BASE_URL=http://127.0.0.1:8080 ITB_USER=admin ITB_PASS='...' ITB_LOGIN_PATH=
 ```
 
 `ITB_CHROMIUM` permite indicar el ejecutable de Chromium si Playwright no descarga el suyo.
+
+## OpenLiteSpeed + LSCache (fase 2a)
+
+LSCache solo cachea de verdad con un servidor LiteSpeed; con `php -S` o Apache no se puede probar el coordinador de caché.
+
+1. Repositorio de LiteSpeed: `deb https://rpms.litespeedtech.com/debian/ <distribución> main` (claves `lst_repo.gpg` y `lst_debian_repo.gpg` en `https://rpms.litespeedtech.com/debian/`, copiadas a `/etc/apt/trusted.gpg.d/`). Instalar `openlitespeed` y `lsphp83` con `lsphp83-mysql`, `lsphp83-curl`, `lsphp83-intl` y `lsphp83-opcache`.
+2. Virtual host con `docRoot` en la instalación de WordPress, `rewrite { enable 1; autoLoadHtaccess 1 }` y `module cache { storagePath ... }`. El `.htaccess` necesita el bloque de reescritura de WordPress (OLS no lee `mod_rewrite` sin él) para que funcionen `/wp-json/` y los enlaces permanentes.
+3. Los archivos del sitio deben pertenecer al usuario de OLS (`nobody:nogroup` por defecto): después de copiar el plugin, `chown -R nobody:nogroup wp-content/plugins/imagina-turbo`.
+4. Reiniciar con `/usr/local/lsws/bin/lswsctrl restart` tras cambiar la configuración.
+5. Ojo al probar desde la línea de comandos: un `wp eval` (o cualquier PHP en CLI) consume la cola de purga diferida de LSCache (`litespeed.purge.queue`) sin poder enviarla al servidor. Para probar la purga diferida, escribir la opción directamente en la base de datos y hacer un request HTTP.
+6. LSCache viene con la caché privada de usuarios logueados y la de REST activas: las pruebas del admin cubren que nuestras rutas no se guardan.
+

@@ -172,6 +172,33 @@ final class ConfigTest extends TestCase {
 		$this->assertSame( 0, $data['profiler']['intensive_until'] );
 		$this->assertArrayHasKey( 'plugin_filter', $data['modules'] );
 		$this->assertSame( [], $warnings );
+
+		// Caché: apagado por defecto (riesgo moderado), en modo solo sincronizar.
+		$this->assertFalse( $data['modules']['cache_coordinator'] );
+		$this->assertSame( 'sync', $data['cache']['mode'] );
+		$this->assertSame( DAY_IN_SECONDS, $data['cache']['edge_ttl'] );
+		$this->assertTrue( $data['cache']['nonce_refresh'] );
+		$this->assertTrue( $data['cache']['edge_html'] );
+	}
+
+	public function test_settings_sanitize_cache_keys(): void {
+		$clean = Settings::sanitize(
+			[
+				'cache_mode'          => 'headers',
+				'cache_edge_ttl'      => 5,
+				'cache_swr'           => '3600',
+				'cache_sie'           => 10 * YEAR_IN_SECONDS,
+				'cache_nonce_refresh' => false,
+				'cache_warm'          => 'no',
+			]
+		);
+		$this->assertSame( 'headers', $clean['cache_mode'] );
+		$this->assertSame( 60, $clean['cache_edge_ttl'] );
+		$this->assertSame( 3600, $clean['cache_swr'] );
+		$this->assertSame( 30 * DAY_IN_SECONDS, $clean['cache_sie'] );
+		$this->assertFalse( $clean['cache_nonce_refresh'] );
+		$this->assertTrue( $clean['cache_warm'], 'un valor no booleano deja el de por defecto' );
+		$this->assertSame( 'sync', Settings::sanitize( [ 'cache_mode' => 'edge' ] )['cache_mode'] );
 	}
 
 	public function test_hash_is_deterministic_and_ignores_timestamp(): void {

@@ -1,4 +1,4 @@
-import { Gauge, ScrollText, Settings2, Zap } from 'lucide-react';
+import { Activity, Gauge, ScrollText, Settings2, Zap } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge } from './ui/badge';
 import { config } from '@/lib/config';
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 
 const items: { route: Route; label: string; icon: typeof Gauge }[] = [
 	{ route: 'panel', label: __( 'Panel' ), icon: Gauge },
+	{ route: 'diagnostico', label: __( 'Diagnóstico' ), icon: Activity },
 	{ route: 'registro', label: __( 'Registro' ), icon: ScrollText },
 	{ route: 'avanzado', label: __( 'Avanzado' ), icon: Settings2 },
 ];
@@ -52,7 +53,7 @@ export function Layout( { children }: { children: ReactNode } ) {
 					) ) }
 				</nav>
 				<p className="itb:hidden itb:px-4 itb:pb-4 itb:text-[11px] itb:leading-snug itb:text-zinc-400 itb:md:block">
-					{ __( 'Fase 0 · Fundaciones. Los módulos llegan por fases.' ) }
+					{ __( 'Fase 1 · Perfilador y diagnóstico. Los módulos llegan por fases.' ) }
 				</p>
 			</aside>
 			<main className="itb:min-w-0 itb:flex-1 itb:p-5 itb:md:p-8">

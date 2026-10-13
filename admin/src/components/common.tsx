@@ -33,7 +33,7 @@ export function PageHeader( { title, description, actions }: { title: string; de
 				<h1 className="itb:text-xl itb:font-semibold itb:tracking-tight itb:text-zinc-900">{ title }</h1>
 				{ description && <p className="itb:mt-1 itb:text-sm itb:text-zinc-500">{ description }</p> }
 			</div>
-			{ actions && <div className="itb:flex itb:gap-2">{ actions }</div> }
+			{ actions && <div className="itb:flex itb:flex-wrap itb:gap-2">{ actions }</div> }
 		</div>
 	);
 }

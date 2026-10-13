@@ -90,12 +90,13 @@ imagina-turbo/
 2. El loader:
    0. Comprueba que el plugin principal existe en disco (`WP_PLUGIN_DIR/imagina-turbo/imagina-turbo.php`). Si se borró por FTP sin pasar por `uninstall.php`, el loader queda huérfano: no hace nada y no lanza errores. El plugin principal, al cargarse, comprueba además que está en `active_plugins`; si el loader se ejecuta con el plugin inactivo, tampoco hace nada (la config compilada se borra al desactivar).
    1. Revisa el kill switch (constante `ITB_DISABLE`, archivo `wp-content/imagina-turbo/disable`, cookie de bypass de admin válida). Si aplica, termina sin hacer nada.
-   2. Revisa el modo seguro (`wp-content/imagina-turbo/safe-mode.flag`). Si existe, solo carga el perfilador pasivo.
+   2. Revisa el modo seguro (`wp-content/imagina-turbo/safe-mode.flag`). Si existe, termina sin hacer nada más. *(Cambio en la fase 1: el borrador decía "solo carga el perfilador pasivo". Se descartó porque el perfilador envuelve callbacks de otros plugins y escribe en la base de datos; en modo seguro el plugin no debe tocar nada del sitio. El diagnóstico se retoma al salir del modo seguro.)*
    3. Incluye `wp-content/imagina-turbo/config.php` (array PHP, OPcache). Si no existe o la versión no coincide, no aplica nada en el frontend (sin guardia ni filtros) y el plugin principal la recompila en el siguiente request de admin o cron. No se activa el modo seguro por esto: una config ausente no es un fallo, es un estado inicial.
    4. Clasifica el request con `RequestClassifier`. Lee solo `$_SERVER`, `$_GET`, `$_POST['action']` (admin-ajax recibe `action` casi siempre por POST; PHP ya parseó el cuerpo) y constantes ya definidas. La ruta se normaliza quitando el path de `home_url` (WordPress en subcarpeta) y el prefijo REST real (`rest_get_url_prefix()`, que puede cambiar por filtro) viene de la config compilada.
    5. Ejecuta la **guardia PHP** del escudo (bloqueos baratos: XML-RPC, enumeración de autores, 404 de assets) antes de cargar plugins.
    6. Registra el filtro de `option_active_plugins` si la carga condicional está activa para ese tipo de request.
    7. Registra el `shutdown` para detectar fatales.
+   8. Decide si el request entra en la muestra del perfilador (cookie de diagnóstico válida, muestreo intensivo vigente o un número aleatorio contra la tasa). Solo si entra, carga `Collector` (ver `docs/02`, módulo 1).
 3. Se cargan los plugins. El plugin principal registra solo los módulos activos para ese tipo de request.
 4. Los módulos actúan por hooks. Ninguno usa output buffering.
 
@@ -151,7 +152,8 @@ Orden de evaluación: CLI → cron → XML-RPC → admin-ajax → admin → logi
 
 La regla "sin consultas en el frontend" admite solo estas excepciones, todas muestreadas o fuera del camino crítico:
 
-- Muestras del perfilador (1 %) y auditoría de `Set-Cookie`: se escriben en `shutdown` **después** de `fastcgi_finish_request()`/`litespeed_finish_request()` cuando existe, con un solo `INSERT`.
+- Muestras del perfilador (1 %, con la auditoría pasiva de `Set-Cookie` en la misma fila): se escriben en `shutdown` con un solo `INSERT`. *(Cambio en la fase 1: no se llama a `fastcgi_finish_request()`/`litespeed_finish_request()`. Cerrar la respuesta antes de tiempo hace que se pierda la salida que otros plugins emiten en `shutdown`, y ese fallo aparecería solo en el 1 % de los requests, imposible de diagnosticar. El `INSERT` cuesta décimas de milisegundo y solo en la muestra.)*
+- Caché de atribución del perfilador (`wp-content/imagina-turbo/profiler-symbols.php`): archivo PHP escrito de forma atómica solo en requests muestreados que descubren funciones o clases nuevas; se sirve desde OPcache.
 - Contador de fatales del modo seguro: archivo, no base de datos.
 - Endpoint RUM local (solo sin hub): `SHORTINIT`, un `INSERT ... ON DUPLICATE KEY UPDATE`.
 

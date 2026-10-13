@@ -165,8 +165,11 @@ final class ConfigTest extends TestCase {
 		$this->assertContains( 'itb_bypass', $data['bypass_cookies'] );
 		$this->assertFalse( $data['requires']['xmlrpc'] );
 
-		// Ningún módulo está implementado en la fase 0: todos apagados aunque sean seguros.
-		$this->assertNotContains( true, $data['modules'] );
+		// Solo los módulos implementados y seguros quedan activos (fase 1: el perfilador).
+		$this->assertTrue( $data['modules']['profiler'] );
+		$this->assertSame( [ 'profiler' ], array_keys( array_filter( $data['modules'] ) ) );
+		$this->assertSame( 0.01, $data['profiler']['rate'] );
+		$this->assertSame( 0, $data['profiler']['intensive_until'] );
 		$this->assertArrayHasKey( 'plugin_filter', $data['modules'] );
 		$this->assertSame( [], $warnings );
 	}

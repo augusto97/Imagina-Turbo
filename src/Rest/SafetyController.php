@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /safety/kill-switch, /safety/bypass-cookie, /safety/safe-mode/exit.
+ * POST /safety/kill-switch, /safety/bypass-cookie, /safety/diag-cookie, /safety/safe-mode/exit.
  *
  * @package ImaginaTurbo
  */
@@ -52,6 +52,23 @@ final class SafetyController extends Controller {
 				],
 			]
 		);
+		$this->route(
+			'/safety/diag-cookie',
+			\WP_REST_Server::CREATABLE,
+			[ $this, 'diagCookie' ],
+			[
+				'enabled' => [
+					'type'     => 'boolean',
+					'required' => true,
+				],
+				'hours'   => [
+					'type'    => 'integer',
+					'minimum' => 1,
+					'maximum' => 8,
+					'default' => 1,
+				],
+			]
+		);
 		$this->route( '/safety/safe-mode/exit', \WP_REST_Server::CREATABLE, [ $this, 'exitSafeMode' ] );
 	}
 
@@ -75,8 +92,31 @@ final class SafetyController extends Controller {
 	}
 
 	public function bypassCookie( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		return $this->signedCookie(
+			$request,
+			AdminBypassCookie::NAME,
+			'bypass_cookie',
+			__( 'Cookie de bypass emitida para el administrador actual.', 'imagina-turbo' ),
+			__( 'Cookie de bypass retirada.', 'imagina-turbo' )
+		);
+	}
+
+	public function diagCookie( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		return $this->signedCookie(
+			$request,
+			AdminBypassCookie::DIAG_NAME,
+			'diag_cookie',
+			__( 'Cookie de diagnóstico emitida: este navegador recibe Server-Timing y todas sus visitas se miden.', 'imagina-turbo' ),
+			__( 'Cookie de diagnóstico retirada.', 'imagina-turbo' )
+		);
+	}
+
+	/**
+	 * Emite o retira una cookie firmada para el administrador actual (HttpOnly, hasta 8 h).
+	 */
+	private function signedCookie( \WP_REST_Request $request, string $name, string $eventType, string $onMessage, string $offMessage ): \WP_REST_Response|\WP_Error {
 		$enabled = (bool) $request->get_param( 'enabled' );
-		$key     = AdminBypassCookie::key();
+		$key     = AdminBypassCookie::key( $name );
 		if ( null === $key ) {
 			return $this->error( 'itb_salts', __( 'Faltan AUTH_KEY y AUTH_SALT en wp-config.php: no se puede firmar la cookie.', 'imagina-turbo' ), 409 );
 		}
@@ -94,7 +134,7 @@ final class SafetyController extends Controller {
 
 		if ( ! headers_sent() ) {
 			setcookie(
-				AdminBypassCookie::NAME,
+				$name,
 				$value,
 				[
 					'expires'  => $expires,
@@ -109,8 +149,8 @@ final class SafetyController extends Controller {
 
 		$this->container->get( EventLog::class )->info(
 			'core',
-			'bypass_cookie',
-			$enabled ? __( 'Cookie de bypass emitida para el administrador actual.', 'imagina-turbo' ) : __( 'Cookie de bypass retirada.', 'imagina-turbo' ),
+			$eventType,
+			$enabled ? $onMessage : $offMessage,
 			[
 				'user'    => get_current_user_id(),
 				'expires' => $enabled ? $expires : null,

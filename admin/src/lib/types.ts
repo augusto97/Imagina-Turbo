@@ -28,9 +28,16 @@ export interface SafeModeDetails {
 	context?: { message?: string; file?: string; line?: number; count?: number };
 }
 
+export interface SignedCookie {
+	available: boolean;
+	active: boolean;
+	expires: number | null;
+}
+
 export interface Safety {
 	kill_switch: { active: boolean; reason: string | null; constant: boolean; file: boolean };
-	bypass_cookie: { available: boolean; active: boolean; expires: number | null };
+	bypass_cookie: SignedCookie;
+	diag_cookie: SignedCookie;
 	safe_mode: { active: boolean; details: SafeModeDetails | null };
 	data_dir: { path: string; exists: boolean; writable: boolean };
 }
@@ -103,4 +110,103 @@ export interface CompileResult {
 	file: string;
 	errors: string[];
 	warnings: string[];
+}
+
+export type Period = '1h' | '24h' | '48h' | '7d' | '30d';
+
+export interface Sampling {
+	enabled: boolean;
+	rate: number;
+	intensive_until: number;
+	intensive_seconds: number;
+}
+
+export interface PluginCost {
+	component: string;
+	load_ms: number;
+	hook_ms: number;
+	total_ms: number;
+	kb: number;
+	share_pct: number;
+	seen_pct: number;
+}
+
+export interface PhaseCost {
+	phase: string;
+	ms: number;
+	seen_pct: number;
+}
+
+export interface ProfilerSummary {
+	period: Period;
+	sample_hours: number;
+	sampling: Sampling;
+	sources: { random: number; intensive: number; diag: number };
+	summary: {
+		samples: number;
+		ms_avg: number;
+		ms_p50: number;
+		ms_p95: number;
+		mem_avg_mb: number;
+		queries_avg: number;
+		overhead_us_avg: number;
+		cacheable_pct: number;
+		via_cf_pct: number;
+		by_type: Record<string, number>;
+	};
+	phases: PhaseCost[];
+	passive: { cookies: Record<string, number>; private_cache: number; eligible: number };
+	latest_diag: null | {
+		created_at: string;
+		request_type: string;
+		route_key: string;
+		ms: number;
+		mem_kb: number;
+		queries: number;
+		overhead_us: number;
+		phases: Record<string, number> | null;
+		plugins: PluginCost[];
+	};
+	rollup: { last_hour: string | null };
+}
+
+export interface RouteCost {
+	request_type: string;
+	route_key: string;
+	n: number;
+	ms_p50: number;
+	ms_p95: number;
+	mem_p95: number;
+	queries_avg: number;
+}
+
+export interface AuditResult {
+	label: string;
+	url: string;
+	status: number;
+	verdict: 'ok' | 'warning' | 'error';
+	issues: string[];
+	cookies: { name: string; hint: string }[];
+	headers: Record<string, string>;
+}
+
+export interface AuditReport {
+	at: number;
+	results: AuditResult[];
+	issues: number;
+}
+
+export interface HubStatus {
+	configured: boolean;
+	url: string;
+	registered: boolean;
+	site_id: string;
+	registered_at: number;
+	last_ok_at: number;
+	last_error: string;
+	failures: number;
+	next_attempt: number;
+	pending_hours: number;
+	license: boolean;
+	result?: { sent: boolean; reason: string };
 }

@@ -217,6 +217,10 @@ final class ConfigCompiler {
 			],
 			'static_passthrough'          => array_map( 'strtolower', $compat['static_passthrough'] ?? [] ),
 			'integrations'                => $compat['integrations'] ?? [],
+			'profiler'                    => [
+				'rate'            => (float) $this->settings->get( 'profiler_sample_rate', Settings::DEFAULT_SAMPLE_RATE ),
+				'intensive_until' => (int) $this->settings->get( 'profiler_intensive_until', 0 ),
+			],
 		];
 
 		$data['hash'] = self::hash( $data );

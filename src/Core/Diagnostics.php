@@ -124,19 +124,8 @@ final class Diagnostics {
 	public function safety(): array {
 		$dataDir  = Runtime::$dataDir;
 		$safeMode = $this->container->get( SafeMode::class );
-		$cookie   = null;
-		$key      = AdminBypassCookie::key();
-		if ( null !== $key && isset( $_COOKIE[ AdminBypassCookie::NAME ] ) ) {
-			$raw = sanitize_text_field( wp_unslash( (string) $_COOKIE[ AdminBypassCookie::NAME ] ) );
-			$uid = AdminBypassCookie::validate( $raw, $key, time() );
-			if ( null !== $uid ) {
-				$parts  = explode( '|', $raw );
-				$cookie = [
-					'user'    => $uid,
-					'expires' => (int) ( $parts[1] ?? 0 ),
-				];
-			}
-		}
+		$bypass   = self::signedCookie( AdminBypassCookie::NAME );
+		$diag     = self::signedCookie( AdminBypassCookie::DIAG_NAME );
 		return [
 			// Estado actual en disco/constante, no el del inicio del request (que puede haber cambiado en este mismo request).
 			'kill_switch'   => [
@@ -145,11 +134,8 @@ final class Diagnostics {
 				'constant' => KillSwitch::constantActive(),
 				'file'     => KillSwitch::fileActive( $dataDir ),
 			],
-			'bypass_cookie' => [
-				'available' => null !== $key,
-				'active'    => null !== $cookie,
-				'expires'   => $cookie['expires'] ?? null,
-			],
+			'bypass_cookie' => $bypass,
+			'diag_cookie'   => $diag,
 			'safe_mode'     => [
 				'active'  => $safeMode->isActive(),
 				'details' => $safeMode->details(),
@@ -159,6 +145,27 @@ final class Diagnostics {
 				'exists'   => is_dir( $dataDir ),
 				'writable' => is_dir( $dataDir ) && wp_is_writable( $dataDir ),
 			],
+		];
+	}
+
+	/**
+	 * Estado de una cookie firmada de administrador en el request actual.
+	 *
+	 * @return array{available: bool, active: bool, expires: int|null}
+	 */
+	private static function signedCookie( string $name ): array {
+		$key     = AdminBypassCookie::key( $name );
+		$expires = null;
+		if ( null !== $key && isset( $_COOKIE[ $name ] ) && is_string( $_COOKIE[ $name ] ) ) {
+			$raw = sanitize_text_field( wp_unslash( $_COOKIE[ $name ] ) );
+			if ( null !== AdminBypassCookie::validate( $raw, $key, time() ) ) {
+				$expires = (int) explode( '|', $raw )[1];
+			}
+		}
+		return [
+			'available' => null !== $key,
+			'active'    => null !== $expires,
+			'expires'   => $expires,
 		];
 	}
 

@@ -25,7 +25,7 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Licencia vía Imagina Updater.
 - **Aceptación:** loader < 0,3 ms y < 150 KB medidos con el benchmark; activar/desactivar el plugin no deja residuos; un fatal simulado 3 veces activa el modo seguro (fatal originado en el propio plugin, ya que en la fase 0 aún no se filtran plugins); la matriz compila solo las reglas de los plugins activos; el loader huérfano (plugin borrado por FTP) no produce errores.
 
-### Fase 1 — Perfilador y diagnóstico (solo lectura)
+### Fase 1 — Perfilador y diagnóstico (solo lectura) ✅ (completada, ver "Estado de la fase 1" al final)
 - Módulo `Profiler`, `Server-Timing`, muestras y rollups.
 - Pantalla Diagnóstico.
 - Auditoría de `Set-Cookie` y de bfcache (lado servidor).
@@ -127,3 +127,31 @@ Completada el 2026-10-13. Criterios de aceptación:
 Calidad: 117 pruebas unitarias, PHPStan nivel 8 sin errores, PHPCS sin errores, TypeScript estricto, E2E del admin en Chromium.
 
 Pendiente fuera del alcance de la fase 0: el hub (fase 1) y el verificador (servicios aparte), y las pruebas en OpenLiteSpeed/LSPHP reales (la instancia de prueba usó el servidor integrado de PHP).
+
+## Estado de la fase 1
+
+Completada el 2026-10-13 (versión 0.2.0, esquema de base de datos v2). Probada en WordPress 7.1.3 + WooCommerce 11.2.1 + LiteSpeed Cache 7.9.1 + WPS Hide Login, PHP 8.3 con OPcache, MariaDB 10.11.
+
+| Criterio | Resultado |
+|---|---|
+| Overhead < 0,2 ms sin muestreo | Sin diferencia medible en el benchmark (+0,00–0,01 ms; el loader completo sigue en 0,04 ms y 18 KB) |
+| Overhead < 1 ms en request muestreado | Costo propio medido en el sitio real: mediana ~0,5 ms en REST/AJAX y ~0,6–0,9 ms en páginas de WooCommerce (incluye envolver ~180 bloques). Benchmark sintético: 0,27 ms. A/B de tiempo de respuesta muestreado vs no muestreado: diferencia dentro del ruido (< 0,5–1 ms) |
+| Totales coherentes con Query Monitor | Tiempo hasta `shutdown` en el mismo request: 180,53 ms (perfilador) vs 180,54 ms (Query Monitor 4.0.7). Memoria y consultas del perfilador son mayores porque se toman al final de `shutdown`, después de que Query Monitor genera su propia salida |
+| Ranking de plugins ±15 % | Query Monitor no desglosa tiempo por plugin, así que se validó con A/B (desactivar el plugin y medir): WooCommerce en `/sample-page/` 63,7 ms atribuidos vs 72 ms de A/B (medianas, −11,5 %) y 70,1 vs 80 ms (medias, −12,4 %). LiteSpeed Cache: 3 ms atribuidos, A/B indistinguible del ruido (±2 ms). El orden coincide |
+| Telemetría llega al hub; el sitio no se afecta si cae | Hub simulado (`tests/e2e/mock-hub.php`): registro, lote firmado y comprimido, verificación de firma y nonce. Con el hub respondiendo 503 o con el puerto cerrado: error controlado, reintento a 1 h que la tarea horaria respeta, sitio y admin responden 200 en todo momento; al volver el hub, el lote pendiente llega |
+
+Hallazgos corregidos durante la validación:
+
+- Sin atribuir el render de bloques dinámicos, el perfilador solo veía ~56 % del costo real de WooCommerce. Ahora se miden los `render_callback` de plugins (incluidos los de `block.json`).
+- El costo propio rondaba 1–1,4 ms: casi todo era resolver a qué plugin pertenece cada callback (~420 callbacks en ~170 archivos). Se dejó de envolver el núcleo y se añadió una caché persistente de atribución (`profiler-symbols.php`, OPcache). Una alternativa probada (listar las funciones del núcleo al arrancar) costaba 0,35–0,8 ms por sí sola y se descartó.
+- La telemetría podía marcar como enviada una hora aún no agregada: ahora el envío ejecuta antes el agregado y no pasa de la última hora agregada.
+- Los eventos del lote podían repetirse en el siguiente (faltaba el límite superior de la ventana).
+- `Server-Timing` con tildes se corrompía (las cabeceras son Latin-1): ahora solo ASCII.
+- `Set-Cookie: =valor` se registraba como cookie `valor`.
+- El orden de las fases dependía de qué tipos de request se mezclaban; ahora sigue el orden real del request.
+
+Decisiones que cambian los documentos de arquitectura (anotadas en `docs/01` y `docs/02`): en modo seguro el perfilador no corre; no se usa `fastcgi_finish_request()`; `Server-Timing` solo con la cookie de diagnóstico (sin `?itb_debug=1`).
+
+Calidad: 142 pruebas unitarias, PHPStan nivel 8 sin errores, PHPCS sin errores, TypeScript estricto, E2E del admin en Chromium (escritorio y móvil sin desbordes).
+
+Pendiente fuera del alcance: el hub real (servicio aparte; el cliente está probado contra el simulado), causas de bfcache del lado del navegador (RUM, fase 6) y las pruebas en OpenLiteSpeed/LSPHP reales.

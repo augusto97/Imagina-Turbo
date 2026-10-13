@@ -17,6 +17,8 @@ if ( ! is_dir( $itb_tmp ) ) {
 define( 'ITB_TESTS_TMP', $itb_tmp );
 define( 'ABSPATH', $itb_tmp . '/wp/' );
 define( 'WP_CONTENT_DIR', $itb_tmp . '/wp/wp-content' );
+define( 'WP_PLUGIN_DIR', WP_CONTENT_DIR . '/plugins' );
+define( 'WPMU_PLUGIN_DIR', WP_CONTENT_DIR . '/mu-plugins' );
 define( 'ITB_VERSION', '0.1.0-test' );
 define( 'DAY_IN_SECONDS', 86400 );
 define( 'HOUR_IN_SECONDS', 3600 );

@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useQuery } from '@tanstack/react-query';
-import { Download, ExternalLink, RotateCcw, ShieldOff, Upload } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Activity, Download, ExternalLink, Link2, RotateCcw, Send, ShieldOff, Unlink, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -10,13 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Select, Textarea } from '@/components/ui/input';
+import { Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction, useStatus } from '@/lib/queries';
-import type { CompileResult, PublicSettings, Safety, Status } from '@/lib/types';
+import type { CompileResult, HubStatus, PublicSettings, Safety, SignedCookie, Status } from '@/lib/types';
 import { downloadFile, formatDate } from '@/lib/utils';
 
 export function Advanced() {
@@ -29,12 +29,29 @@ export function Advanced() {
 			{ data && (
 				<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2">
 					<KillSwitchCard safety={ data.safety } />
-					<BypassCard safety={ data.safety } />
+					<SignedCookieCard
+						cookie={ data.safety.bypass_cookie }
+						endpoint="safety/bypass-cookie"
+						title={ __( 'Cookie de bypass' ) }
+						description={ __( 'Navega el sitio "como si el plugin no existiera", solo tú y por un tiempo limitado. Sirve para comparar y diagnosticar.' ) }
+						activeTone="amber"
+						icon={ ShieldOff }
+					/>
+					<SignedCookieCard
+						cookie={ data.safety.diag_cookie }
+						endpoint="safety/diag-cookie"
+						title={ __( 'Cookie de diagnóstico' ) }
+						description={ __( 'Mide todas tus visitas (no solo la muestra) y añade la cabecera Server-Timing con las fases y los plugins más costosos. Míralo en las herramientas de desarrollo del navegador, pestaña Red → Tiempos.' ) }
+						activeTone="blue"
+						activeHint={ data.safety.bypass_cookie.active ? __( 'Tienes también la cookie de bypass: mientras esté activa, el plugin no corre para ti y no hay nada que medir.' ) : undefined }
+						icon={ Activity }
+					/>
 					<SafeModeCard safety={ data.safety } />
 					<ConfigCard status={ data } />
 					<SettingsCard />
 					<ImportExportCard />
 					<LicenseCard status={ data } />
+					<HubCard />
 					<LoaderCard status={ data } />
 				</div>
 			) }
@@ -79,29 +96,31 @@ function KillSwitchCard( { safety }: { safety: Safety } ) {
 	);
 }
 
-function BypassCard( { safety }: { safety: Safety } ) {
+function SignedCookieCard( { cookie, endpoint, title, description, activeTone, activeHint, icon: Icon }: { cookie: SignedCookie; endpoint: string; title: string; description: string; activeTone: 'amber' | 'blue'; activeHint?: string; icon: typeof ShieldOff } ) {
 	const [ hours, setHours ] = useState( '1' );
-	const action = useAction( ( vars: { enabled: boolean; hours: number } ) => api<{ active: boolean; expires: number | null }>( 'safety/bypass-cookie', 'POST', vars ) );
-	const cookie = safety.bypass_cookie;
+	const action = useAction( ( vars: { enabled: boolean; hours: number } ) => api<{ active: boolean; expires: number | null }>( endpoint, 'POST', vars ) );
 
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>{ __( 'Cookie de bypass' ) }</CardTitle>
-				<CardDescription>{ __( 'Navega el sitio "como si el plugin no existiera", solo tú y por un tiempo limitado. Sirve para comparar y diagnosticar.' ) }</CardDescription>
+				<CardTitle>{ title }</CardTitle>
+				<CardDescription>{ description }</CardDescription>
 			</CardHeader>
 			<CardContent>
 				{ ! cookie.available ? (
 					<Notice level="warning">{ __( 'Faltan AUTH_KEY y AUTH_SALT en wp-config.php: no se puede firmar la cookie.' ) }</Notice>
 				) : cookie.active ? (
-					<div className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-3">
-						<span className="itb:text-[13px]">
-							<Badge tone="amber">{ __( 'Activa' ) }</Badge> { __( 'hasta' ) } { formatDate( cookie.expires, config.locale ) }
-						</span>
-						<Button variant="outline" size="sm" disabled={ action.isPending } onClick={ () => action.mutate( { enabled: false, hours: 1 } ) }>
-							{ __( 'Retirar' ) }
-						</Button>
-					</div>
+					<>
+						<div className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-3">
+							<span className="itb:text-[13px]">
+								<Badge tone={ activeTone }>{ __( 'Activa' ) }</Badge> { __( 'hasta' ) } { formatDate( cookie.expires, config.locale ) }
+							</span>
+							<Button variant="outline" size="sm" disabled={ action.isPending } onClick={ () => action.mutate( { enabled: false, hours: 1 } ) }>
+								{ __( 'Retirar' ) }
+							</Button>
+						</div>
+						{ activeHint && <p className="itb:mt-3 itb:text-xs itb:text-zinc-500">{ activeHint }</p> }
+					</>
 				) : (
 					<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
 						<Select className="itb:w-32" value={ hours } onChange={ ( e ) => setHours( e.target.value ) } aria-label={ __( 'Duración' ) }>
@@ -112,7 +131,7 @@ function BypassCard( { safety }: { safety: Safety } ) {
 							) ) }
 						</Select>
 						<Button size="sm" disabled={ action.isPending } onClick={ () => action.mutate( { enabled: true, hours: Number( hours ) } ) }>
-							<ShieldOff aria-hidden />
+							<Icon aria-hidden />
 							{ __( 'Emitir para mí' ) }
 						</Button>
 					</div>
@@ -261,7 +280,7 @@ function SettingsCard() {
 						<label className="itb:flex itb:items-center itb:justify-between itb:gap-3 itb:text-[13px]">
 							<span>
 								<span className="itb:font-medium">{ __( 'Modo depuración' ) }</span>
-								<span className="itb:block itb:text-xs itb:text-zinc-500">{ __( 'Reservado para diagnóstico: el perfilador (fase 1) lo usa para mostrar Server-Timing.' ) }</span>
+								<span className="itb:block itb:text-xs itb:text-zinc-500">{ __( 'Reservado para las fases siguientes (registro más detallado). Para Server-Timing usa la cookie de diagnóstico.' ) }</span>
 							</span>
 							<Switch checked={ form.watch( 'debug' ) } onCheckedChange={ ( value ) => form.setValue( 'debug', value, { shouldDirty: true } ) } />
 						</label>
@@ -402,8 +421,8 @@ function LoaderCard( { status }: { status: Status } ) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>{ __( 'Loader MU y conexión con el hub' ) }</CardTitle>
-				<CardDescription>{ __( 'El loader corre antes que los demás plugins. El hub llega en la fase 1; el sitio nunca depende de él.' ) }</CardDescription>
+				<CardTitle>{ __( 'Loader MU' ) }</CardTitle>
+				<CardDescription>{ __( 'Corre antes que los demás plugins: clasifica el request, aplica el kill switch y decide la muestra del perfilador.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent>
 				<dl className="itb:m-0">
@@ -418,6 +437,126 @@ function LoaderCard( { status }: { status: Status } ) {
 					</KeyValue>
 				</dl>
 			</CardContent>
+		</Card>
+	);
+}
+
+const hubSchema = z.object( {
+	url: z
+		.string()
+		.trim()
+		.max( 200 )
+		.refine( ( value ) => value === '' || /^https:\/\/[^\s?#@]+$/i.test( value ) || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/[^\s?#@]*)?$/i.test( value ), {
+			message: __( 'Debe ser https (http solo para localhost), sin usuario, consulta ni fragmento.' ),
+		} ),
+} );
+
+function HubCard() {
+	const client = useQueryClient();
+	const { data, isLoading, error } = useQuery( { queryKey: [ 'hub' ], queryFn: () => api<HubStatus>( 'hub' ) } );
+	const [ confirmDisconnect, setConfirmDisconnect ] = useState( false );
+	const form = useForm<z.infer<typeof hubSchema>>( { resolver: zodResolver( hubSchema ), defaultValues: { url: '' } } );
+	const onDone = ( status: HubStatus ) => client.setQueryData( [ 'hub' ], status );
+	const save = useAction( ( url: string ) => api<HubStatus>( 'hub', 'PUT', { url } ) );
+	const register = useAction( () => api<HubStatus>( 'hub/register', 'POST' ) );
+	const send = useAction( () => api<HubStatus>( 'hub/send', 'POST' ) );
+	const disconnect = useAction( () => api<HubStatus>( 'hub', 'DELETE' ) );
+	const pending = save.isPending || register.isPending || send.isPending || disconnect.isPending;
+	const actionError = save.error ?? register.error ?? send.error ?? disconnect.error;
+
+	useEffect( () => {
+		if ( data ) {
+			form.reset( { url: data.url } );
+		}
+	}, [ data, form ] );
+
+	const reasons: Record<string, string> = {
+		ok: __( 'Telemetría enviada.' ),
+		nothing_pending: __( 'Nada pendiente: el siguiente lote sale al cerrar la hora.' ),
+		not_registered: __( 'El sitio no está registrado en el hub.' ),
+		hub_changed: __( 'La URL del hub cambió: registra el sitio de nuevo.' ),
+	};
+	const result = send.data?.result;
+
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:justify-between">
+					<CardTitle>{ __( 'Hub de Imagina' ) }</CardTitle>
+					{ data && <Badge tone={ data.registered ? ( data.failures > 0 ? 'amber' : 'green' ) : 'neutral' }>{ data.registered ? ( data.failures > 0 ? __( 'Con errores' ) : __( 'Conectado' ) ) : data.configured ? __( 'Sin registrar' ) : __( 'Apagado' ) }</Badge> }
+				</div>
+				<CardDescription>
+					{ __( 'Envía cada hora métricas agregadas, el inventario de plugins y los avisos. Nunca datos de clientes, correos, pedidos ni IPs. Si el hub falla, el sitio sigue igual y se reintenta (lo de más de 24 h se descarta).' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				{ isLoading && <Skeleton className="itb:h-24" /> }
+				{ error && <Notice level="error">{ error.message }</Notice> }
+				{ data && (
+					<div className="itb:flex itb:flex-col itb:gap-3">
+						<form
+							noValidate
+							className="itb:flex itb:flex-wrap itb:items-start itb:gap-2"
+							onSubmit={ ( e ) => void form.handleSubmit( ( values ) => save.mutate( values.url, { onSuccess: onDone } ) )( e ) }
+						>
+							<div className="itb:min-w-0 itb:flex-1">
+								<Input placeholder="https://hub.imaginawp.com" aria-label={ __( 'URL del hub' ) } aria-invalid={ !! form.formState.errors.url } { ...form.register( 'url' ) } />
+								{ form.formState.errors.url && <span className="itb:mt-1 itb:block itb:text-xs itb:text-red-600">{ form.formState.errors.url.message }</span> }
+							</div>
+							<Button type="submit" size="sm" className="itb:h-9" variant="outline" disabled={ pending || ! form.formState.isDirty }>
+								{ __( 'Guardar' ) }
+							</Button>
+						</form>
+						{ data.configured && (
+							<dl className="itb:m-0">
+								<KeyValue label={ __( 'Sitio' ) }>{ data.registered ? <code className="itb:text-xs">{ data.site_id }</code> : '—' }</KeyValue>
+								<KeyValue label={ __( 'Último envío correcto' ) }>{ formatDate( data.last_ok_at, config.locale ) }</KeyValue>
+								<KeyValue label={ __( 'Horas pendientes' ) }>{ data.registered ? data.pending_hours : '—' }</KeyValue>
+								{ data.failures > 0 && (
+									<KeyValue label={ __( 'Próximo intento' ) }>
+										{ formatDate( data.next_attempt, config.locale ) } ({ data.failures } { data.failures === 1 ? __( 'fallo' ) : __( 'fallos' ) })
+									</KeyValue>
+								) }
+								<KeyValue label={ __( 'Licencia enviada' ) }>{ data.license ? __( 'Sí' ) : __( 'No (copia sin licencia)' ) }</KeyValue>
+							</dl>
+						) }
+						{ data.last_error && <Notice level="warning">{ data.last_error }</Notice> }
+						{ data.configured && (
+							<div className="itb:flex itb:flex-wrap itb:gap-2">
+								{ ! data.registered ? (
+									<Button size="sm" disabled={ pending } onClick={ () => register.mutate( undefined, { onSuccess: onDone } ) }>
+										<Link2 aria-hidden />
+										{ register.isPending ? __( 'Registrando…' ) : __( 'Registrar el sitio' ) }
+									</Button>
+								) : (
+									<>
+										<Button size="sm" variant="outline" disabled={ pending } onClick={ () => send.mutate( undefined, { onSuccess: onDone } ) }>
+											<Send aria-hidden />
+											{ send.isPending ? __( 'Enviando…' ) : __( 'Enviar ahora' ) }
+										</Button>
+										<Button size="sm" variant="ghost" disabled={ pending } onClick={ () => setConfirmDisconnect( true ) }>
+											<Unlink aria-hidden />
+											{ __( 'Desconectar' ) }
+										</Button>
+									</>
+								) }
+							</div>
+						) }
+						{ result && <Notice level={ result.sent ? 'success' : 'info' }>{ reasons[ result.reason ] ?? result.reason }</Notice> }
+						<ErrorText error={ actionError } />
+					</div>
+				) }
+			</CardContent>
+			<ConfirmDialog
+				open={ confirmDisconnect }
+				onOpenChange={ setConfirmDisconnect }
+				title={ __( '¿Desconectar del hub?' ) }
+				description={ __( 'Se borran el identificador y la clave del sitio. Para volver a conectar habrá que registrarlo de nuevo.' ) }
+				confirmLabel={ __( 'Desconectar' ) }
+				destructive
+				pending={ disconnect.isPending }
+				onConfirm={ () => disconnect.mutate( undefined, { onSuccess: onDone, onSettled: () => setConfirmDisconnect( false ) } ) }
+			/>
 		</Card>
 	);
 }

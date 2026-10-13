@@ -1,13 +1,19 @@
+import { useQuery } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
+import { useState } from 'react';
 import { KeyValue, PageHeader, RiskBadge, StatusDot } from '@/components/common';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
+import { Switch } from '@/components/ui/switch';
+import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
-import { useCompat, useStatus } from '@/lib/queries';
-import type { Status } from '@/lib/types';
+import { useAction, useCompat, useStatus } from '@/lib/queries';
+import { useRouter } from '@/lib/router';
+import type { Module, ProfilerSummary, Status } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const cacheNames: Record<string, string> = {
@@ -103,15 +109,7 @@ function PanelContent( { status }: { status: Status } ) {
 				</CardContent>
 			</Card>
 
-			<Card>
-				<CardHeader>
-					<CardTitle>{ __( 'Métricas' ) }</CardTitle>
-					<CardDescription>{ __( 'TTFB, LCP, aciertos del edge, memoria por request y bloqueos del firewall.' ) }</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<Notice level="info">{ __( 'Aún no hay datos: el perfilador (fase 1), Cloudflare (fase 2) y el RUM (fase 6) los irán llenando. Cada métrica indicará su fuente y su periodo.' ) }</Notice>
-				</CardContent>
-			</Card>
+			<MetricsCard />
 
 			<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2">
 				<Card>
@@ -149,7 +147,10 @@ function PanelContent( { status }: { status: Status } ) {
 							<li key={ module.id } className="itb:rounded-md itb:border itb:border-zinc-200 itb:p-3">
 								<div className="itb:flex itb:items-start itb:justify-between itb:gap-2">
 									<span className="itb:text-[13px] itb:font-medium">{ module.label }</span>
-									<RiskBadge risk={ module.risk } label={ module.riskLabel } />
+									<div className="itb:flex itb:items-center itb:gap-2">
+										<RiskBadge risk={ module.risk } label={ module.riskLabel } />
+										{ module.available && <ModuleSwitch module={ module } /> }
+									</div>
 								</div>
 								<p className="itb:mt-1 itb:text-xs itb:text-zinc-500">{ module.description }</p>
 								<div className="itb:mt-2 itb:flex itb:flex-wrap itb:gap-1.5">
@@ -210,5 +211,80 @@ function CompatCard( { status, conflicts }: { status: Status; conflicts: number 
 				) }
 			</CardContent>
 		</Card>
+	);
+}
+
+function MetricsCard() {
+	const go = useRouter( ( state ) => state.go );
+	const { data } = useQuery( { queryKey: [ 'profiler', 'summary', '24h', '' ], queryFn: () => api<ProfilerSummary>( 'profiler/summary', 'GET', undefined, { period: '24h' } ) } );
+	const s = data?.summary;
+	const number = new Intl.NumberFormat( config.locale, { maximumFractionDigits: 1 } );
+
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Métricas' ) }</CardTitle>
+				<CardDescription>{ __( 'Fuente: perfilador (PHP del origen), últimas 24 h. Cloudflare (fase 2) y el RUM (fase 6) añadirán TTFB, LCP, aciertos del edge y bloqueos.' ) }</CardDescription>
+			</CardHeader>
+			<CardContent>
+				{ ! s || s.samples === 0 ? (
+					<Notice level="info">{ __( 'Aún no hay muestras del perfilador. Con poco tráfico, activa el muestreo intensivo en Diagnóstico.' ) }</Notice>
+				) : (
+					<dl className="itb:m-0 itb:grid itb:gap-x-6 itb:sm:grid-cols-2 itb:xl:grid-cols-4">
+						<KeyValue label={ __( 'Tiempo PHP p50 / p95' ) }>
+							{ number.format( s.ms_p50 ) } / { number.format( s.ms_p95 ) } ms
+						</KeyValue>
+						<KeyValue label={ __( 'Memoria pico media' ) }>{ number.format( s.mem_avg_mb ) } MB</KeyValue>
+						<KeyValue label={ __( 'Consultas medias' ) }>{ s.queries_avg }</KeyValue>
+						<KeyValue label={ __( 'Muestras' ) }>
+							<a
+								href="#/diagnostico"
+								className="itb:underline"
+								onClick={ ( e ) => {
+									e.preventDefault();
+									go( 'diagnostico' );
+								} }
+							>
+								{ s.samples }
+							</a>
+						</KeyValue>
+					</dl>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+function ModuleSwitch( { module }: { module: Module } ) {
+	const [ confirm, setConfirm ] = useState( false );
+	const action = useAction( ( vars: { enabled: boolean; confirm: boolean } ) => api( `modules/${ module.id }`, 'PUT', vars ) );
+	const forced = module.forcedOff.length > 0;
+	const onChange = ( enabled: boolean ) => {
+		if ( enabled && module.risk !== 'safe' ) {
+			setConfirm( true );
+			return;
+		}
+		action.mutate( { enabled, confirm: false } );
+	};
+
+	return (
+		<>
+			<Switch
+				checked={ module.enabled }
+				disabled={ action.isPending || ( forced && ! module.requested ) }
+				onCheckedChange={ onChange }
+				aria-label={ `${ module.label }: ${ module.enabled ? __( 'activo' ) : __( 'inactivo' ) }` }
+				title={ action.error?.message }
+			/>
+			<ConfirmDialog
+				open={ confirm }
+				onOpenChange={ setConfirm }
+				title={ __( '¿Activar un módulo que no es seguro por defecto?' ) }
+				description={ __( 'Confirma que lo verificaste en este sitio. El cambio queda registrado y se puede revertir apagándolo.' ) }
+				confirmLabel={ __( 'Activar' ) }
+				pending={ action.isPending }
+				onConfirm={ () => action.mutate( { enabled: true, confirm: true }, { onSettled: () => setConfirm( false ) } ) }
+			/>
+		</>
 	);
 }

@@ -21,8 +21,15 @@ use ImaginaTurbo\Core\Request\RequestClassifier;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Core\Safety\SafeMode;
 use ImaginaTurbo\Core\Safety\SafeModeNotifier;
+use ImaginaTurbo\Hub\HubClient;
+use ImaginaTurbo\Hub\TelemetryBuilder;
 use ImaginaTurbo\Licensing\ImaginaUpdater;
+use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
+use ImaginaTurbo\Modules\Profiler\Rollup;
+use ImaginaTurbo\Modules\Profiler\SampleWriter;
 use ImaginaTurbo\Repository\EventRepository;
+use ImaginaTurbo\Repository\MetricsRepository;
+use ImaginaTurbo\Repository\SampleRepository;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
 
@@ -106,6 +113,11 @@ final class Plugin {
 
 		add_action( 'init', [ $this, 'loadTextdomain' ] );
 		add_action( Jobs::DAILY_CLEANUP, [ $this, 'dailyCleanup' ] );
+		// Las tareas tienen manejador siempre (si no, Action Scheduler las marca como fallidas);
+		// con el kill switch o el modo seguro no hacen nada.
+		add_action( Jobs::HOURLY_ROLLUP, fn() => $this->whenActive( fn() => $this->container->get( Rollup::class )->run() ) );
+		add_action( Jobs::HOURLY_TELEMETRY, fn() => $this->whenActive( fn() => $this->sendTelemetry( false ) ) );
+		add_action( Jobs::DAILY_AUDIT, fn() => $this->whenActive( fn() => $this->container->get( CacheabilityAudit::class )->run() ) );
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
@@ -172,10 +184,45 @@ final class Plugin {
 	}
 
 	/**
-	 * Tarea diaria: retención de eventos.
+	 * Tarea diaria: retención de eventos (180 días), muestras (48 h) y agregados (30 días).
 	 */
 	public function dailyCleanup(): void {
 		$this->container->get( EventLog::class )->purge();
+		$this->container->get( SampleRepository::class )->deleteOlderThan( SampleRepository::RETENTION_HOURS );
+		$this->container->get( MetricsRepository::class )->deleteOlderThan( MetricsRepository::RETENTION_DAYS );
+	}
+
+	/**
+	 * Telemetría al hub con el agregado al día (idempotente: si ya corrió esta hora no hace nada).
+	 *
+	 * @return array{sent: bool, reason: string}
+	 */
+	public function sendTelemetry( bool $force ): array {
+		$hub = $this->container->get( HubClient::class );
+		if ( ! $hub->isRegistered() ) {
+			return [
+				'sent'   => false,
+				'reason' => 'not_registered',
+			];
+		}
+		$this->container->get( Rollup::class )->run();
+		return $hub->sendTelemetry( $force );
+	}
+
+	/**
+	 * Ejecuta una tarea solo si el plugin no está apagado (kill switch o modo seguro).
+	 *
+	 * @param callable(): mixed $task Tarea.
+	 */
+	private function whenActive( callable $task ): void {
+		if ( null !== Runtime::$killReason || Runtime::$safeMode ) {
+			return;
+		}
+		try {
+			$task();
+		} catch ( \Throwable $e ) {
+			$this->container->get( EventLog::class )->error( 'core', 'job', __( 'Una tarea programada falló.', 'imagina-turbo' ), [ 'error' => substr( $e->getMessage(), 0, 300 ) ] );
+		}
 	}
 
 	public function loadTextdomain(): void {
@@ -238,6 +285,42 @@ final class Plugin {
 			}
 		);
 		$c->set( EventLog::class, static fn( Container $c ): EventLog => new EventLog( $c->get( EventRepository::class ) ) );
+		$c->set(
+			SampleRepository::class,
+			static function (): SampleRepository {
+				global $wpdb;
+				return new SampleRepository( $wpdb );
+			}
+		);
+		$c->set(
+			MetricsRepository::class,
+			static function (): MetricsRepository {
+				global $wpdb;
+				return new MetricsRepository( $wpdb );
+			}
+		);
+		$c->set( SampleWriter::class, static fn( Container $c ): SampleWriter => new SampleWriter( $c->get( SampleRepository::class ) ) );
+		$c->set( Rollup::class, static fn( Container $c ): Rollup => new Rollup( $c->get( SampleRepository::class ), $c->get( MetricsRepository::class ) ) );
+		$c->set( CacheabilityAudit::class, static fn( Container $c ): CacheabilityAudit => new CacheabilityAudit( $c->get( EventLog::class ) ) );
+		$c->set(
+			TelemetryBuilder::class,
+			static fn( Container $c ): TelemetryBuilder => new TelemetryBuilder(
+				$c->get( Detector::class ),
+				$c->get( MetricsRepository::class ),
+				$c->get( EventRepository::class ),
+				$c->get( Settings::class ),
+				$c->get( ModuleCatalog::class )
+			)
+		);
+		$c->set(
+			HubClient::class,
+			static fn( Container $c ): HubClient => new HubClient(
+				$c->get( Settings::class ),
+				$c->get( TelemetryBuilder::class ),
+				$c->get( ImaginaUpdater::class ),
+				$c->get( EventLog::class )
+			)
+		);
 		$c->set( MuLoaderInstaller::class, static fn(): MuLoaderInstaller => new MuLoaderInstaller( $dir, WPMU_PLUGIN_DIR ) );
 		$c->set( Jobs::class, static fn(): Jobs => new Jobs() );
 		$c->set(

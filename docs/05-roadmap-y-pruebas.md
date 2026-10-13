@@ -387,3 +387,13 @@ Lo que sigue sin ser reversible está en la pantalla correspondiente: purgas de 
 ## Versión 0.10.2
 
 Detección de Cloudflare Access (Zero Trust) en las peticiones del sitio a sí mismo: el error dice que Access bloqueó la ruta y cómo permitirla. Probado simulando Access delante de `/contacto/` y `admin-ajax.php`: el inventario de assets, la inspección de caché y un experimento de carga condicional devolvieron el mensaje; la portada siguió funcionando.
+
+## Versión 0.10.3 — primera instalación fuera del entorno de pruebas
+
+La primera instalación en un WordPress ajeno (TasteWP) sacó a la luz:
+
+- **Pantalla Caché en blanco en un sitio nuevo**: sin purgas previas, el estado llegaba como `[]` (arreglo PHP vacío) y en JavaScript `[].at` es una función, que se tomaba por la fecha. Corregido en la API (objeto) y en `formatDate` (solo texto o número). El sitio de pruebas siempre había tenido purgas, por eso no se vio.
+- **Un error en una pantalla dejaba todo el admin en blanco**: ahora cada pantalla tiene una barrera de errores que muestra el mensaje y deja el resto del plugin funcionando.
+- **El ZIP llevaba el repositorio `.git`, las pruebas y la documentación de Action Scheduler** (5,8 MB, superaba el límite de subida de 2 MB de muchos hostings, y un `.git` dentro de un plugin hace saltar los escáneres de seguridad). Ahora pesa 1 MB y el empaquetado falla si queda un `.git`.
+- **Nueva prueba `tests/e2e/screens-e2e.js`**: abre cada pantalla en una carga nueva y falla ante errores de JavaScript, 5xx o pantallas vacías. Se corre en el sitio de pruebas y en un WordPress limpio (sin plugin de caché ni WooCommerce).
+- **TasteWP suspendió el sitio** (por su escáner, sin motivo concreto). No se reprodujo la pantalla en blanco al activar: en un WordPress limpio, con y sin permisos de escritura en `wp-content`, el plugin se activa y el Panel explica lo que falta. Los sandboxes con escáneres agresivos no sirven para probar plugins que escriben su loader en `mu-plugins` y su configuración compilada.

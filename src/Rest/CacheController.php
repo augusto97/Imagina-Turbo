@@ -156,7 +156,8 @@ final class CacheController extends Controller {
 				'all'  => $queue[ PurgeQueueRepository::KIND_ALL ] > 0,
 				'warm' => $queue[ PurgeQueueRepository::KIND_WARM ],
 			],
-			'last'     => PurgeWorker::lastState(),
+			// Objeto aunque esté vacío: [] en JSON tiene métodos de arreglo en JavaScript (last.at).
+			'last'     => (object) PurgeWorker::lastState(),
 			'warmer'   => $this->container->get( Warmer::class )->state(),
 			'sitemaps' => $compiled['sitemaps'],
 		];

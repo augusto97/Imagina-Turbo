@@ -1,3 +1,4 @@
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { useRouter } from './lib/router';
 import { Advanced } from './screens/Advanced';
@@ -19,20 +20,22 @@ export function App() {
 	const route = useRouter( ( state ) => state.route );
 	return (
 		<Layout>
-			{ route === 'panel' && <Panel /> }
-			{ route === 'diagnostico' && <Diagnostics /> }
-			{ route === 'cache' && <Cache /> }
-			{ route === 'cloudflare' && <Cloudflare /> }
-			{ route === 'woocommerce' && <Woo /> }
-			{ route === 'navegacion' && <Navigation /> }
-			{ route === 'carga' && <PluginFilter /> }
-			{ route === 'firewall' && <Firewall /> }
-			{ route === 'ajustes' && <Tweaks /> }
-			{ route === 'assets' && <Assets /> }
-			{ route === 'base-de-datos' && <Database /> }
-			{ route === 'flota' && <Fleet /> }
-			{ route === 'registro' && <Log /> }
-			{ route === 'avanzado' && <Advanced /> }
+			<ErrorBoundary key={ route }>
+				{ route === 'panel' && <Panel /> }
+				{ route === 'diagnostico' && <Diagnostics /> }
+				{ route === 'cache' && <Cache /> }
+				{ route === 'cloudflare' && <Cloudflare /> }
+				{ route === 'woocommerce' && <Woo /> }
+				{ route === 'navegacion' && <Navigation /> }
+				{ route === 'carga' && <PluginFilter /> }
+				{ route === 'firewall' && <Firewall /> }
+				{ route === 'ajustes' && <Tweaks /> }
+				{ route === 'assets' && <Assets /> }
+				{ route === 'base-de-datos' && <Database /> }
+				{ route === 'flota' && <Fleet /> }
+				{ route === 'registro' && <Log /> }
+				{ route === 'avanzado' && <Advanced /> }
+			</ErrorBoundary>
 		</Layout>
 	);
 }

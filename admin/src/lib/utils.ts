@@ -8,8 +8,9 @@ export function cn( ...inputs: ClassValue[] ): string {
 	return twMerge( clsx( inputs ) );
 }
 
-export function formatDate( value: string | number | null | undefined, locale: string ): string {
-	if ( value === null || value === undefined || value === '' || value === 0 ) {
+export function formatDate( value: unknown, locale: string ): string {
+	// Solo texto o número: un arreglo PHP vacío llega como [] y [].at es una función, no una fecha.
+	if ( ( typeof value !== 'string' && typeof value !== 'number' ) || value === '' || value === 0 ) {
 		return '—';
 	}
 	// Las fechas de la base vienen en UTC sin zona ("2026-10-13 10:00:00").

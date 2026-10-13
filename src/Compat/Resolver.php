@@ -27,7 +27,10 @@ final class Resolver {
 	 *     require_cookie_before_cache: list<string>,
 	 *     cart_cookies: list<string>,
 	 *     requires: array{xmlrpc: bool, rest_users: bool, webhook_paths: list<string>},
-	 *     static_passthrough: list<string>
+	 *     static_passthrough: list<string>,
+	 *     purge_all_hooks: list<string>,
+	 *     sitemaps: list<string>,
+	 *     preload_exclude: list<string>
 	 * }
 	 */
 	public function resolve( Matrix $matrix, array $activePlugins, string $stylesheet, string $template ): array {
@@ -51,6 +54,9 @@ final class Resolver {
 				'webhook_paths' => [],
 			],
 			'static_passthrough'          => [],
+			'purge_all_hooks'             => [],
+			'sitemaps'                    => [],
+			'preload_exclude'             => $matrix->coreList( 'preload_exclude_patterns' ),
 		];
 
 		foreach ( $matrix->integrations() as $integration ) {
@@ -81,9 +87,21 @@ final class Resolver {
 			}
 			$result['requires']['webhook_paths'] = array_merge( $result['requires']['webhook_paths'], self::strings( $requires['webhook_paths'] ?? [] ) );
 			$result['static_passthrough']        = array_merge( $result['static_passthrough'], self::strings( $integration['static_miss_passthrough'] ?? [] ) );
+
+			$purge = is_array( $integration['purge'] ?? null ) ? $integration['purge'] : [];
+			foreach ( self::strings( $purge['on_hooks'] ?? [] ) as $hook ) {
+				// "hook:all" = purgar todo. Los demás (stock, variaciones) los cubre el mapa de purga propio.
+				if ( str_ends_with( $hook, ':all' ) ) {
+					$result['purge_all_hooks'][] = substr( $hook, 0, -4 );
+				}
+			}
+			$preload = is_array( $integration['preload'] ?? null ) ? $integration['preload'] : [];
+			if ( is_string( $preload['sitemap'] ?? null ) && str_starts_with( $preload['sitemap'], '/' ) ) {
+				$result['sitemaps'][] = $preload['sitemap'];
+			}
 		}
 
-		foreach ( [ 'integrations', 'bypass_cookies', 'bypass_paths', 'dynamic_paths', 'vary_cookies', 'require_cookie_before_cache', 'cart_cookies', 'static_passthrough' ] as $key ) {
+		foreach ( [ 'integrations', 'bypass_cookies', 'bypass_paths', 'dynamic_paths', 'vary_cookies', 'require_cookie_before_cache', 'cart_cookies', 'static_passthrough', 'purge_all_hooks', 'sitemaps', 'preload_exclude' ] as $key ) {
 			$result[ $key ] = self::unique( $result[ $key ] );
 		}
 		$result['requires']['webhook_paths'] = self::unique( $result['requires']['webhook_paths'] );

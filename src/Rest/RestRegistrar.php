@@ -11,6 +11,9 @@ namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Core\Container;
 use ImaginaTurbo\Core\Installer;
+use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Modules\CacheCoordinator\Adapters\CacheAdapter;
+use ImaginaTurbo\Modules\CacheCoordinator\CacheModule;
 
 /**
  * Crea los controladores y registra sus rutas.
@@ -30,9 +33,15 @@ final class RestRegistrar {
 			new SettingsController( $this->container ),
 			new ProfilerController( $this->container ),
 			new HubController( $this->container ),
+			new CacheController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();
+		}
+
+		// Público: solo con el coordinador de caché activo y el refresco de nonces encendido.
+		if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cache_coordinator' ) && CacheModule::settings()['nonce_refresh'] && null === Runtime::$killReason && ! Runtime::$safeMode ) {
+			( new NonceController( $this->container->get( CacheAdapter::class ) ) )->registerRoutes();
 		}
 	}
 

@@ -18,11 +18,19 @@ echo "→ Admin (npm ci + vite build)"
 echo "→ Copiando archivos"
 mkdir -p "$BUILD"
 cp "$ROOT/imagina-turbo.php" "$ROOT/uninstall.php" "$ROOT/composer.json" "$ROOT/composer.lock" "$ROOT/README.md" "$BUILD/"
-cp -R "$ROOT/src" "$ROOT/mu-loader" "$ROOT/data" "$BUILD/"
+cp -R "$ROOT/src" "$ROOT/mu-loader" "$ROOT/data" "$ROOT/assets" "$BUILD/"
 mkdir -p "$BUILD/languages" "$BUILD/admin"
 cp -R "$ROOT/admin/dist" "$BUILD/admin/dist"
 rm -f "$BUILD/admin/dist/vite-dev-server.json"
 if [ -d "$ROOT/languages" ]; then cp -R "$ROOT/languages/." "$BUILD/languages/"; fi
+
+echo "→ Scripts del frontend (minificados, < 3 KB cada uno)"
+for js in "$BUILD"/assets/js/*.js; do
+  min="${js%.js}.min.js"
+  "$ROOT/admin/node_modules/.bin/esbuild" "$js" --minify --target=es2017 --log-level=warning --outfile="$min"
+  size=$(wc -c < "$min")
+  if [ "$size" -ge 3072 ]; then echo "✗ $(basename "$min") pesa $size bytes (máximo 3 KB)"; exit 1; fi
+done
 
 echo "→ Dependencias de producción"
 ( cd "$BUILD" && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --classmap-authoritative --no-interaction --no-progress --quiet )

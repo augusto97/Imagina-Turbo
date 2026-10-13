@@ -24,11 +24,25 @@ use ImaginaTurbo\Core\Safety\SafeModeNotifier;
 use ImaginaTurbo\Hub\HubClient;
 use ImaginaTurbo\Hub\TelemetryBuilder;
 use ImaginaTurbo\Licensing\ImaginaUpdater;
+use ImaginaTurbo\Modules\CacheCoordinator\Adapters\CacheAdapter;
+use ImaginaTurbo\Modules\CacheCoordinator\Adapters\LiteSpeedAdapter;
+use ImaginaTurbo\Modules\CacheCoordinator\Adapters\NullAdapter;
+use ImaginaTurbo\Modules\CacheCoordinator\Adapters\WpRocketAdapter;
+use ImaginaTurbo\Modules\CacheCoordinator\CacheModule;
+use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
+use ImaginaTurbo\Modules\CacheCoordinator\Edge\EdgePurger;
+use ImaginaTurbo\Modules\CacheCoordinator\Edge\NullEdgePurger;
+use ImaginaTurbo\Modules\CacheCoordinator\NonceRefresh;
+use ImaginaTurbo\Modules\CacheCoordinator\Purger;
+use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
+use ImaginaTurbo\Modules\CacheCoordinator\TagBuilder;
+use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
 use ImaginaTurbo\Modules\Profiler\Rollup;
 use ImaginaTurbo\Modules\Profiler\SampleWriter;
 use ImaginaTurbo\Repository\EventRepository;
 use ImaginaTurbo\Repository\MetricsRepository;
+use ImaginaTurbo\Repository\PurgeQueueRepository;
 use ImaginaTurbo\Repository\SampleRepository;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
@@ -118,6 +132,9 @@ final class Plugin {
 		add_action( Jobs::HOURLY_ROLLUP, fn() => $this->whenActive( fn() => $this->container->get( Rollup::class )->run() ) );
 		add_action( Jobs::HOURLY_TELEMETRY, fn() => $this->whenActive( fn() => $this->sendTelemetry( false ) ) );
 		add_action( Jobs::DAILY_AUDIT, fn() => $this->whenActive( fn() => $this->container->get( CacheabilityAudit::class )->run() ) );
+		add_action( Jobs::PURGE_FLUSH, fn() => $this->whenCache( fn() => $this->container->get( PurgeWorker::class )->run() ) );
+		add_action( Jobs::WARM, fn() => $this->whenCache( fn() => $this->container->get( Warmer::class )->run() ) );
+		add_action( Jobs::WARM_SEED, fn() => $this->whenCache( fn() => $this->container->get( Warmer::class )->seed() ) );
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
@@ -225,6 +242,26 @@ final class Plugin {
 		}
 	}
 
+	/**
+	 * Tarea del coordinador de caché: si el módulo está apagado, se vacía la cola en lugar de procesarla.
+	 *
+	 * @param callable(): mixed $task Tarea.
+	 */
+	private function whenCache( callable $task ): void {
+		$this->whenActive(
+			function () use ( $task ): void {
+				if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cache_coordinator' ) ) {
+					$task();
+					return;
+				}
+				$queue = $this->container->get( PurgeQueueRepository::class );
+				foreach ( [ PurgeQueueRepository::KIND_ALL, PurgeQueueRepository::KIND_TAG, PurgeQueueRepository::KIND_URL, PurgeQueueRepository::KIND_WARM ] as $kind ) {
+					$queue->clear( $kind );
+				}
+			}
+		);
+	}
+
 	public function loadTextdomain(): void {
 		load_plugin_textdomain( 'imagina-turbo', false, dirname( $this->basename ) . '/languages' );
 	}
@@ -297,6 +334,68 @@ final class Plugin {
 			static function (): MetricsRepository {
 				global $wpdb;
 				return new MetricsRepository( $wpdb );
+			}
+		);
+		$c->set(
+			PurgeQueueRepository::class,
+			static function (): PurgeQueueRepository {
+				global $wpdb;
+				return new PurgeQueueRepository( $wpdb );
+			}
+		);
+		$c->set(
+			TagBuilder::class,
+			static function (): TagBuilder {
+				$tags = Runtime::$config?->get( 'tags', [] );
+				return new TagBuilder( is_array( $tags ) && is_string( $tags['prefix'] ?? null ) ? $tags['prefix'] : '' );
+			}
+		);
+		$c->set(
+			CacheAdapter::class,
+			static function ( Container $c ): CacheAdapter {
+				$cache = CacheModule::settings();
+				return match ( $cache['adapter'] ) {
+					'litespeed' => new LiteSpeedAdapter( $c->get( TagBuilder::class ) ),
+					'wp-rocket' => new WpRocketAdapter( $cache['server'], 'headers' === $cache['mode'] ? Cacheability::edgeHeader( true, $cache['nonce_refresh'] ? $cache['edge_ttl'] : min( $cache['edge_ttl'], Cacheability::MAX_TTL_WITHOUT_NONCE_REFRESH ), $cache['swr'], $cache['sie'] ) : '' ),
+					default     => new NullAdapter(),
+				};
+			}
+		);
+		$c->set( EdgePurger::class, static fn(): EdgePurger => new NullEdgePurger() );
+		$c->set( Purger::class, static fn( Container $c ): Purger => new Purger( $c->get( CacheAdapter::class ), $c->get( TagBuilder::class ), $c->get( PurgeQueueRepository::class ) ) );
+		$c->set(
+			Warmer::class,
+			static function ( Container $c ): Warmer {
+				$cache = CacheModule::settings();
+				$paths = Runtime::$config?->get( 'paths', [] );
+				$block = [];
+				foreach ( is_array( $paths ) ? $paths : [] as $list ) {
+					foreach ( is_array( $list ) ? $list : [] as $path ) {
+						if ( is_string( $path ) ) {
+							$block[] = $path;
+						}
+					}
+				}
+				return new Warmer( $c->get( PurgeQueueRepository::class ), $cache['preload_exclude'], $block, $cache['sitemaps'] );
+			}
+		);
+		$c->set(
+			PurgeWorker::class,
+			static fn( Container $c ): PurgeWorker => new PurgeWorker(
+				$c->get( PurgeQueueRepository::class ),
+				$c->get( CacheAdapter::class ),
+				$c->get( EdgePurger::class ),
+				$c->get( TagBuilder::class ),
+				$c->get( Warmer::class ),
+				$c->get( EventLog::class ),
+				CacheModule::settings()['warm']
+			)
+		);
+		$c->set(
+			NonceRefresh::class,
+			static function () use ( $dir ): NonceRefresh {
+				$file = is_file( $dir . '/assets/js/itb-nonce.min.js' ) ? 'itb-nonce.min.js' : 'itb-nonce.js';
+				return new NonceRefresh( plugins_url( 'assets/js/' . $file, $dir . '/imagina-turbo.php' ) . '?ver=' . ITB_VERSION, rest_url( RestRegistrar::NAMESPACE . '/nonce' ) );
 			}
 		);
 		$c->set( SampleWriter::class, static fn( Container $c ): SampleWriter => new SampleWriter( $c->get( SampleRepository::class ) ) );

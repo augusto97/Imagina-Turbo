@@ -23,7 +23,8 @@ final class ModuleCatalog {
 	 */
 	public static function classMap(): array {
 		return [
-			'profiler' => \ImaginaTurbo\Modules\Profiler\ProfilerModule::class,
+			'profiler'          => \ImaginaTurbo\Modules\Profiler\ProfilerModule::class,
+			'cache_coordinator' => \ImaginaTurbo\Modules\CacheCoordinator\CacheModule::class,
 		];
 	}
 

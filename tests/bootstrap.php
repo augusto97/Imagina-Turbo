@@ -21,6 +21,7 @@ define( 'WP_PLUGIN_DIR', WP_CONTENT_DIR . '/plugins' );
 define( 'WPMU_PLUGIN_DIR', WP_CONTENT_DIR . '/mu-plugins' );
 define( 'ITB_VERSION', '0.1.0-test' );
 define( 'DAY_IN_SECONDS', 86400 );
+define( 'YEAR_IN_SECONDS', 31536000 );
 define( 'HOUR_IN_SECONDS', 3600 );
 define( 'AUTH_KEY', 'test-auth-key-0123456789abcdefghijklmnopqrstuvwxyz' );
 define( 'AUTH_SALT', 'test-auth-salt-0123456789abcdefghijklmnopqrstuvwxyz' );

@@ -44,6 +44,12 @@ final class Settings {
 			'profiler_sample_rate'     => self::DEFAULT_SAMPLE_RATE,
 			'profiler_intensive_until' => 0,
 			'hub_url'                  => '',
+			'cache_mode'               => 'sync',
+			'cache_edge_ttl'           => DAY_IN_SECONDS,
+			'cache_swr'                => DAY_IN_SECONDS,
+			'cache_sie'                => 3 * DAY_IN_SECONDS,
+			'cache_nonce_refresh'      => true,
+			'cache_warm'               => true,
 		];
 	}
 
@@ -184,6 +190,26 @@ final class Settings {
 		}
 		if ( isset( $input['hub_url'] ) && is_string( $input['hub_url'] ) ) {
 			$out['hub_url'] = self::sanitizeHubUrl( $input['hub_url'] );
+		}
+
+		if ( isset( $input['cache_mode'] ) && in_array( $input['cache_mode'], [ 'sync', 'headers' ], true ) ) {
+			$out['cache_mode'] = $input['cache_mode'];
+		}
+		// TTL del edge: de 1 minuto a 1 año. SWR hasta 7 días y SIE hasta 30 (límites del sentido común,
+		// no de Cloudflare: más allá, un error del origen se ocultaría demasiado tiempo).
+		foreach ( [
+			'cache_edge_ttl' => [ 60, YEAR_IN_SECONDS ],
+			'cache_swr'      => [ 0, 7 * DAY_IN_SECONDS ],
+			'cache_sie'      => [ 0, 30 * DAY_IN_SECONDS ],
+		] as $key => [ $min, $max ] ) {
+			if ( isset( $input[ $key ] ) && is_numeric( $input[ $key ] ) ) {
+				$out[ $key ] = (int) max( $min, min( $max, (int) $input[ $key ] ) );
+			}
+		}
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm' ] as $key ) {
+			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
+				$out[ $key ] = $input[ $key ];
+			}
 		}
 
 		return $out;

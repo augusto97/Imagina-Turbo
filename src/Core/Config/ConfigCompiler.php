@@ -217,6 +217,7 @@ final class ConfigCompiler {
 			],
 			'static_passthrough'          => array_map( 'strtolower', $compat['static_passthrough'] ?? [] ),
 			'integrations'                => $compat['integrations'] ?? [],
+			'cache'                       => $this->cacheConfig( $env, $compat ),
 			'profiler'                    => [
 				'rate'            => (float) $this->settings->get( 'profiler_sample_rate', Settings::DEFAULT_SAMPLE_RATE ),
 				'intensive_until' => (int) $this->settings->get( 'profiler_intensive_until', 0 ),
@@ -225,6 +226,38 @@ final class ConfigCompiler {
 
 		$data['hash'] = self::hash( $data );
 		return $data;
+	}
+
+	/**
+	 * Ajustes del coordinador de caché para el frontend y las tareas.
+	 *
+	 * @param array<string, mixed>      $env    Entorno detectado.
+	 * @param array<string, mixed>|null $compat Reglas de la matriz.
+	 * @return array<string, mixed>
+	 */
+	private function cacheConfig( array $env, ?array $compat ): array {
+		$plugin  = $env['cache_plugin'] ?? null;
+		$adapter = match ( $plugin ) {
+			'litespeed-cache' => 'litespeed',
+			'wp-rocket'       => 'wp-rocket',
+			default           => 'none',
+		};
+		$server = is_array( $env['server'] ?? null ) && is_string( $env['server']['family'] ?? null ) ? $env['server']['family'] : 'unknown';
+		return [
+			'mode'            => (string) $this->settings->get( 'cache_mode', 'sync' ),
+			'edge_ttl'        => (int) $this->settings->get( 'cache_edge_ttl', DAY_IN_SECONDS ),
+			'swr'             => (int) $this->settings->get( 'cache_swr', DAY_IN_SECONDS ),
+			'sie'             => (int) $this->settings->get( 'cache_sie', 3 * DAY_IN_SECONDS ),
+			'nonce_refresh'   => (bool) $this->settings->get( 'cache_nonce_refresh', true ),
+			'warm'            => (bool) $this->settings->get( 'cache_warm', true ),
+			'adapter'         => $adapter,
+			'server'          => $server,
+			// Con WP Rocket fuera de Apache, sus aciertos no llevan cabeceras: el HTML no se deja en el edge.
+			'edge_html'       => 'wp-rocket' !== $adapter || 'apache' === $server,
+			'purge_all_hooks' => $compat['purge_all_hooks'] ?? [],
+			'sitemaps'        => $compat['sitemaps'] ?? [],
+			'preload_exclude' => $compat['preload_exclude'] ?? [],
+		];
 	}
 
 	/**

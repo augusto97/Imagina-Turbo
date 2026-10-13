@@ -20,6 +20,12 @@ final class Settings {
 
 	public const SCHEMA_VERSION = 1;
 
+	/** Muestreo por defecto del perfilador: 1 % (docs/02). */
+	public const DEFAULT_SAMPLE_RATE = 0.01;
+
+	/** Duración del muestreo intensivo. */
+	public const INTENSIVE_SECONDS = 900;
+
 	/** @var array<string, mixed>|null */
 	private ?array $cache = null;
 
@@ -30,11 +36,14 @@ final class Settings {
 	 */
 	public static function defaults(): array {
 		return [
-			'version'         => self::SCHEMA_VERSION,
-			'modules'         => [],
-			'tag_prefix'      => '',
-			'debug'           => false,
-			'staging_domains' => [],
+			'version'                  => self::SCHEMA_VERSION,
+			'modules'                  => [],
+			'tag_prefix'               => '',
+			'debug'                    => false,
+			'staging_domains'          => [],
+			'profiler_sample_rate'     => self::DEFAULT_SAMPLE_RATE,
+			'profiler_intensive_until' => 0,
+			'hub_url'                  => '',
 		];
 	}
 
@@ -102,7 +111,8 @@ final class Settings {
 	 */
 	public function export(): array {
 		$data = $this->all();
-		unset( $data['tag_prefix'] );
+		// El prefijo es propio de cada sitio y el muestreo intensivo es un estado temporal.
+		unset( $data['tag_prefix'], $data['profiler_intensive_until'] );
 		return [
 			'plugin'   => 'imagina-turbo',
 			'version'  => self::SCHEMA_VERSION,
@@ -125,7 +135,7 @@ final class Settings {
 			throw new \InvalidArgumentException( 'La exportación es de una versión más nueva del plugin.' );
 		}
 		$settings = $payload['settings'];
-		unset( $settings['tag_prefix'] );
+		unset( $settings['tag_prefix'], $settings['profiler_intensive_until'] );
 		return $this->update( $settings );
 	}
 
@@ -166,7 +176,46 @@ final class Settings {
 			$out['staging_domains'] = array_slice( array_keys( $domains ), 0, 100 );
 		}
 
+		if ( isset( $input['profiler_sample_rate'] ) && is_numeric( $input['profiler_sample_rate'] ) ) {
+			$out['profiler_sample_rate'] = round( max( 0.0, min( 1.0, (float) $input['profiler_sample_rate'] ) ), 4 );
+		}
+		if ( isset( $input['profiler_intensive_until'] ) && is_int( $input['profiler_intensive_until'] ) && $input['profiler_intensive_until'] > 0 ) {
+			$out['profiler_intensive_until'] = $input['profiler_intensive_until'];
+		}
+		if ( isset( $input['hub_url'] ) && is_string( $input['hub_url'] ) ) {
+			$out['hub_url'] = self::sanitizeHubUrl( $input['hub_url'] );
+		}
+
 		return $out;
+	}
+
+	/**
+	 * URL del hub: https obligatorio salvo en localhost (pruebas). Inválida → vacía (hub apagado).
+	 */
+	public static function sanitizeHubUrl( string $url ): string {
+		$url = trim( $url );
+		if ( '' === $url || strlen( $url ) > 200 ) {
+			return '';
+		}
+		$parts = parse_url( $url ); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- función pura, sin WordPress.
+		if ( ! is_array( $parts ) || ! isset( $parts['scheme'], $parts['host'] ) || isset( $parts['user'] ) || isset( $parts['query'] ) || isset( $parts['fragment'] ) ) {
+			return '';
+		}
+		$scheme = strtolower( $parts['scheme'] );
+		$host   = strtolower( $parts['host'] );
+		$local  = in_array( $host, [ 'localhost', '127.0.0.1', '[::1]', '::1' ], true );
+		if ( 'https' !== $scheme && ! ( 'http' === $scheme && $local ) ) {
+			return '';
+		}
+		if ( 1 !== preg_match( '/^[a-z0-9.\-\[\]:]+$/', $host ) ) {
+			return '';
+		}
+		$port = isset( $parts['port'] ) ? ':' . (int) $parts['port'] : '';
+		$path = isset( $parts['path'] ) ? rtrim( $parts['path'], '/' ) : '';
+		if ( '' !== $path && 1 !== preg_match( '#^/[A-Za-z0-9._~\-/]*$#', $path ) ) {
+			return '';
+		}
+		return $scheme . '://' . $host . $port . $path;
 	}
 
 	/**

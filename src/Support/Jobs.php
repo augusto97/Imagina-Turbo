@@ -18,20 +18,44 @@ final class Jobs {
 
 	public const DAILY_CLEANUP = 'itb_daily_cleanup';
 
+	public const HOURLY_ROLLUP = 'itb_profiler_rollup';
+
+	public const HOURLY_TELEMETRY = 'itb_hub_telemetry';
+
+	public const DAILY_AUDIT = 'itb_daily_audit';
+
 	/**
-	 * Programa las tareas si faltan. Solo se llama en admin o al activar (consulta la base).
+	 * Tareas recurrentes: hook => intervalo en segundos.
+	 *
+	 * @return array<string, int>
+	 */
+	public static function recurring(): array {
+		return [
+			self::DAILY_CLEANUP    => DAY_IN_SECONDS,
+			self::HOURLY_ROLLUP    => HOUR_IN_SECONDS,
+			self::HOURLY_TELEMETRY => HOUR_IN_SECONDS,
+			self::DAILY_AUDIT      => DAY_IN_SECONDS,
+		];
+	}
+
+	/**
+	 * Programa las tareas que falten. Solo se llama en admin o al activar (consulta la base).
 	 */
 	public function schedule(): void {
-		if ( self::actionSchedulerReady() ) {
-			if ( false === as_has_scheduled_action( self::DAILY_CLEANUP, [], self::GROUP ) ) {
-				as_schedule_recurring_action( time() + HOUR_IN_SECONDS, DAY_IN_SECONDS, self::DAILY_CLEANUP, [], self::GROUP );
+		$useActionScheduler = self::actionSchedulerReady();
+		$offset             = 5 * MINUTE_IN_SECONDS;
+		foreach ( self::recurring() as $hook => $interval ) {
+			if ( $useActionScheduler ) {
+				if ( false === as_has_scheduled_action( $hook, [], self::GROUP ) ) {
+					as_schedule_recurring_action( time() + $offset, $interval, $hook, [], self::GROUP );
+				}
+				// Si antes se usó WP-Cron, se limpia para no ejecutar dos veces.
+				wp_clear_scheduled_hook( $hook );
+			} elseif ( false === wp_next_scheduled( $hook ) ) {
+				wp_schedule_event( time() + $offset, DAY_IN_SECONDS === $interval ? 'daily' : 'hourly', $hook );
 			}
-			// Si antes se usó WP-Cron, se limpia para no ejecutar dos veces.
-			wp_clear_scheduled_hook( self::DAILY_CLEANUP );
-			return;
-		}
-		if ( false === wp_next_scheduled( self::DAILY_CLEANUP ) ) {
-			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', self::DAILY_CLEANUP );
+			// Escalonadas: no corren todas en el mismo minuto.
+			$offset += 2 * MINUTE_IN_SECONDS;
 		}
 	}
 
@@ -46,7 +70,9 @@ final class Jobs {
 		if ( function_exists( 'as_unschedule_all_actions' ) && self::actionSchedulerReady() ) {
 			as_unschedule_all_actions( '', [], self::GROUP );
 		}
-		wp_clear_scheduled_hook( self::DAILY_CLEANUP );
+		foreach ( array_keys( self::recurring() ) as $hook ) {
+			wp_clear_scheduled_hook( $hook );
+		}
 	}
 
 	/**

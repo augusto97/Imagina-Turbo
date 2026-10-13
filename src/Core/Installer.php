@@ -25,15 +25,15 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 1;
+	public const DB_VERSION        = 2;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key' ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last' ];
 
 	/** Tablas propias sin prefijo. */
-	public const TABLES = [ 'itb_events' ];
+	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly' ];
 
 	public function __construct(
 		private readonly Settings $settings,
@@ -120,6 +120,48 @@ final class Installer {
   PRIMARY KEY  (id),
   KEY created_at (created_at),
   KEY module_type (module,type)
+) {$charset};"
+		);
+
+		$samples = $wpdb->prefix . 'itb_route_samples';
+		dbDelta(
+			"CREATE TABLE {$samples} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  created_at datetime NOT NULL,
+  request_type varchar(20) NOT NULL,
+  route_key varchar(150) NOT NULL,
+  path_hash char(16) NOT NULL,
+  status smallint(5) unsigned NOT NULL DEFAULT 200,
+  ms mediumint(8) unsigned NOT NULL DEFAULT 0,
+  mem_kb int(10) unsigned NOT NULL DEFAULT 0,
+  queries smallint(5) unsigned NOT NULL DEFAULT 0,
+  cacheable tinyint(1) NOT NULL DEFAULT 0,
+  via_cf tinyint(1) NOT NULL DEFAULT 0,
+  source tinyint(3) unsigned NOT NULL DEFAULT 0,
+  overhead_us int(10) unsigned NOT NULL DEFAULT 0,
+  set_cookies varchar(255) NULL,
+  cache_control varchar(100) NULL,
+  phases text NULL,
+  plugins_cost text NULL,
+  PRIMARY KEY  (id),
+  KEY created_at (created_at),
+  KEY route (request_type,route_key)
+) {$charset};"
+		);
+
+		$hourly = $wpdb->prefix . 'itb_metrics_hourly';
+		dbDelta(
+			"CREATE TABLE {$hourly} (
+  hour datetime NOT NULL,
+  request_type varchar(20) NOT NULL,
+  route_key varchar(150) NOT NULL,
+  n int(10) unsigned NOT NULL DEFAULT 0,
+  ms_p50 mediumint(8) unsigned NOT NULL DEFAULT 0,
+  ms_p95 mediumint(8) unsigned NOT NULL DEFAULT 0,
+  mem_p50 int(10) unsigned NOT NULL DEFAULT 0,
+  mem_p95 int(10) unsigned NOT NULL DEFAULT 0,
+  queries_avg smallint(5) unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY  (hour,request_type,route_key)
 ) {$charset};"
 		);
 

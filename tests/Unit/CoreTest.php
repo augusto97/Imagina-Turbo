@@ -80,7 +80,8 @@ final class CoreTest extends TestCase {
 		$states  = ModuleRegistry::states( $catalog, [ 'shield' => false ], [ 'tweaks' => [ 'Se solapa con perfmatters' ] ] );
 
 		$this->assertTrue( $states['profiler']['requested'], 'seguro y activo por defecto' );
-		$this->assertFalse( $states['profiler']['enabled'], 'aún no implementado' );
+		$this->assertTrue( $states['profiler']['enabled'], 'implementado en la fase 1' );
+		$this->assertFalse( $states['tweaks']['enabled'], 'aún no implementado' );
 		$this->assertFalse( $states['shield']['requested'] );
 		$this->assertSame( [ 'Se solapa con perfmatters' ], $states['tweaks']['forcedOff'] );
 		$this->assertFalse( $states['woo_cart']['requested'] );

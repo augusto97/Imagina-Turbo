@@ -28,6 +28,8 @@ final class RestRegistrar {
 			new EventsController( $this->container ),
 			new SafetyController( $this->container ),
 			new SettingsController( $this->container ),
+			new ProfilerController( $this->container ),
+			new HubController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

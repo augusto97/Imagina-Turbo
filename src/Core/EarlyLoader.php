@@ -14,6 +14,9 @@ namespace ImaginaTurbo\Core;
 
 use ImaginaTurbo\Core\Config\CompiledConfig;
 use ImaginaTurbo\Core\Request\RequestClassifier;
+use ImaginaTurbo\Core\Request\RequestType;
+use ImaginaTurbo\Core\Safety\AdminBypassCookie;
+use ImaginaTurbo\Modules\Profiler\Collector;
 use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
 
@@ -21,6 +24,9 @@ use ImaginaTurbo\Core\Safety\SafeMode;
  * Orquesta kill switch, modo seguro, config compilada y clasificación.
  */
 final class EarlyLoader {
+
+	/** Igual que AdminBypassCookie::DIAG_NAME (repetido para no cargar esa clase en cada request). */
+	public const DIAG_COOKIE = 'itb_diag';
 
 	/** Debe coincidir con SafeMode::FLAG (se repite para no cargar la clase en cada request). */
 	public const SAFE_MODE_FLAG = 'safe-mode.flag';
@@ -49,6 +55,10 @@ final class EarlyLoader {
 		if ( Runtime::$earlyRan ) {
 			return;
 		}
+		$startNs   = hrtime( true );
+		$startWall = microtime( true );
+		$startMem  = memory_get_usage();
+
 		Runtime::$earlyRan  = true;
 		Runtime::$pluginDir = rtrim( $pluginDir, '/\\' );
 		Runtime::$dataDir   = self::dataDir();
@@ -79,7 +89,54 @@ final class EarlyLoader {
 		Runtime::$config  = $config;
 		Runtime::$request = ( new RequestClassifier( $config->classifierConfig() ) )->classifyCurrent();
 
+		self::maybeStartProfiler( $config, $startNs, $startMem, $startWall );
+
 		// Fases 4 y 5: aquí se ejecutarán la guardia PHP del escudo y el filtro de active_plugins.
+	}
+
+	/**
+	 * Decide si este request entra en la muestra del perfilador. El camino normal (no muestreado)
+	 * cuesta un número aleatorio y un par de comparaciones; el recolector solo se carga si toca.
+	 */
+	private static function maybeStartProfiler( CompiledConfig $config, int $startNs, int $startMem, float $startWall ): void {
+		$request = Runtime::$request;
+		if ( null === $request || RequestType::Cli === $request->type || ! $config->moduleEnabled( 'profiler' ) ) {
+			return;
+		}
+		$profiler = $config->get( 'profiler' );
+		if ( ! is_array( $profiler ) ) {
+			return;
+		}
+
+		$source = null;
+		if ( isset( $_COOKIE[ self::DIAG_COOKIE ] ) ) {
+			if ( ! class_exists( AdminBypassCookie::class, false ) ) {
+				require_once Runtime::$pluginDir . '/src/Core/Safety/AdminBypassCookie.php';
+			}
+			if ( AdminBypassCookie::isValidRequest( $_COOKIE, null, self::DIAG_COOKIE ) ) {
+				$source = 2; // Collector::SOURCE_DIAG (la clase aún no está cargada).
+			}
+		}
+		if ( null === $source && is_int( $profiler['intensive_until'] ?? null ) && $profiler['intensive_until'] > time() ) {
+			$source = 1;
+		}
+		if ( null === $source ) {
+			$rate = is_float( $profiler['rate'] ?? null ) || is_int( $profiler['rate'] ?? null ) ? (float) $profiler['rate'] : 0.0;
+			if ( $rate <= 0.0 || mt_rand( 1, 1000000 ) > (int) round( $rate * 1000000 ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rand_mt_rand -- muestreo estadístico, no seguridad; wp_rand() aún no existe aquí.
+				return;
+			}
+			$source = 0;
+		}
+
+		$extra = [];
+		if ( RequestType::AdminAjax === $request->type && '' !== $request->endpoint ) {
+			$extra = [ 'wp_ajax_' . $request->endpoint, 'wp_ajax_nopriv_' . $request->endpoint ];
+		} elseif ( RequestType::WcAjax === $request->type && '' !== $request->endpoint ) {
+			$extra = [ 'wc_ajax_' . $request->endpoint ];
+		}
+
+		require_once Runtime::$pluginDir . '/src/Modules/Profiler/Collector.php';
+		Collector::start( $source, $startNs, $startMem, $startWall, $extra, Runtime::$dataDir . '/profiler-symbols.php', $config->hash() );
 	}
 
 	/**

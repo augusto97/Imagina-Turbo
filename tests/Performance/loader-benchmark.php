@@ -1,7 +1,9 @@
 <?php
 /**
- * Benchmark de la etapa temprana (loader MU) contra el presupuesto de la fase 0:
- * < 0,3 ms por request y < 150 KB de memoria propia.
+ * Benchmark de la etapa temprana (loader MU) contra el presupuesto:
+ * - fase 0: < 0,3 ms por request y < 150 KB de memoria propia;
+ * - fase 1 (perfilador, docs/02): < 0,2 ms extra en requests no muestreados y < 1 ms de medición
+ *   en un request muestreado (sin contar el INSERT de la muestra, que se mide en el WordPress real).
  *
  * Uso: php -d opcache.enable_cli=1 tests/Performance/loader-benchmark.php
  * Sale con código 1 si se pasa del presupuesto.
@@ -13,9 +15,85 @@ declare(strict_types=1);
 
 const ITB_BUDGET_MS = 0.3;
 const ITB_BUDGET_KB = 150;
+const ITB_BUDGET_PROFILER_MS = 0.2;
+const ITB_BUDGET_SAMPLED_MS = 1.0;
 const ITB_ITERATIONS = 10000;
 
 $plugin = dirname( __DIR__, 2 );
+
+if ( 'sampled' === ( $argv[1] ?? '' ) ) {
+	// Request muestreado simulado: 30 plugins, 11 hooks clave con 20 callbacks cada uno.
+	define( 'ABSPATH', sys_get_temp_dir() . '/itb-bench-wp/' );
+	define( 'WP_CONTENT_DIR', ABSPATH . 'wp-content' );
+	define( 'WP_PLUGIN_DIR', WP_CONTENT_DIR . '/plugins' );
+	define( 'WPMU_PLUGIN_DIR', WP_CONTENT_DIR . '/mu-plugins' );
+	function add_action( string $hook, callable $callback, int $priority = 10, int $args = 1 ): bool { // phpcs:ignore
+		return true;
+	}
+	function add_filter( string $hook, callable $callback, int $priority = 10, int $args = 1 ): bool { // phpcs:ignore
+		return true;
+	}
+	require $plugin . '/tests/Unit/Stubs/WpHook.php';
+	require $plugin . '/src/Modules/Profiler/Collector.php';
+
+	// Un sitio real llega al loader con ~3000 funciones y ~400 clases del núcleo ya definidas.
+	$core = '';
+	for ( $i = 0; $i < 3000; $i++ ) {
+		$core .= "function itb_bench_core_{$i}() {}\n";
+	}
+	for ( $i = 0; $i < 400; $i++ ) {
+		$core .= "class Itb_Bench_Core_{$i} {}\n";
+	}
+	eval( $core ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- solo el benchmark.
+
+	$hooks = [ 'plugins_loaded', 'after_setup_theme', 'init', 'wp_loaded', 'wp', 'template_redirect', 'wp_enqueue_scripts', 'wp_head', 'wp_footer', 'rest_api_init', 'admin_init' ];
+	$GLOBALS['wp_filter'] = [];
+	foreach ( $hooks as $hook ) {
+		$GLOBALS['wp_filter'][ $hook ] = new WP_Hook();
+		// Mitad del núcleo (no se envuelven), mitad de plugins (closures: se envuelven y se atribuyen).
+		for ( $i = 0; $i < 20; $i++ ) {
+			$GLOBALS['wp_filter'][ $hook ]->add( 0 === $i % 2 ? 'itb_bench_core_' . $i : static fn( $x = null ) => $x, 10 + $i % 3, 'cb' . $i );
+		}
+	}
+	$plugins = array_map( static fn( int $i ): string => WP_PLUGIN_DIR . '/plugin-' . $i . '/plugin-' . $i . '.php', range( 1, 30 ) );
+
+	$run = static function ( bool $measure ) use ( $hooks, $plugins ): void {
+		$c = null;
+		if ( $measure ) {
+			\ImaginaTurbo\Modules\Profiler\Collector::reset();
+			$c = \ImaginaTurbo\Modules\Profiler\Collector::start( 0, (int) hrtime( true ), memory_get_usage(), microtime( true ) );
+			$c->resetLoadCursor();
+			foreach ( $plugins as $file ) {
+				$c->onPluginLoaded( $file );
+			}
+		}
+		foreach ( $hooks as $hook ) {
+			$c?->beginHook( $hook );
+			$GLOBALS['wp_filter'][ $hook ]->doAction( 'x' );
+			$c?->endHook( $hook );
+			$c?->mark( $hook );
+		}
+		if ( null !== $c ) {
+			$c->phases();
+			$c->components();
+		}
+	};
+
+	$iterations = 2000;
+	$run( true );
+	$t = hrtime( true );
+	for ( $i = 0; $i < $iterations; $i++ ) {
+		$run( false );
+	}
+	$base = ( hrtime( true ) - $t ) / 1e6 / $iterations;
+	$t    = hrtime( true );
+	for ( $i = 0; $i < $iterations; $i++ ) {
+		$run( true );
+	}
+	$with = ( hrtime( true ) - $t ) / 1e6 / $iterations;
+	echo json_encode( [ 'ms' => max( 0.0, $with - $base ) ] );
+	exit( 0 );
+}
 
 if ( 'child' === ( $argv[1] ?? '' ) ) {
 	// Proceso hijo: un request "frío" para medir memoria y luego el bucle caliente para medir tiempo.
@@ -80,6 +158,10 @@ $config = [
 		'login'    => [ '/acceso' ],
 	],
 	'modules'                     => array_fill_keys( [ 'profiler', 'cache_coordinator', 'cloudflare', 'woo_cart', 'shield', 'tweaks', 'firewall', 'plugin_filter', 'speculation', 'rum', 'frontend_hints', 'asset_manager', 'database' ], false ),
+	'profiler'                    => [
+		'rate'            => 0.000001,
+		'intensive_until' => 0,
+	],
 	'filter'                      => [],
 	'tags'                        => [ 'prefix' => 'k7' ],
 	'bypass_cookies'              => [ 'wordpress_logged_in_', 'wp-postpass_', 'comment_author_', 'comment_author_email_', 'wptouch_switch_toggle', 'itb_bypass' ],
@@ -95,28 +177,42 @@ $config = [
 	'static_passthrough'          => [],
 	'integrations'                => array_map( static fn( int $i ): string => 'plugin:plugin-' . $i . '/plugin-' . $i . '.php', range( 1, 25 ) ),
 ];
-file_put_contents( $dir . '/config.php', \ImaginaTurbo\Core\Config\ConfigCompiler::render( $config, 'bench' ) );
+$measure = static function ( array $config, string $dir ) use ( $plugin ): array {
+	file_put_contents( $dir . '/config.php', \ImaginaTurbo\Core\Config\ConfigCompiler::render( $config, 'bench' ) );
+	$cmd    = escapeshellarg( PHP_BINARY ) . ' -d opcache.enable_cli=1 -d opcache.validate_timestamps=1 ' . escapeshellarg( __FILE__ ) . ' child ' . escapeshellarg( $dir );
+	$out    = shell_exec( $cmd );
+	$result = json_decode( (string) $out, true );
+	if ( ! is_array( $result ) ) {
+		fwrite( STDERR, "El proceso de medición falló:\n" . $out . "\n" );
+		exit( 2 );
+	}
+	return $result;
+};
 
-$cmd = escapeshellarg( PHP_BINARY ) . ' -d opcache.enable_cli=1 -d opcache.validate_timestamps=1 ' . escapeshellarg( __FILE__ ) . ' child ' . escapeshellarg( $dir );
-$out = shell_exec( $cmd );
+$off                         = $measure( $config, $dir );
+$config['modules']['profiler'] = true;
+$on                          = $measure( $config, $dir );
 exec( 'rm -rf ' . escapeshellarg( $dir ) );
 
-$result = json_decode( (string) $out, true );
-if ( ! is_array( $result ) ) {
-	fwrite( STDERR, "El proceso de medición falló:\n" . $out . "\n" );
+$sampled = json_decode( (string) shell_exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __FILE__ ) . ' sampled' ), true );
+if ( ! is_array( $sampled ) ) {
+	fwrite( STDERR, "La medición del request muestreado falló.\n" );
 	exit( 2 );
 }
 
+$delta = max( 0.0, $on['ms'] - $off['ms'] );
 printf(
 	"Etapa temprana: %.4f ms por request (presupuesto %.1f ms) · %.1f KB de memoria (presupuesto %d KB) · OPcache: %s · tipo: %s\n",
-	$result['ms'],
+	$on['ms'],
 	ITB_BUDGET_MS,
-	$result['kb'],
+	$on['kb'],
 	ITB_BUDGET_KB,
-	$result['opcache'] ? 'sí' : 'no',
-	$result['type']
+	$on['opcache'] ? 'sí' : 'no',
+	$on['type']
 );
+printf( "Perfilador sin muestrear: +%.4f ms (presupuesto %.1f ms)\n", $delta, ITB_BUDGET_PROFILER_MS );
+printf( "Request muestreado (30 plugins, 11 hooks × 20 callbacks): %.4f ms de medición (presupuesto %.1f ms, sin el INSERT)\n", $sampled['ms'], ITB_BUDGET_SAMPLED_MS );
 
-$ok = $result['ms'] < ITB_BUDGET_MS && $result['kb'] < ITB_BUDGET_KB;
+$ok = $on['ms'] < ITB_BUDGET_MS && $on['kb'] < ITB_BUDGET_KB && $delta < ITB_BUDGET_PROFILER_MS && $sampled['ms'] < ITB_BUDGET_SAMPLED_MS;
 echo $ok ? "OK: dentro del presupuesto.\n" : "FALLA: fuera del presupuesto.\n";
 exit( $ok ? 0 : 1 );

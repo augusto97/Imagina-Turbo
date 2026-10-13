@@ -22,7 +22,9 @@ final class ModuleCatalog {
 	 * @return array<string, class-string<ModuleInterface>>
 	 */
 	public static function classMap(): array {
-		return [];
+		return [
+			'profiler' => \ImaginaTurbo\Modules\Profiler\ProfilerModule::class,
+		];
 	}
 
 	/** @var array<string, ModuleDefinition>|null */

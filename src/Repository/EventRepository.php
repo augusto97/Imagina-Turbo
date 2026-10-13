@@ -42,7 +42,7 @@ final class EventRepository {
 	/**
 	 * Lista paginada con filtros. El SQL es literal: los filtros vacíos se neutralizan con OR.
 	 *
-	 * @param array{module?: string, type?: string, severity?: int, search?: string, since?: string} $filters Filtros.
+	 * @param array{module?: string, type?: string, severity?: int, search?: string, since?: string, until?: string} $filters Filtros (until es exclusivo).
 	 * @return array{items: list<array<string, mixed>>, total: int}
 	 */
 	public function query( array $filters, int $page = 1, int $perPage = 50 ): array {
@@ -54,14 +54,15 @@ final class EventRepository {
 		$severity = $filters['severity'] ?? 0;
 		$search   = isset( $filters['search'] ) && '' !== $filters['search'] ? '%' . $this->db->esc_like( $filters['search'] ) . '%' : '';
 		$since    = $filters['since'] ?? '1970-01-01 00:00:00';
-		$where    = [ $this->table(), $module, $module, $type, $type, $severity, $search, $search, $since ];
+		$until    = $filters['until'] ?? '9999-12-31 23:59:59';
+		$where    = [ $this->table(), $module, $module, $type, $type, $severity, $search, $search, $since, $until ];
 
 		$countSql = $this->db->prepare(
-			"SELECT COUNT(*) FROM %i WHERE (%s = '' OR module = %s) AND (%s = '' OR type = %s) AND severity >= %d AND (%s = '' OR message LIKE %s) AND created_at >= %s",
+			"SELECT COUNT(*) FROM %i WHERE (%s = '' OR module = %s) AND (%s = '' OR type = %s) AND severity >= %d AND (%s = '' OR message LIKE %s) AND created_at >= %s AND created_at < %s",
 			$where
 		);
 		$listSql  = $this->db->prepare(
-			"SELECT id, created_at, module, type, severity, message, context FROM %i WHERE (%s = '' OR module = %s) AND (%s = '' OR type = %s) AND severity >= %d AND (%s = '' OR message LIKE %s) AND created_at >= %s ORDER BY id DESC LIMIT %d OFFSET %d",
+			"SELECT id, created_at, module, type, severity, message, context FROM %i WHERE (%s = '' OR module = %s) AND (%s = '' OR type = %s) AND severity >= %d AND (%s = '' OR message LIKE %s) AND created_at >= %s AND created_at < %s ORDER BY id DESC LIMIT %d OFFSET %d",
 			array_merge( $where, [ $perPage, ( $page - 1 ) * $perPage ] )
 		);
 		if ( null === $countSql || null === $listSql ) {

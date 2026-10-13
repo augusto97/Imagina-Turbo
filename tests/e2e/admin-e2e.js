@@ -302,6 +302,22 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.screenshot( { path: OUT + '/15b-movil-base-de-datos.png', fullPage: true } );
 	await page.setViewportSize( { width: 1400, height: 1000 } );
 
+	// Flota: plantilla del hub (si el sitio está registrado), desviaciones y autorización del hub.
+	await page.click( 'a[href="#/flota"]' );
+	await page.waitForSelector( 'text=/Aplicación por lotes desde el hub|no está registrado en el hub/' );
+	const fleet = { registered: await page.getByText( 'Aplicación por lotes desde el hub' ).count() > 0 };
+	if ( fleet.registered ) {
+		await page.getByRole( 'button', { name: 'Consultar el hub' } ).click();
+		await page.getByRole( 'button', { name: 'Consultando…' } ).waitFor( { state: 'detached', timeout: 30000 } );
+		fleet.drift = await page.locator( 'table tbody tr' ).count();
+		fleet.matches = await page.getByText( 'El sitio coincide con la plantilla.' ).count() > 0;
+		fleet.snapshots = await page.getByRole( 'button', { name: 'Revertir' } ).count();
+	}
+	await page.screenshot( { path: OUT + '/16-flota.png', fullPage: true } );
+	await page.setViewportSize( { width: 390, height: 844 } );
+	fleet.mobileOverflow = await page.evaluate( () => document.documentElement.scrollWidth > window.innerWidth + 1 );
+	await page.setViewportSize( { width: 1400, height: 1000 } );
+
 	// Carga condicional: reglas con su evidencia (si el sitio ya tiene alguna) y revisión de una activa.
 	await page.click( 'a[href="#/carga"]' );
 	await page.waitForSelector( 'text=Protecciones' );
@@ -370,6 +386,6 @@ const LOGIN = process.env.ITB_LOGIN_PATH || '/wp-login.php';
 	await page.goto( BASE + '/wp-admin/plugins.php' );
 	await page.screenshot( { path: OUT + '/6-plugins.png' } );
 
-	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, navigation, assets, database, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
+	console.log( JSON.stringify( { rows, plugins, diagCookie: diagCookie ? { httpOnly: diagCookie.httpOnly, sameSite: diagCookie.sameSite } : null, serverTiming: timing.slice( 0, 120 ), serverTimingAfterRetire: noTiming, mobileOverflow: overflow, mobileOverflowCache: overflowCache, cache, cloudflare, woo, shield: { hits: shieldHits, moderateNeedsConfirm: feedsStillOff }, firewall, navigation, assets, database, fleet, pluginFilter: { rules: filterRules, recheck: filterRecheck, mobileOverflow: filterMobileOverflow }, problems }, null, 1 ) );
 	await browser.close();
 } )().catch( ( e ) => { console.error( e ); process.exit( 1 ); } );

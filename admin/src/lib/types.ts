@@ -620,3 +620,40 @@ export interface DbStatus {
 	result?: { action: string; batch: string; affected: number; backed_up: number; more: boolean };
 	restored?: { batch: string; restored: number; skipped: number };
 }
+
+export interface FleetDrift {
+	kind: 'setting' | 'module' | 'tweak' | 'cloudflare';
+	key: string;
+	label: string;
+	current: unknown;
+	desired: unknown;
+	risk: 'safe' | 'moderate' | 'invasive';
+}
+
+export interface FleetPolicy {
+	id: string;
+	version: number;
+	name: string;
+	settings: Record<string, unknown>;
+	modules: Record<string, boolean>;
+	tweaks: Record<string, boolean>;
+	cloudflare: { rules: string[]; settings: string[] };
+	ignored: string[];
+}
+
+export interface FleetStatus {
+	hub: { configured: boolean; registered: boolean };
+	state: {
+		policy: FleetPolicy | null;
+		fetched_at: number;
+		error: string;
+		drift: FleetDrift[];
+		cloudflare_error: string;
+		checked_at: number;
+		applied: { id: string; version: number; at: number; source: string } | null;
+	};
+	remote: boolean;
+	snapshots: { id: string; created_at: number; source: string; policy: string }[];
+	endpoint: string;
+	result?: { applied: string[]; skipped: { key: string; reason: string }[]; cloudflare: Record<string, unknown> | null; snapshot: string };
+}

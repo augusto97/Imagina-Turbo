@@ -1,4 +1,4 @@
-import { Activity, Blocks, Cloud, Database, FastForward, FileCode2, Gauge, Layers, ScrollText, Settings2, Shield, ShoppingCart, SlidersHorizontal, Zap } from 'lucide-react';
+import { Activity, Blocks, Cloud, Database, FastForward, FileCode2, Gauge, Network, Layers, ScrollText, Settings2, Shield, ShoppingCart, SlidersHorizontal, Zap } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Badge } from './ui/badge';
 import { config } from '@/lib/config';
@@ -19,6 +19,7 @@ const items: { route: Route; label: string; icon: typeof Gauge }[] = [
 	{ route: 'ajustes', label: __( 'Ajustes rápidos' ), icon: SlidersHorizontal },
 	{ route: 'assets', label: __( 'Assets' ), icon: FileCode2 },
 	{ route: 'base-de-datos', label: __( 'Base de datos' ), icon: Database },
+	{ route: 'flota', label: __( 'Flota' ), icon: Network },
 	{ route: 'registro', label: __( 'Registro' ), icon: ScrollText },
 	{ route: 'avanzado', label: __( 'Avanzado' ), icon: Settings2 },
 ];
@@ -62,7 +63,7 @@ export function Layout( { children }: { children: ReactNode } ) {
 					) ) }
 				</nav>
 				<p className="itb:hidden itb:px-4 itb:pb-4 itb:text-[11px] itb:leading-snug itb:text-zinc-400 itb:md:block">
-					{ __( 'Fase 7 · Assets por ruta y base de datos. Los módulos llegan por fases.' ) }
+					{ __( 'Fase 8 · Flota: plantillas del hub y desviaciones.' ) }
 				</p>
 			</aside>
 			<main className="itb:min-w-0 itb:flex-1 itb:p-5 itb:md:p-8">

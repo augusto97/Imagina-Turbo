@@ -27,6 +27,9 @@ final class HubClient {
 
 	public const KEY_OPTION = 'itb_site_key';
 
+	/** Nonces de las peticiones del hub ya vistas (anti-replay, 10 minutos). */
+	public const NONCES_OPTION = 'itb_hub_nonces';
+
 	public const TIMEOUT = 8;
 
 	/** Ventana máxima de datos pendientes: lo más antiguo se descarta. */
@@ -270,6 +273,82 @@ final class HubClient {
 			'sent'   => false,
 			'reason' => 'error',
 		];
+	}
+
+	/**
+	 * Descarga la plantilla de flota (GET /v1/fleet/policy, firmada). El hub firma también la
+	 * respuesta: HMAC con la clave del sitio sobre "RESPONSE\nRUTA\nTIMESTAMP\nNONCE de la
+	 * petición\nsha256(cuerpo)" en X-ITB-Timestamp y X-ITB-Signature. Así una respuesta no sirve
+	 * para otra petición ni para otro sitio.
+	 *
+	 * @return array<string, mixed>|null|\WP_Error Plantilla (JSON decodificado), null si el hub no tiene ninguna (204/404).
+	 */
+	public function fetchPolicy( ?int $now = null ): array|null|\WP_Error {
+		if ( ! $this->isConfigured() || ! $this->isRegistered() || $this->state()['hub'] !== $this->url() ) {
+			return new \WP_Error( 'itb_hub_off', __( 'El sitio no está registrado en el hub.', 'imagina-turbo' ) );
+		}
+		$now     = $now ?? time();
+		$url     = $this->url() . '/v1/fleet/policy';
+		$path    = (string) wp_parse_url( $url, PHP_URL_PATH );
+		$nonce   = bin2hex( random_bytes( 16 ) );
+		$headers = Signer::headers( $this->siteId(), $this->siteKey(), $this->license->licenseKey(), 'GET', $path, '', $now, $nonce );
+
+		$response = wp_remote_get(
+			$url,
+			[
+				'timeout'     => self::TIMEOUT,
+				'redirection' => 0,
+				'headers'     => $headers + [ 'User-Agent' => 'ImaginaTurbo/' . ITB_VERSION ],
+			]
+		);
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		if ( 204 === $code || 404 === $code ) {
+			return null;
+		}
+		$error = self::responseError( $response );
+		if ( null !== $error ) {
+			return new \WP_Error( 'itb_hub_http', $error );
+		}
+		$body      = (string) wp_remote_retrieve_body( $response );
+		$timestamp = wp_remote_retrieve_header( $response, 'x-itb-timestamp' );
+		$signature = wp_remote_retrieve_header( $response, 'x-itb-signature' );
+		if ( ! is_string( $timestamp ) || ! is_string( $signature ) || ! Signer::verify( $this->siteKey(), 'RESPONSE', $path, $timestamp, $nonce, $body, $signature, $now ) ) {
+			$this->events->warning( 'hub', 'fleet_signature', __( 'La plantilla de flota llegó sin una firma válida del hub y se descartó.', 'imagina-turbo' ) );
+			return new \WP_Error( 'itb_hub_signature', __( 'La respuesta del hub no tiene una firma válida.', 'imagina-turbo' ) );
+		}
+		$data = json_decode( $body, true );
+		return is_array( $data ) ? $data : new \WP_Error( 'itb_hub_json', __( 'La plantilla del hub no es JSON válido.', 'imagina-turbo' ) );
+	}
+
+	/**
+	 * Verifica una petición del hub al sitio (lotes de flota): sitio, firma, ventana de 5 minutos y
+	 * nonce no repetido. Devuelve null si es válida o el motivo del rechazo.
+	 *
+	 * @param array<string, string> $headers Cabeceras en minúsculas.
+	 */
+	public function verifyIncoming( string $method, string $path, string $body, array $headers, ?int $now = null ): ?string {
+		$now = $now ?? time();
+		if ( ! $this->isRegistered() || $this->state()['hub'] !== $this->url() ) {
+			return 'not_registered';
+		}
+		if ( ! hash_equals( $this->siteId(), (string) ( $headers['x-itb-site'] ?? '' ) ) ) {
+			return 'site';
+		}
+		$nonce = (string) ( $headers['x-itb-nonce'] ?? '' );
+		if ( ! Signer::verify( $this->siteKey(), $method, $path, (string) ( $headers['x-itb-timestamp'] ?? '' ), $nonce, $body, (string) ( $headers['x-itb-signature'] ?? '' ), $now ) ) {
+			return 'signature';
+		}
+		$seen = get_option( self::NONCES_OPTION, [] );
+		$seen = array_filter( is_array( $seen ) ? $seen : [], static fn( $t ): bool => is_int( $t ) && $t > $now - 2 * Signer::MAX_SKEW );
+		if ( isset( $seen[ $nonce ] ) ) {
+			return 'replay';
+		}
+		$seen[ $nonce ] = $now;
+		update_option( self::NONCES_OPTION, array_slice( $seen, -500, null, true ), false );
+		return null;
 	}
 
 	/**

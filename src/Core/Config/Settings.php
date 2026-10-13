@@ -77,6 +77,7 @@ final class Settings {
 			'db_keep_revisions'        => 5,
 			'db_schedule'              => [],
 			'db_schedule_days'         => 7,
+			'fleet_remote'             => false,
 		];
 	}
 
@@ -272,7 +273,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades', 'fleet_remote' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}

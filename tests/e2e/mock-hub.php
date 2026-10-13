@@ -9,6 +9,11 @@
  * Guarda en ITB_HUB_DIR: sites.json (site_id → site_key), nonces.json (anti-replay) y
  * telemetry-<n>.json (cada lote recibido, ya descomprimido) para inspeccionarlo.
  *
+ * Flota: GET /v1/fleet/policy devuelve ITB_HUB_DIR/policy.json (204 si no existe) con la respuesta
+ * firmada. POST /__mock/fleet/push {"dry_run": bool} recorre los sitios registrados y llama a su
+ * /fleet/remote firmado (lote); guarda fleet-push-<n>.json. Como el sitio llama al hub mientras el hub
+ * espera su respuesta, hay que arrancarlo con PHP_CLI_SERVER_WORKERS=4.
+ *
  * @package ImaginaTurbo
  */
 
@@ -132,6 +137,104 @@ if ( 'POST' === $method && '/v1/telemetry' === $path ) {
 	$n = count( glob( $dir . '/telemetry-*.json' ) ?: [] ) + 1;
 	file_put_contents( $dir . '/telemetry-' . $n . '.json', json_encode( $data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
 	itb_hub_reply( 202, [ 'accepted' => true ] );
+	return;
+}
+
+/**
+ * Verifica una petición firmada del sitio (firma, ventana y nonce). Devuelve el site_id o null.
+ */
+function itb_hub_verify( string $dir, string $method, string $path, string $body ): ?string {
+	$sites  = itb_hub_read( $dir . '/sites.json' );
+	$siteId = (string) ( $_SERVER['HTTP_X_ITB_SITE'] ?? '' );
+	if ( ! isset( $sites[ $siteId ]['key'] ) ) {
+		return null;
+	}
+	$nonce = (string) ( $_SERVER['HTTP_X_ITB_NONCE'] ?? '' );
+	if ( ! Signer::verify( (string) $sites[ $siteId ]['key'], $method, $path, (string) ( $_SERVER['HTTP_X_ITB_TIMESTAMP'] ?? '' ), $nonce, $body, (string) ( $_SERVER['HTTP_X_ITB_SIGNATURE'] ?? '' ) ) ) {
+		return null;
+	}
+	$nonces = itb_hub_read( $dir . '/nonces.json' );
+	$nonces = array_filter( $nonces, static fn( $t ): bool => is_int( $t ) && $t > time() - Signer::MAX_SKEW );
+	if ( isset( $nonces[ $nonce ] ) ) {
+		return null;
+	}
+	$nonces[ $nonce ] = time();
+	file_put_contents( $dir . '/nonces.json', json_encode( $nonces ) );
+	return $siteId;
+}
+
+if ( 'GET' === $method && '/v1/fleet/policy' === $path ) {
+	$siteId = itb_hub_verify( $dir, $method, $path, $body );
+	if ( null === $siteId ) {
+		itb_hub_reply( 401, [ 'error' => 'firma inválida' ] );
+		return;
+	}
+	if ( ! is_file( $dir . '/policy.json' ) ) {
+		http_response_code( 204 );
+		return;
+	}
+	$policy = (string) file_get_contents( $dir . '/policy.json' );
+	$sites  = itb_hub_read( $dir . '/sites.json' );
+	$ts     = time();
+	// Firma de la respuesta: atada a la petición (su nonce) y al sitio (su clave).
+	$sig = is_file( $dir . '/bad-signature' ) ? str_repeat( '0', 64 ) : Signer::sign( (string) $sites[ $siteId ]['key'], 'RESPONSE', $path, $ts, (string) $_SERVER['HTTP_X_ITB_NONCE'], $policy );
+	header( 'X-ITB-Timestamp: ' . $ts );
+	header( 'X-ITB-Signature: ' . $sig );
+	header( 'Content-Type: application/json' );
+	echo $policy;
+	return;
+}
+
+// Lote de flota: el hub llama a cada sitio (estado o aplicar), como haría el hub real.
+if ( 'POST' === $method && '/__mock/fleet/push' === $path ) {
+	$input   = json_decode( $body, true );
+	$dry     = is_array( $input ) && true === ( $input['dry_run'] ?? false );
+	$replay  = is_array( $input ) && true === ( $input['replay'] ?? false );
+	$policy  = json_decode( (string) @file_get_contents( $dir . '/policy.json' ), true );
+	$version = is_array( $policy ) ? (int) ( $policy['version'] ?? 0 ) : 0;
+	$results = [];
+	foreach ( itb_hub_read( $dir . '/sites.json' ) as $siteId => $site ) {
+		$url                = rtrim( (string) $site['url'], '/' ) . '/wp-json/imagina-turbo/v1/fleet/remote';
+		$payload            = (string) json_encode(
+			[
+				'action'         => $dry ? 'status' : 'apply',
+				'policy_version' => $version,
+			]
+		);
+		$headers            = Signer::headers( (string) $siteId, (string) $site['key'], (string) ( $site['license'] ?? '' ), 'POST', (string) parse_url( $url, PHP_URL_PATH ), $payload );
+		$send               = static function () use ( $url, $headers, $payload ): array {
+			$lines = [ 'Content-Type: application/json' ];
+			foreach ( $headers as $name => $value ) {
+				$lines[] = $name . ': ' . $value;
+			}
+			$ch = curl_init( $url );
+			curl_setopt_array(
+				$ch,
+				[
+					CURLOPT_POST           => true,
+					CURLOPT_POSTFIELDS     => $payload,
+					CURLOPT_HTTPHEADER     => $lines,
+					CURLOPT_RETURNTRANSFER => true,
+					CURLOPT_TIMEOUT        => 60,
+				]
+			);
+			$response = (string) curl_exec( $ch );
+			$code     = (int) curl_getinfo( $ch, CURLINFO_HTTP_CODE );
+			curl_close( $ch );
+			return [
+				'status'   => $code,
+				'response' => json_decode( $response, true ) ?? $response,
+			];
+		};
+		$results[ $siteId ] = $send();
+		if ( $replay ) {
+			// Misma petición otra vez (mismo nonce): el sitio debe rechazarla.
+			$results[ $siteId ]['replay'] = $send()['status'];
+		}
+	}
+	$n = count( glob( $dir . '/fleet-push-*.json' ) ?: [] ) + 1;
+	file_put_contents( $dir . '/fleet-push-' . $n . '.json', json_encode( $results, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE ) );
+	itb_hub_reply( 200, $results );
 	return;
 }
 

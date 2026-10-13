@@ -372,4 +372,12 @@ Verificado en `augusto97/imagina-search` (Woo Smart Search 6.0.2):
 - Envía telemetría agregada cada hora por Action Scheduler (lotes, gzip). Si el hub no responde, reintenta con backoff y descarta después de 24 h.
 - Descarga la matriz de compatibilidad firmada (ed25519, `sodium_crypto_sign_verify_detached`, clave pública incluida en el plugin). Si la firma falla, conserva la versión anterior.
 - Recibe plantillas de flota (configuración estándar) y reporta desviaciones.
+
+### Implementación de la flota (fase 8)
+
+- **Plantilla**: se descarga del hub en la tarea diaria `itb_fleet_daily` o con "Consultar el hub", firmada en los dos sentidos. Se valida con las mismas reglas que los ajustes y se guarda tal como llegó; si el hub falla o la firma no cuadra, se conserva la anterior (regla 7).
+- **Desviaciones**: ajustes, módulos y ajustes rápidos se comparan con la configuración del sitio; Cloudflare, con el plan del sitio filtrado por las reglas y ajustes que pide la plantilla (falta, distinta, cambiada a mano, bloqueada). Se muestran con su riesgo y viajan en la telemetría.
+- **Aplicar**: desde el admin, todo lo no invasivo tras confirmar. Antes se guarda un snapshot de lo que la plantilla puede tocar (revertible desde la pantalla) y Cloudflare guarda el suyo de la zona. Se aplica lo del sitio, se recompila, y Cloudflare usa la config nueva (si la plantilla enciende el módulo, sus reglas ya cuentan).
+- **Por lotes desde el hub**: solo si el administrador lo autorizó (`fleet_remote`, con confirmación). La petición va firmada con la clave del sitio, caduca en 5 minutos, no se acepta dos veces y está limitada a 60 por hora. El sitio no acepta configuración en la petición: descarga la plantilla del hub y la aplica solo si la versión coincide con la pedida.
+- **Nunca por plantilla**: lo invasivo (carga condicional, quitar jQuery Migrate), reglas de Cloudflare que alguien cambió a mano en el panel, Cloudflare con el módulo apagado, DNS, SSL y certificados (regla 8).
 - Detalle del protocolo en `docs/04-admin-y-api.md`.

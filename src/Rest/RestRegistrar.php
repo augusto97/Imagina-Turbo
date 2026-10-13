@@ -43,6 +43,7 @@ final class RestRegistrar {
 			new TweaksController( $this->container ),
 			new AssetsController( $this->container ),
 			new DatabaseController( $this->container ),
+			new FleetController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

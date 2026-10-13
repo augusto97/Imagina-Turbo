@@ -56,6 +56,13 @@ final class CloudflareService {
 		return '' !== $this->state->zoneId() && 'ok' === $this->vault->status()['state'] && '' === $this->guard();
 	}
 
+	/**
+	 * Prefijo de las reglas propias de este sitio (itb-{prefijo de tags}-).
+	 */
+	public function refPrefix(): string {
+		return $this->site->refPrefix;
+	}
+
 	public function guard(): string {
 		return $this->site->guard( $this->state->all()['zone_name'] );
 	}

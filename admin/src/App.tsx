@@ -10,6 +10,7 @@ import { Navigation } from './screens/Navigation';
 import { Tweaks } from './screens/Tweaks';
 import { Assets } from './screens/Assets';
 import { Database } from './screens/Database';
+import { Fleet } from './screens/Fleet';
 import { Diagnostics } from './screens/Diagnostics';
 import { Log } from './screens/Log';
 import { Panel } from './screens/Panel';
@@ -29,6 +30,7 @@ export function App() {
 			{ route === 'ajustes' && <Tweaks /> }
 			{ route === 'assets' && <Assets /> }
 			{ route === 'base-de-datos' && <Database /> }
+			{ route === 'flota' && <Fleet /> }
 			{ route === 'registro' && <Log /> }
 			{ route === 'avanzado' && <Advanced /> }
 		</Layout>

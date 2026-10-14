@@ -50,6 +50,37 @@ final class DelayJsExclusions {
 		add_filter( 'rocket_delay_js_exclusions', [ self::class, 'rocket' ] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro de WP Rocket.
 		add_filter( 'litespeed_optm_js_defer_exc', [ self::class, 'litespeed' ] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro de LiteSpeed Cache.
 		add_filter( 'script_loader_tag', [ self::class, 'pinTag' ], 20, 2 );
+		// Los datos de wp_localize_script (-js-extra) se imprimen aparte, sin pasar por script_loader_tag.
+		add_filter( 'wp_inline_script_attributes', [ self::class, 'pinInline' ], 20, 2 );
+		// LSCache carga después (orden alfabético): se comprueba al imprimir, no al registrar.
+		add_action( 'wp_head', [ self::class, 'printClickReplay' ], 1 );
+	}
+
+	/**
+	 * Con "Delayed", LSCache carga el JS retrasado en la primera interacción pero no repite ese clic
+	 * (assets/js/js_delay.js, 7.9.1): un toque en "Añadir al presupuesto" (href="#") antes de hacer
+	 * scroll no hacía nada. Se guarda el primer clic en un control que depende de JS (botón, campo,
+	 * enlace sin destino) y se repite cuando LSCache avisa que terminó (DOMContentLiteSpeedLoaded).
+	 * Los enlaces normales navegan como siempre.
+	 */
+	public static function printClickReplay(): void {
+		if ( ! self::litespeedDelays() ) {
+			return;
+		}
+		$js = '(function(d,w){var q=null;function p(){return!!d.querySelector(\'script[type="litespeed/javascript"]\')}'
+			. 'function h(e){if(q||!p())return;var t=e.target&&e.target.closest?e.target.closest(\'button,input,select,label,[role=button],a\'):null;if(!t)return;'
+			. 'if(t.tagName==="A"){var r=t.getAttribute("href");if(r&&r!=="#"&&r.indexOf("javascript:")!==0)return}'
+			. 'e.preventDefault();e.stopImmediatePropagation();q=t}'
+			. 'd.addEventListener("click",h,true);'
+			. 'w.addEventListener("DOMContentLiteSpeedLoaded",function(){d.removeEventListener("click",h,true);if(q){var t=q;q=null;setTimeout(function(){t.click()},0)}})})(document,window);';
+		wp_print_inline_script_tag(
+			$js,
+			[
+				'id'            => 'itb-click-replay',
+				'data-no-defer' => '1',
+				'nowprocket'    => true,
+			]
+		);
 	}
 
 	/** @var array<string, bool> Resultado por handle: ¿su src o su código en línea coincide con una exclusión? */
@@ -75,17 +106,49 @@ final class DelayJsExclusions {
 	 * @return mixed
 	 */
 	public static function pinTag( mixed $tag, mixed $handle ): mixed {
-		global $wp_scripts;
-		if ( ! is_string( $tag ) || ! is_string( $handle ) || ! ( $wp_scripts instanceof \WP_Scripts ) ) {
+		if ( ! is_string( $tag ) || ! is_string( $handle ) ) {
 			return $tag;
 		}
-		// El conjunto se recalcula solo si cambió la cola (un shortcode puede encolar durante el render).
+		return isset( self::pinned()[ $handle ] ) ? self::markTag( $tag ) : $tag;
+	}
+
+	/**
+	 * Los datos de un script marcado (var ... = {...}, id "{handle}-js-extra") tampoco se retrasan: con
+	 * "Delayed", el script del carrito corría sin su configuración y el contador quedaba en 0.
+	 *
+	 * @param mixed $attributes Atributos de la etiqueta en línea.
+	 * @param mixed $data       Código.
+	 * @return mixed
+	 */
+	public static function pinInline( mixed $attributes, mixed $data = '' ): mixed {
+		unset( $data );
+		if ( ! is_array( $attributes ) || ! is_string( $attributes['id'] ?? null ) || 1 !== preg_match( '/^(.+)-js-(?:extra|before|after|translations)$/', $attributes['id'], $m ) ) {
+			return $attributes;
+		}
+		if ( isset( self::pinned()[ $m[1] ] ) ) {
+			$attributes['data-no-defer'] = '1';
+			$attributes['nowprocket']    = true;
+		}
+		return $attributes;
+	}
+
+	/**
+	 * Handles marcados en esta página. Se recalcula solo si cambió la cola (un shortcode puede encolar
+	 * durante el render).
+	 *
+	 * @return array<string, true>
+	 */
+	private static function pinned(): array {
+		global $wp_scripts;
+		if ( ! ( $wp_scripts instanceof \WP_Scripts ) ) {
+			return [];
+		}
 		$queued = count( $wp_scripts->queue );
 		if ( $queued !== self::$pinnedFor ) {
 			self::$pinnedFor = $queued;
 			self::$pinned    = self::pinnedHandles( self::graph( $wp_scripts ), $wp_scripts->queue, array_merge( self::patterns(), self::litespeedOwn() ), self::litespeedDelays() );
 		}
-		return isset( self::$pinned[ $handle ] ) ? self::markTag( $tag ) : $tag;
+		return self::$pinned;
 	}
 
 	/**

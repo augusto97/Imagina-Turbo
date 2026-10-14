@@ -71,6 +71,7 @@ final class AssetsDatabaseTest extends TestCase {
 		$this->assertMatchesRegularExpression( '/^[a-f0-9]{12}$/', $rule['id'] );
 
 		$this->assertNull( AssetRules::normalize( [ 'handle' => 'x', 'type' => 'js', 'mode' => 'only' ] ), '"solo aquí" sin lugares quitaría el asset en todo el sitio' );
+		$this->assertNull( AssetRules::normalize( [ 'handle' => 'x', 'type' => 'css', 'mode' => 'never' ] ), '"nunca aquí" sin lugares no quitaría nada' );
 		$this->assertNull( AssetRules::normalize( [ 'handle' => '<script>', 'type' => 'js', 'mode' => 'never' ] ) );
 		$this->assertNull( AssetRules::normalize( [ 'handle' => 'x', 'type' => 'img', 'mode' => 'never' ] ) );
 	}

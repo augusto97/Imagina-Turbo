@@ -180,7 +180,7 @@ final class AssetScanner {
 			}
 		}
 		if ( isset( $active['woocommerce'] ) ) {
-			$usage['woocommerce'] = $this->usage( AssetSuggestions::WOO_MARKERS, [], [] );
+			$usage['woocommerce'] = $this->usage( AssetSuggestions::WOO_MARKERS, AssetSuggestions::WOO_ELEMENTOR, [] );
 		}
 		$wooIds = [];
 		foreach ( [ 'woocommerce_cart_page_id', 'woocommerce_checkout_page_id', 'woocommerce_myaccount_page_id' ] as $option ) {

@@ -68,8 +68,9 @@ final class AssetRules {
 		$templates = array_values( array_unique( array_filter( is_array( $rule['templates'] ?? null ) ? $rule['templates'] : [], static fn( $t ): bool => is_string( $t ) && 1 === preg_match( '/^[a-z0-9:_\-]{1,40}$/', $t ) ) ) );
 		$ids       = array_values( array_unique( array_filter( array_map( 'intval', is_array( $rule['ids'] ?? null ) ? $rule['ids'] : [] ), static fn( int $i ): bool => $i > 0 ) ) );
 		$types     = array_values( array_unique( array_filter( is_array( $rule['post_types'] ?? null ) ? $rule['post_types'] : [], static fn( $t ): bool => is_string( $t ) && 1 === preg_match( '/^[a-z0-9_\-]{1,20}$/', $t ) ) ) );
-		// "Solo aquí" sin ningún lugar quitaría el asset en todo el sitio: no es válida.
-		if ( 'only' === $mode && [] === $templates && [] === $ids && [] === $types ) {
+		// Sin ningún lugar, "solo aquí" quitaría el asset en todo el sitio y "nunca aquí" no haría nada:
+		// ninguna de las dos es válida.
+		if ( [] === $templates && [] === $ids && [] === $types ) {
 			return null;
 		}
 		$id = substr( hash( 'sha256', $type . '|' . $handle . '|' . $mode . '|' . implode( ',', $templates ) . '|' . implode( ',', $ids ) . '|' . implode( ',', $types ) ), 0, 12 );

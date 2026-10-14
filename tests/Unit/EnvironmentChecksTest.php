@@ -138,6 +138,50 @@ final class EnvironmentChecksTest extends TestCase {
 		$this->assertSame( [ 'wp-polyfill', 'wp-url' ], $broken, 'un patrón inválido no anula los demás' );
 	}
 
+	public function test_native_defer_scripts_pin_their_dependencies_under_delay(): void {
+		$graph = [
+			'jquery'                   => [
+				'src'    => '/wp-includes/js/jquery/jquery.min.js',
+				'deps'   => [],
+				'inline' => '',
+			],
+			'underscore'               => [
+				'src'    => '/wp-includes/js/underscore.min.js',
+				'deps'   => [],
+				'inline' => '',
+			],
+			'wp-util'                  => [
+				'src'    => '/wp-includes/js/wp-util.min.js',
+				'deps'   => [ 'underscore', 'jquery' ],
+				'inline' => '',
+			],
+			'wc-add-to-cart-variation' => [
+				'src'      => '/woocommerce/assets/js/frontend/add-to-cart-variation.min.js',
+				'deps'     => [ 'jquery', 'wp-util' ],
+				'inline'   => '',
+				'strategy' => 'defer',
+			],
+			'woodmart-theme'           => [
+				'src'    => '/woodmart/js/scripts/global/helpers.min.js',
+				'deps'   => [ 'jquery' ],
+				'inline' => '',
+			],
+		];
+		$this->assertSame( [], DelayJsExclusions::pinnedHandles( $graph, [ 'wc-add-to-cart-variation', 'woodmart-theme' ], [] ), 'sin Delayed, el defer nativo no importa' );
+		$pinned = array_keys( DelayJsExclusions::pinnedHandles( $graph, [ 'wc-add-to-cart-variation', 'woodmart-theme' ], [], true ) );
+		sort( $pinned );
+		$this->assertSame( [ 'jquery', 'underscore', 'wc-add-to-cart-variation', 'wp-util' ], $pinned, 'LSCache no retrasa el script con defer: sus dependencias tampoco; el tema sí se retrasa' );
+
+		$own = [
+			'itb-cart' => [
+				'src'    => '/wp-content/plugins/imagina-turbo/assets/js/itb-cart.min.js',
+				'deps'   => [],
+				'inline' => '',
+			],
+		];
+		$this->assertSame( [ 'itb-cart' => true ], DelayJsExclusions::pinnedHandles( $own, [ 'itb-cart' ], [ DelayJsExclusions::OWN ] ), 'el contador del carrito no espera a la interacción' );
+	}
+
 	public function test_mark_tag_adds_attributes_once(): void {
 		$tag = "<script id=\"wp-api-fetch-js\" src=\"/api-fetch.min.js\"></script>\n<script id=\"wp-api-fetch-js-after\">\nwp.apiFetch.use();\n</script>\n";
 		$out = DelayJsExclusions::markTag( $tag );

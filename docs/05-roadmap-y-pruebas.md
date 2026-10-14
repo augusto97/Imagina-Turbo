@@ -417,3 +417,9 @@ Revisión de un WooCommerce real (WoodMart + Elementor, OpenLiteSpeed con LiteSp
 ## Versión 0.10.6
 
 - **La pantalla Base de datos no cargaba en el sitio real**: el servidor respondía 403 a cualquier URL con `/database/` (reglas tipo 7G/8G de firewalls de servidor y de plugins), antes de llegar a WordPress. Las rutas pasan a `/db/status`, `/db/audit`, `/db/actions/{acción}`, `/db/restore/{lote}` y `/db/settings`. Se probaron las 73 rutas de la API contra ese firewall: era la única afectada.
+
+## Versión 0.10.7
+
+- **"Delayed" de LiteSpeed sin romper WooCommerce.** LSCache no retrasa ninguna etiqueta que contenga "defer" (`_js_defer` en `src/optimize.cls.php` 7.9.1). Los scripts que WordPress imprime con `defer` nativo (estrategia de WP 6.3+, como `add-to-cart-variation` de WooCommerce) corrían al cargar la página, con sus dependencias sin `defer` (`wp-util`, `underscore`) retrasadas hasta la interacción: "wp.template is not a function" al elegir una variación en el sitio real. Con el modo Delayed activo, esos scripts cuentan como excluidos y sus dependencias se marcan para no retrasarse. Reproducido en la instancia de pruebas con un producto variable: sin el arreglo, "wp is not defined"; con él, sin errores.
+- **Los scripts propios no se difieren ni se retrasan** (`/imagina-turbo/assets/js/`): con Delayed, el contador del carrito se quedaba en 0 hasta que el visitante movía el ratón.
+- **Carga condicional en el sitio real**: `admin-ajax: woodmart_load_html_dropdowns` (el menú desplegable de WoodMart, una vez por visitante nuevo) sin 27 plugins ajenos: 632 → 278 ms y 63 → 49 MB, 20 pares idénticos. El primer intento falló porque Meta for WooCommerce pone `_fbp` en esa respuesta: se dejó cargado.

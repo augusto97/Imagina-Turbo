@@ -20,6 +20,14 @@
  * nowprocket para WP Rocket (atributo documentado para excluir del delay). Se marca en script_loader_tag,
  * un filtro de WordPress, sin tocar el HTML de otra forma.
  *
+ * 0.10.7, "Delayed" de LSCache: LSCache no retrasa ninguna etiqueta que contenga "defer"
+ * (src/optimize.cls.php, _js_defer). Los scripts que WordPress imprime con defer nativo (estrategia
+ * de WP 6.3+, como add-to-cart-variation de WooCommerce) corren al cargar la página, y sus dependencias
+ * sin defer (wp-util) quedaban retrasadas hasta la interacción: "wp.template is not a function" al
+ * elegir una variación. Con el modo Delayed, esos scripts cuentan como excluidos. Los scripts propios
+ * del plugin (carrito, prefetch, RUM) nunca se difieren ni se retrasan: el contador del carrito no
+ * puede esperar a que el visitante mueva el ratón.
+ *
  * @package ImaginaTurbo
  */
 
@@ -56,6 +64,9 @@ final class DelayJsExclusions {
 
 	private static string $signature = '';
 
+	/** Scripts del propio plugin: nunca se difieren ni se retrasan. */
+	public const OWN = '/imagina-turbo/assets/js/';
+
 	/**
 	 * Marca la etiqueta de un script que no se debe diferir ni retrasar.
 	 *
@@ -72,7 +83,7 @@ final class DelayJsExclusions {
 		$queued = count( $wp_scripts->queue );
 		if ( $queued !== self::$pinnedFor ) {
 			self::$pinnedFor = $queued;
-			self::$pinned    = self::pinnedHandles( self::graph( $wp_scripts ), $wp_scripts->queue, array_merge( self::patterns(), self::litespeedOwn() ) );
+			self::$pinned    = self::pinnedHandles( self::graph( $wp_scripts ), $wp_scripts->queue, array_merge( self::patterns(), self::litespeedOwn() ), self::litespeedDelays() );
 		}
 		return isset( self::$pinned[ $handle ] ) ? self::markTag( $tag ) : $tag;
 	}
@@ -100,9 +111,19 @@ final class DelayJsExclusions {
 	}
 
 	/**
+	 * LSCache retrasa el JS hasta la interacción ("Load JS Deferred" = Delayed, o el modo invitado).
+	 */
+	private static function litespeedDelays(): bool {
+		if ( ! defined( 'LSCWP_V' ) ) {
+			return false;
+		}
+		return defined( 'LITESPEED_GUEST_OPTM' ) || 2 === (int) get_option( 'litespeed.conf.optm-js_defer' );
+	}
+
+	/**
 	 * Grafo de los scripts registrados: src, dependencias y código en línea.
 	 *
-	 * @return array<string, array{src: string, deps: list<string>, inline: string}>
+	 * @return array<string, array{src: string, deps: list<string>, inline: string, strategy?: string}>
 	 */
 	private static function graph( \WP_Scripts $scripts ): array {
 		$out = [];
@@ -115,9 +136,10 @@ final class DelayJsExclusions {
 				}
 			}
 			$out[ (string) $handle ] = [
-				'src'    => is_string( $dep->src ) ? $dep->src : '',
-				'deps'   => array_values( array_filter( $dep->deps, 'is_string' ) ),
-				'inline' => $inline,
+				'src'      => is_string( $dep->src ) ? $dep->src : '',
+				'deps'     => array_values( array_filter( $dep->deps, 'is_string' ) ),
+				'inline'   => $inline,
+				'strategy' => is_string( $dep->extra['strategy'] ?? null ) ? $dep->extra['strategy'] : '',
 			];
 		}
 		return $out;
@@ -127,16 +149,17 @@ final class DelayJsExclusions {
 	 * Handles que no se pueden diferir: los que coinciden con una exclusión (por src o por su código en
 	 * línea) y todas sus dependencias, recursivamente. Solo entre los que se van a imprimir.
 	 *
-	 * @param array<string, array{src: string, deps: list<string>, inline: string}> $graph    Scripts registrados.
+	 * @param array<string, array{src: string, deps: list<string>, inline: string, strategy?: string}> $graph    Scripts registrados.
 	 * @param array<string>                                                          $queue    Handles encolados.
 	 * @param list<string>                                                           $patterns Exclusiones (regex de WP Rocket).
+	 * @param bool                                                                   $native   Los scripts con defer/async nativo de WordPress también cuentan (LSCache Delayed).
 	 * @return array<string, true>
 	 */
-	public static function pinnedHandles( array $graph, array $queue, array $patterns ): array {
-		if ( [] === $patterns ) {
+	public static function pinnedHandles( array $graph, array $queue, array $patterns, bool $native = false ): array {
+		if ( [] === $patterns && ! $native ) {
 			return [];
 		}
-		$signature = md5( implode( "\n", $patterns ) );
+		$signature = md5( implode( "\n", $patterns ) . ( $native ? "\nnative" : '' ) );
 		if ( $signature !== self::$signature ) {
 			self::$signature = $signature;
 			self::$rootCache = [];
@@ -159,7 +182,7 @@ final class DelayJsExclusions {
 		$pinned = [];
 		$stack  = [];
 		foreach ( array_keys( $printed ) as $handle ) {
-			if ( self::isRoot( $handle, $graph[ $handle ], $patterns ) ) {
+			if ( self::isRoot( $handle, $graph[ $handle ], $patterns ) || ( $native && in_array( $graph[ $handle ]['strategy'] ?? '', [ 'defer', 'async' ], true ) ) ) {
 				$stack[] = $handle;
 			}
 		}
@@ -177,13 +200,13 @@ final class DelayJsExclusions {
 	}
 
 	/**
-	 * @param array{src: string, deps: list<string>, inline: string} $node     Script.
+	 * @param array{src: string, deps: list<string>, inline: string, strategy?: string} $node     Script.
 	 * @param list<string>                                           $patterns Exclusiones.
 	 */
 	private static function isRoot( string $handle, array $node, array $patterns ): bool {
 		if ( ! isset( self::$rootCache[ $handle ] ) ) {
 			$subject                    = $node['src'] . "\n" . $node['inline'];
-			self::$rootCache[ $handle ] = '' !== trim( $subject ) && self::matches( $subject, $patterns );
+			self::$rootCache[ $handle ] = '' !== trim( $subject ) && [] !== $patterns && self::matches( $subject, $patterns );
 		}
 		return self::$rootCache[ $handle ];
 	}
@@ -232,7 +255,9 @@ final class DelayJsExclusions {
 	 */
 	public static function patterns(): array {
 		$list = Runtime::$config?->get( 'delay_js', [] );
-		return is_array( $list ) ? array_values( array_filter( $list, 'is_string' ) ) : [];
+		$list = is_array( $list ) ? array_values( array_filter( $list, 'is_string' ) ) : [];
+		// Solo hay lista con WP Rocket o LSCache activos: entonces también los scripts propios.
+		return [] === $list ? [] : array_values( array_unique( array_merge( $list, [ self::OWN ] ) ) );
 	}
 
 	/**

@@ -258,6 +258,11 @@ final class Diagnostics {
 		if ( true !== ( $env['opcache'] ?? false ) ) {
 			$add( 'warning', 'opcache', __( 'OPcache no está activo: la configuración compilada se leerá desde disco en cada request.', 'imagina-turbo' ) );
 		}
+		// OPcache lleno, WebP sin entregar, página de acceso en caché.
+		$cloudflare = is_array( $env['cloudflare'] ?? null ) && true === ( $env['cloudflare']['proxied_request'] ?? false );
+		foreach ( EnvironmentChecks::current( $cloudflare ) as $alert ) {
+			$alerts[] = $alert;
+		}
 		if ( true === ( $license['protected'] ?? false ) && false === ( $license['licensed'] ?? null ) ) {
 			$add( 'error', 'license', __( 'La licencia de Imagina Turbo no está activa.', 'imagina-turbo' ) );
 		}

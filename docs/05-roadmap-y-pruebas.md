@@ -397,3 +397,13 @@ La primera instalación en un WordPress ajeno (TasteWP) sacó a la luz:
 - **El ZIP llevaba el repositorio `.git`, las pruebas y la documentación de Action Scheduler** (5,8 MB, superaba el límite de subida de 2 MB de muchos hostings, y un `.git` dentro de un plugin hace saltar los escáneres de seguridad). Ahora pesa 1 MB y el empaquetado falla si queda un `.git`.
 - **Nueva prueba `tests/e2e/screens-e2e.js`**: abre cada pantalla en una carga nueva y falla ante errores de JavaScript, 5xx o pantallas vacías. Se corre en el sitio de pruebas y en un WordPress limpio (sin plugin de caché ni WooCommerce).
 - **TasteWP suspendió el sitio** (por su escáner, sin motivo concreto). No se reprodujo la pantalla en blanco al activar: en un WordPress limpio, con y sin permisos de escritura en `wp-content`, el plugin se activa y el Panel explica lo que falta. Los sandboxes con escáneres agresivos no sirven para probar plugins que escriben su loader en `mu-plugins` y su configuración compilada.
+
+## Versión 0.10.4 — lo aprendido en el primer sitio de producción
+
+Revisión de un WooCommerce real (WoodMart + Elementor, OpenLiteSpeed con LiteSpeed Cache, ServerAvatar):
+
+- **Scripts que no se difieren y sus dependencias.** Con "Load JS Deferred" de LSCache, la página de producto daba `Cannot read properties of undefined (reading 'use')`. Las exclusiones de la matriz (heredadas de WP Rocket, donde el delay mueve todo junto) dejaban `api-fetch`, `i18n` y `hooks` sin diferir, mientras `url`, `private-apis` y `wp-polyfill`, de los que dependen, sí se diferían: el excluido corría antes que sus dependencias. Ahora, al imprimir cada script (`script_loader_tag`), las dependencias de todo script excluido (por su src o por su código en línea, con las exclusiones de Turbo y las escritas a mano en LSCache) se marcan con `data-no-defer` (LSCache, verificado en `src/optimize.cls.php` 7.9.1) y `nowprocket` (WP Rocket). Reproducido en la instancia de pruebas: sin el arreglo, los mismos dos errores; con él, ninguno y `api-fetch` funcional.
+- **Alertas nuevas en el Panel** (`Core\EnvironmentChecks`, solo admin):
+  - OPcache lleno o con pocos aciertos. En el sitio, 128 MB llenos y 44 % de aciertos: WordPress tardaba 1,5 s en arrancar; con 512 MB a nivel de servidor (en ServerAvatar la opción de la aplicación no aplica a OPcache), 0,35 s y un tercio de la memoria.
+  - EWWW Image Optimizer genera WebP sin método de entrega (10 MB de PNG por página; con la reescritura por JS, 1,4–2,5 MB) o los entrega por `.htaccess` detrás de Cloudflare.
+  - LiteSpeed Cache guarda la página de acceso: la copia no envía `wordpress_test_cookie` y el primer intento de acceso falla con "las cookies están bloqueadas".

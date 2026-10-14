@@ -1,7 +1,7 @@
 {
   "name": "imagina-turbo-admin",
   "private": true,
-  "version": "0.10.3",
+  "version": "0.10.4",
   "type": "module",
   "description": "Admin de Imagina Turbo (React + Vite).",
   "license": "GPL-2.0-or-later",

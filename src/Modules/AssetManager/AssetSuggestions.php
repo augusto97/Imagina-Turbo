@@ -121,6 +121,13 @@ final class AssetSuggestions {
 	}
 
 	/** Marcas de WooCommerce en el contenido (shortcodes y bloques que muestran productos o el carrito). */
+	/**
+	 * Widgets de Elementor que pintan productos con botón de carrito (WooCommerce de Elementor Pro y
+	 * WoodMart). Sin ellos, una portada de WoodMart con carruseles de productos parecía no usar la
+	 * tienda y se sugería quitar wc-add-to-cart (0.10.5).
+	 */
+	public const WOO_ELEMENTOR = [ '"widgetType":"woocommerce-product', '"widgetType":"wc-', '"widgetType":"wd_product', '"widgetType":"wd_products' ];
+
 	public const WOO_MARKERS = [ '[products', '[product_', '[add_to_cart', '[woocommerce_', '[recent_products', '[featured_products', '[sale_products', '[best_selling_products', '[top_rated_products', 'wp:woocommerce/' ];
 
 	/** Tipos de contenido que se muestran en cualquier página (plantillas, partes, bloques reutilizables). */

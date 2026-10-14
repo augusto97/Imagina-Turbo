@@ -497,14 +497,21 @@ function AuditCard() {
 										<a href={ result.url } target="_blank" rel="noreferrer" className="itb:truncate itb:text-[13px] itb:font-medium itb:text-zinc-900 itb:hover:underline">
 											{ result.label }
 										</a>
-										<Badge tone={ result.verdict === 'ok' ? 'green' : result.verdict === 'warning' ? 'amber' : 'red' }>
-											{ result.verdict === 'ok' ? __( 'Cacheable' ) : result.verdict === 'warning' ? __( 'Revisar' ) : __( 'Error' ) }
+										<Badge tone={ result.verdict === 'ok' || result.verdict === 'info' ? 'green' : result.verdict === 'warning' ? 'amber' : 'red' }>
+											{ result.verdict === 'ok' || result.verdict === 'info' ? __( 'Cacheable' ) : result.verdict === 'warning' ? __( 'Revisar' ) : __( 'Error' ) }
 										</Badge>
 									</div>
 									{ result.issues.length > 0 && (
 										<ul className="itb:mt-2 itb:flex itb:list-disc itb:flex-col itb:gap-1 itb:pl-4 itb:text-xs itb:text-zinc-700">
 											{ result.issues.map( ( issue ) => (
 												<li key={ issue }>{ issue }</li>
+											) ) }
+										</ul>
+									) }
+									{ ( result.notes ?? [] ).length > 0 && (
+										<ul className="itb:mt-2 itb:flex itb:list-none itb:flex-col itb:gap-1 itb:p-0 itb:text-xs itb:text-zinc-500">
+											{ ( result.notes ?? [] ).map( ( note ) => (
+												<li key={ note }>{ note }</li>
 											) ) }
 										</ul>
 									) }

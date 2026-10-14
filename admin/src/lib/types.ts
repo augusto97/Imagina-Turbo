@@ -184,8 +184,9 @@ export interface AuditResult {
 	label: string;
 	url: string;
 	status: number;
-	verdict: 'ok' | 'warning' | 'error';
+	verdict: 'ok' | 'info' | 'warning' | 'error';
 	issues: string[];
+	notes?: string[];
 	cookies: { name: string; hint: string }[];
 	headers: Record<string, string>;
 }

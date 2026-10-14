@@ -435,4 +435,47 @@ final class ProfilerTest extends TestCase {
 		$this->assertSame( 'error', CacheabilityAudit::analyze( 500, [] )['verdict'] );
 		$this->assertCount( 1, CacheabilityAudit::analyze( 200, [ 'set-cookie' => 'PHPSESSID=1' ] )['cookies'] );
 	}
+
+	/**
+	 * El caso real (0.10.5): _fbp y se-recently-viewed-products solo en la visita que regenera la página.
+	 */
+	public function test_audit_second_request_from_cache(): void {
+		$first = CacheabilityAudit::analyze(
+			200,
+			[
+				'set-cookie'                => [ '_fbp=fb.1.1.2.AQ; path=/', 'se-recently-viewed-products=4690; path=/' ],
+				'x-litespeed-cache'         => 'miss',
+				'x-litespeed-cache-control' => 'public,max-age=604800',
+			]
+		);
+		$this->assertSame( 'warning', $first['verdict'] );
+		$this->assertStringContainsString( 'Meta', $first['cookies'][0]['hint'] );
+		$this->assertStringContainsString( 'Searchanise', $first['cookies'][1]['hint'] );
+
+		$cached = CacheabilityAudit::reconcile( $first, 200, [ 'x-litespeed-cache' => 'hit' ] );
+		$this->assertSame( 'info', $cached['verdict'], 'la caché funciona: no es un problema' );
+		$this->assertSame( [], $cached['issues'] );
+		$this->assertStringContainsString( 'x-litespeed-cache: hit', $cached['notes'][0] );
+		$this->assertSame( 'hit', $cached['headers']['x-litespeed-cache'] );
+
+		$again = CacheabilityAudit::reconcile( $first, 200, [ 'set-cookie' => '_fbp=otra; path=/' ] );
+		$this->assertSame( $first, $again, 'si la segunda también trae cookies, sigue siendo un problema' );
+
+		$withNoStore = CacheabilityAudit::analyze( 200, [ 'set-cookie' => 'x=1', 'cache-control' => 'no-store' ] );
+		$this->assertSame( 'warning', CacheabilityAudit::reconcile( $withNoStore, 200, [ 'cache-control' => 'no-store' ] )['verdict'], 'los demás problemas se conservan' );
+	}
+
+	public function test_audit_page_marked_dynamic_on_purpose(): void {
+		$search = CacheabilityAudit::analyze(
+			200,
+			[
+				'cache-control'             => 'no-cache, must-revalidate, max-age=0, no-store, private',
+				'x-litespeed-cache-control' => 'no-cache',
+			]
+		);
+		$this->assertSame( 'info', $search['verdict'] );
+		$this->assertSame( [], $search['issues'] );
+		$this->assertCount( 1, $search['notes'] );
+		$this->assertSame( 'warning', CacheabilityAudit::analyze( 200, [ 'cache-control' => 'no-store' ] )['verdict'], 'sin la marca del plugin de caché sigue siendo un problema' );
+	}
 }

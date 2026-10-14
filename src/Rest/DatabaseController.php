@@ -1,7 +1,10 @@
 <?php
 /**
- * Base de datos: GET /database/status, POST /database/audit, POST /database/actions/{action},
- * POST /database/restore/{batch}, PUT /database/settings.
+ * Base de datos: GET /db/status, POST /db/audit, POST /db/actions/{action}, POST /db/restore/{batch},
+ * PUT /db/settings.
+ *
+ * Las rutas eran /database/...: firewalls de servidor y de plugins con reglas tipo 7G/8G bloquean con 403
+ * cualquier URL que contenga "/database/" antes de llegar a WordPress (visto en producción, 0.10.6).
  *
  * @package ImaginaTurbo
  */
@@ -24,9 +27,9 @@ use ImaginaTurbo\Repository\DbBackupRepository;
 final class DatabaseController extends Controller {
 
 	public function registerRoutes(): void {
-		$this->route( '/database/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );
+		$this->route( '/db/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );
 		$this->route(
-			'/database/audit',
+			'/db/audit',
 			\WP_REST_Server::CREATABLE,
 			function (): \WP_REST_Response {
 				$this->container->get( DatabaseAudit::class )->run( $this->container->get( DatabaseService::class )->keep() );
@@ -34,7 +37,7 @@ final class DatabaseController extends Controller {
 			}
 		);
 		$this->route(
-			'/database/actions/(?P<action>transients|action_scheduler|revisions|autoload)',
+			'/db/actions/(?P<action>transients|action_scheduler|revisions|autoload)',
 			\WP_REST_Server::CREATABLE,
 			[ $this, 'action' ],
 			[
@@ -53,7 +56,7 @@ final class DatabaseController extends Controller {
 			]
 		);
 		$this->route(
-			'/database/restore/(?P<batch>[a-f0-9]{12})',
+			'/db/restore/(?P<batch>[a-f0-9]{12})',
 			\WP_REST_Server::CREATABLE,
 			[ $this, 'restore' ],
 			[
@@ -64,7 +67,7 @@ final class DatabaseController extends Controller {
 			]
 		);
 		$this->route(
-			'/database/settings',
+			'/db/settings',
 			'PUT',
 			[ $this, 'settings' ],
 			[

@@ -27,9 +27,9 @@ const ACTION_LABELS: Record<Action, string> = {
 };
 
 export function Database() {
-	const { data, isLoading, error, isFetching, refetch } = useQuery( { queryKey: KEY, queryFn: () => api<DbStatus>( 'database/status' ) } );
+	const { data, isLoading, error, isFetching, refetch } = useQuery( { queryKey: KEY, queryFn: () => api<DbStatus>( 'db/status' ) } );
 	const client = useQueryClient();
-	const audit = useAction( () => api<DbStatus>( 'database/audit', 'POST' ) );
+	const audit = useAction( () => api<DbStatus>( 'db/audit', 'POST' ) );
 	const runAudit = () => audit.mutate( undefined, { onSuccess: ( d ) => client.setQueryData( KEY, d ) } );
 	return (
 		<>
@@ -99,7 +99,7 @@ function EnableCard() {
 function ActionButton( { action, disabled, options, label, onDone }: { action: Action; disabled: boolean; options?: string[]; label?: string; onDone?: () => void } ) {
 	const client = useQueryClient();
 	const [ open, setOpen ] = useState( false );
-	const run = useAction( () => api<DbStatus>( `database/actions/${ action }`, 'POST', { confirm: true, options } ) );
+	const run = useAction( () => api<DbStatus>( `db/actions/${ action }`, 'POST', { confirm: true, options } ) );
 	const result = run.data?.result;
 	return (
 		<div className="itb:flex itb:flex-col itb:gap-1">
@@ -269,7 +269,7 @@ function AuditCards( { status, audit }: { status: DbStatus; audit: DbAudit } ) {
 function BackupsCard( { status }: { status: DbStatus } ) {
 	const client = useQueryClient();
 	const [ batch, setBatch ] = useState<string | null>( null );
-	const restore = useAction( ( id: string ) => api<DbStatus>( `database/restore/${ id }`, 'POST', { confirm: true } ) );
+	const restore = useAction( ( id: string ) => api<DbStatus>( `db/restore/${ id }`, 'POST', { confirm: true } ) );
 	return (
 		<Section title={ __( 'Respaldos' ) } description={ __( 'Cada acción guarda las filas que tocó. Se conservan 30 días.' ) }>
 			{ status.batches.length === 0 && <p className="itb:m-0 itb:text-zinc-500">{ __( 'Sin respaldos.' ) }</p> }
@@ -307,7 +307,7 @@ function ScheduleCard( { status }: { status: DbStatus } ) {
 	const client = useQueryClient();
 	const [ values, setValues ] = useState( status.settings );
 	useEffect( () => setValues( status.settings ), [ status.settings ] );
-	const save = useAction( () => api<DbStatus>( 'database/settings', 'PUT', values ) );
+	const save = useAction( () => api<DbStatus>( 'db/settings', 'PUT', values ) );
 	const toggle = ( a: string ) => setValues( { ...values, db_schedule: values.db_schedule.includes( a ) ? values.db_schedule.filter( ( x ) => x !== a ) : [ ...values.db_schedule, a ] } );
 	return (
 		<Section title={ __( 'Limpieza programada' ) } description={ __( 'Opcional. Corre las acciones elegidas cada N días con el mismo respaldo. El autoload siempre es manual.' ) }>

@@ -482,3 +482,15 @@ Arreglos que salieron de la verificación en vivo en un sitio real (WooCommerce 
 - **Diagnóstico de bfcache.** «Páginas propias con no-store» cuenta solo visitantes anónimos con respuesta 200: el `no-store` de las sesiones (WordPress 6.3+) y de los 404 (6.8+) es del core. El texto ya no dice que `no-store` impide el bfcache en todos los navegadores: es así en Firefox; Chrome guarda la página y la descarta si cambian las cookies.
 - **Always Online** entra en los ajustes de zona, recomendado apagado: con él activo Cloudflare ignora `stale-while-revalidate` (documentación `cache/concepts/cache-control.mdx`). `stale-if-error` ya cubre la caída del servidor.
 - Confirmado sin cambios: las cabeceras del edge (`max-age` + `stale-while-revalidate`, sin `s-maxage`, que lo anularía) y las exclusiones de carrito, checkout y cuenta en las Speculation Rules.
+
+## Versión 0.14.0
+
+Lo que salió del análisis de cómo cargan rápido Shopify, Tiendanube y VTEX. Todos sirven HTML guardado: Shopify en sus servidores, Tiendanube en Cloudflare durante 24 h, VTEX FastStore en CloudFront con stale-while-revalidate. La diferencia con WooCommerce está en cuántas visitas reciben la copia guardada y en cuánto tarda la página cuando no la hay (1,8 s medidos en un sitio real).
+
+- **Carga de scripts** (módulo nuevo `script_loading`, moderado, apagado por defecto): diferido nativo de WordPress solo donde el núcleo lo aplica, y retraso solo de los scripts de terceros indicados. Ver docs/02, «Carga de scripts».
+- **`Clear-Site-Data: "prefetchCache", "prerenderCache"`** al agregar, quitar o cambiar productos del carrito, aplicar o quitar cupones, iniciar o cerrar sesión (`ClearSpeculations`), como Shopify (shopify.dev, «use-speculation-rules»). Chrome 138+ descarta lo precargado con el estado anterior; los demás navegadores la ignoran. Nunca `"cache"`.
+- **Desglose del TTFB en el RUM:**
+  - El cargador lleva la hora de generación del HTML (`g`). En una copia guardada queda la de la regeneración.
+  - El beacon agrega la conexión (`k`, redirecciones + DNS + TCP + TLS), la espera del servidor (`w`) y la edad de la copia (`a`), solo en navegaciones que fueron a la red.
+  - El colector guarda `conn`, `waith`/`waitm` (espera con copia guardada o generada; una copia de menos de 30 s cuenta como generada) y `hit`.
+  - Navegación muestra «De dónde sale el TTFB» por dispositivo: dice si el TTFB es de la red del visitante (lo arregla un nodo cercano) o del servidor (lo arreglan más aciertos de caché). Sin cambios de esquema: la columna `metric` es `varchar(8)`.

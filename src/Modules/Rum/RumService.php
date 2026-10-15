@@ -95,6 +95,7 @@ final class RumService {
 			'days'       => $days,
 			'navigation' => RumReport::navigation( $hist ),
 			'vitals'     => RumReport::vitals( $hist ),
+			'ttfb'       => RumReport::ttfbBreakdown( $hist ),
 			'bfcache'    => array_slice( self::merge( $this->repository->events( 'nrr', $days, 200 ) ), 0, 15 ),
 			'next'       => array_slice( $this->repository->events( 'next', $days, 50 ), 0, 30 ),
 			'lcp'        => array_slice( $this->repository->events( 'lcp', $days, 50 ), 0, 30 ),

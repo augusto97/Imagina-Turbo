@@ -81,6 +81,10 @@ final class Settings {
 			'db_schedule_days'         => 7,
 			'db_as_retention'          => 0,
 			'fleet_remote'             => false,
+			'script_defer'             => false,
+			'script_defer_exclude'     => [],
+			'script_delay'             => [],
+			'script_delay_timeout'     => 0,
 		];
 	}
 
@@ -287,6 +291,20 @@ final class Settings {
 			$out['lazy_render'] = self::lazyRender( $input['lazy_render'] );
 		}
 
+		// Carga de scripts (0.14.0).
+		if ( isset( $input['script_defer'] ) && is_bool( $input['script_defer'] ) ) {
+			$out['script_defer'] = $input['script_defer'];
+		}
+		if ( isset( $input['script_defer_exclude'] ) && is_array( $input['script_defer_exclude'] ) ) {
+			$out['script_defer_exclude'] = self::scriptHandles( $input['script_defer_exclude'] );
+		}
+		if ( isset( $input['script_delay'] ) && is_array( $input['script_delay'] ) ) {
+			$out['script_delay'] = self::delayPatterns( $input['script_delay'] );
+		}
+		if ( isset( $input['script_delay_timeout'] ) && is_numeric( $input['script_delay_timeout'] ) ) {
+			$out['script_delay_timeout'] = (int) max( 0, min( 30, (int) $input['script_delay_timeout'] ) );
+		}
+
 		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).
 		if ( isset( $input['db_schedule'] ) && is_array( $input['db_schedule'] ) ) {
 			$out['db_schedule'] = array_values( array_intersect( [ 'transients', 'action_scheduler', 'revisions' ], $input['db_schedule'] ) );
@@ -317,6 +335,42 @@ final class Settings {
 			}
 		}
 		return array_slice( array_keys( $out ), 0, 20 );
+	}
+
+	/**
+	 * Handles de scripts (exactos), hasta 50.
+	 *
+	 * @param array<mixed> $input Lista.
+	 * @return list<string>
+	 */
+	public static function scriptHandles( array $input ): array {
+		$out = [];
+		foreach ( $input as $handle ) {
+			if ( is_string( $handle ) && 1 === preg_match( '/^[A-Za-z0-9_\-.\/]{1,80}$/', trim( $handle ) ) ) {
+				$out[] = trim( $handle );
+			}
+		}
+		return array_slice( array_values( array_unique( $out ) ), 0, 50 );
+	}
+
+	/**
+	 * Patrones de retraso: subcadenas de 4 a 120 caracteres sin etiquetas, hasta 30.
+	 *
+	 * @param array<mixed> $input Lista.
+	 * @return list<string>
+	 */
+	public static function delayPatterns( array $input ): array {
+		$out = [];
+		foreach ( $input as $pattern ) {
+			if ( ! is_string( $pattern ) ) {
+				continue;
+			}
+			$pattern = trim( $pattern );
+			if ( strlen( $pattern ) >= 4 && strlen( $pattern ) <= 120 && ! preg_match( '/[<>\s]/', $pattern ) ) {
+				$out[] = $pattern;
+			}
+		}
+		return array_slice( array_values( array_unique( $out ) ), 0, 30 );
 	}
 
 	/**

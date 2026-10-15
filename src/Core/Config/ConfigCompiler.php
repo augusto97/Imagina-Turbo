@@ -260,6 +260,13 @@ final class ConfigCompiler {
 			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
 			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( $compat['delay_js'] ?? [] ) : [],
 			'rum'                         => $this->rumConfig(),
+			// Carga de scripts: solo con el módulo activo.
+			'scripts'                     => true === ( $modules['script_loading'] ?? false ) ? [
+				'defer'         => (bool) $this->settings->get( 'script_defer', false ),
+				'defer_exclude' => Settings::scriptHandles( (array) $this->settings->get( 'script_defer_exclude', [] ) ),
+				'delay'         => Settings::delayPatterns( (array) $this->settings->get( 'script_delay', [] ) ),
+				'delay_timeout' => (int) $this->settings->get( 'script_delay_timeout', 0 ),
+			] : [],
 			// Retención de Action Scheduler: solo con el módulo Base de datos activo (0 = la de Action Scheduler).
 			'database'                    => [ 'as_retention' => true === ( $modules['database'] ?? false ) ? (int) $this->settings->get( 'db_as_retention', 0 ) : 0 ],
 			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),

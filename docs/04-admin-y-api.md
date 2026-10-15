@@ -79,6 +79,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/assets/inspect` · `/assets/suggest` | Inventario de una ruta (loopback firmado como visitante anónimo) · inventariar páginas de muestra y calcular sugerencias |
 | POST / DELETE | `/assets/rules` · `/assets/rules/{id}/activate\|disable\|test` · `/assets/rules/{id}` | Crear en prueba · activar (`confirm`, 428; guarda quién y cuándo verificó y purga la caché) · desactivar · volver a prueba · eliminar |
 | POST | `/assets/preview` | `{on}`: cookie firmada `itb_assets_prev` (HttpOnly, 2 h) para ver las reglas en prueba; purga la caché privada de ese admin (LSCache, WP Rocket) |
+| POST | `/assets/scripts` | Carga de scripts (0.14.0): `script_defer`, `script_defer_exclude` (handles), `script_delay` (patrones), `script_delay_timeout` (0–30 s). Recompila, purga la caché y queda en el registro. `GET /assets/status` lo devuelve en `scripts` junto con `cache_defers` y `cache_delays` |
 | GET / POST | `/db/status` · `/db/audit` | Última auditoría, lotes de respaldo, ajustes · auditar ahora (solo lectura) |
 | POST | `/db/actions/{transients\|action_scheduler\|revisions\|autoload}` | Con el módulo activo y `confirm` (428). `autoload` recibe `options[]` y solo acepta opciones atribuidas a plugins inactivos |
 | POST / PUT | `/db/restore/{lote}` · `/db/settings` | Restaurar un lote (`confirm`) · `db_keep_revisions`, `db_schedule`, `db_schedule_days`, `db_as_retention` (0, o 3–30 días de historial de Action Scheduler) |

@@ -149,9 +149,18 @@ final class DelayJsExclusions {
 		$queued = count( $wp_scripts->queue );
 		if ( $queued !== self::$pinnedFor ) {
 			self::$pinnedFor = $queued;
-			self::$pinned    = self::pinnedHandles( self::graph( $wp_scripts ), $wp_scripts->queue, array_merge( self::patterns(), self::litespeedOwn() ), self::litespeedDelays() );
+			self::$pinned    = self::pinnedHandles( self::graph( $wp_scripts ), $wp_scripts->queue, self::exclusionPatterns(), self::litespeedDelays() );
 		}
 		return self::$pinned;
+	}
+
+	/**
+	 * Exclusiones de la matriz más las escritas a mano en LiteSpeed Cache (regex de WP Rocket).
+	 *
+	 * @return list<string>
+	 */
+	public static function exclusionPatterns(): array {
+		return array_merge( self::patterns(), self::litespeedOwn() );
 	}
 
 	/**
@@ -179,7 +188,7 @@ final class DelayJsExclusions {
 	/**
 	 * LSCache retrasa el JS hasta la interacción ("Load JS Deferred" = Delayed, o el modo invitado).
 	 */
-	private static function litespeedDelays(): bool {
+	public static function litespeedDelays(): bool {
 		if ( ! defined( 'LSCWP_V' ) ) {
 			return false;
 		}
@@ -189,9 +198,9 @@ final class DelayJsExclusions {
 	/**
 	 * Grafo de los scripts registrados: src, dependencias y código en línea.
 	 *
-	 * @return array<string, array{src: string, deps: list<string>, inline: string, strategy?: string}>
+	 * @return array<string, array{src: string, deps: list<string>, inline: string, strategy?: string, after?: bool}>
 	 */
-	private static function graph( \WP_Scripts $scripts ): array {
+	public static function graph( \WP_Scripts $scripts ): array {
 		$out = [];
 		foreach ( $scripts->registered as $handle => $dep ) {
 			$inline = '';
@@ -201,11 +210,13 @@ final class DelayJsExclusions {
 					$inline .= implode( "\n", array_filter( $data, 'is_string' ) );
 				}
 			}
+			$after                   = $dep->extra['after'] ?? [];
 			$out[ (string) $handle ] = [
 				'src'      => is_string( $dep->src ) ? $dep->src : '',
 				'deps'     => array_values( array_filter( $dep->deps, 'is_string' ) ),
 				'inline'   => $inline,
 				'strategy' => is_string( $dep->extra['strategy'] ?? null ) ? $dep->extra['strategy'] : '',
+				'after'    => is_array( $after ) && [] !== array_filter( $after, static fn( mixed $code ): bool => is_string( $code ) && '' !== trim( $code ) ),
 			];
 		}
 		return $out;

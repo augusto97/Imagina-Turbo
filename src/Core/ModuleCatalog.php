@@ -36,6 +36,7 @@ final class ModuleCatalog {
 			'frontend_hints'    => \ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule::class,
 			'asset_manager'     => \ImaginaTurbo\Modules\AssetManager\AssetManagerModule::class,
 			'database'          => \ImaginaTurbo\Modules\Database\DatabaseModule::class,
+			'script_loading'    => \ImaginaTurbo\Modules\ScriptLoading\ScriptLoadingModule::class,
 		];
 	}
 
@@ -87,6 +88,7 @@ final class ModuleCatalog {
 			$m( 'frontend_hints', __( 'Pistas de frontend', 'imagina-turbo' ), __( 'Prioriza la imagen LCP y agrega fachadas para videos.', 'imagina-turbo' ), RiskLevel::Safe, true, 6 ),
 			$m( 'asset_manager', __( 'Gestor de assets', 'imagina-turbo' ), __( 'Desencola CSS/JS que una ruta no usa.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
 			$m( 'database', __( 'Base de datos', 'imagina-turbo' ), __( 'Auditoría y limpieza con respaldo.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
+			$m( 'script_loading', __( 'Carga de scripts', 'imagina-turbo' ), __( 'Diferido nativo de WordPress y retraso solo de los scripts de terceros indicados.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
 		];
 	}
 }

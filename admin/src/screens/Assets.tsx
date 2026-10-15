@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Input, Select } from '@/components/ui/input';
+import { Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { AssetInventory, AssetRule, AssetsStatus, AssetSuggestion, InventoryAsset } from '@/lib/types';
+import type { AssetInventory, AssetRule, AssetsStatus, AssetSuggestion, InventoryAsset, ScriptLoadingStatus } from '@/lib/types';
 import { formatBytes, formatDate } from '@/lib/utils';
 
 const KEY = [ 'assets' ];
@@ -59,6 +59,7 @@ export function Assets() {
 					{ draft && <DraftCard status={ data } draft={ draft } onChange={ setDraft } onClose={ () => setDraft( null ) } /> }
 					<InspectCard status={ data } onRule={ setDraft } />
 					<SuggestionsCard status={ data } onRule={ setDraft } />
+					<ScriptsCard scripts={ data.scripts } />
 				</div>
 			) }
 		</>
@@ -452,6 +453,125 @@ function SuggestionsCard( { status, onRule }: { status: AssetsStatus; onRule: ( 
 						) ) }
 					</>
 				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+const DELAY_SUGGESTIONS = [ 'googletagmanager.com', 'gtag(', 'connect.facebook.net', 'fbq(', 'clarity.ms', 'static.hotjar.com', 'analytics.tiktok.com', 'snap.licdn.com', 'joinchat' ];
+
+const lines = ( text: string ): string[] => text.split( /[\n,]+/ ).map( ( l ) => l.trim() ).filter( Boolean );
+
+function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
+	const client = useQueryClient();
+	const [ defer, setDefer ] = useState( scripts.defer );
+	const [ exclude, setExclude ] = useState( scripts.defer_exclude.join( '\n' ) );
+	const [ delay, setDelay ] = useState( scripts.delay.join( '\n' ) );
+	const [ timeout, setTimeoutValue ] = useState( String( scripts.delay_timeout ) );
+	const [ open, setOpen ] = useState( false );
+	const enable = useAction( () => api( 'modules/script_loading', 'PUT', { enabled: true, confirm: true } ) );
+	const save = useAction( () =>
+		api<AssetsStatus>( 'assets/scripts', 'POST', {
+			script_defer: defer,
+			script_defer_exclude: lines( exclude ),
+			script_delay: lines( delay ),
+			script_delay_timeout: Number( timeout ),
+		} )
+	);
+	const add = ( pattern: string ) => {
+		if ( ! lines( delay ).includes( pattern ) ) {
+			setDelay( [ ...lines( delay ), pattern ].join( '\n' ) );
+		}
+	};
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Carga de scripts' ) }</CardTitle>
+				<CardDescription>{ __( 'Dos ajustes independientes, sin reescribir el HTML. Después de guardar se purga la caché; revisa el carrito, las variaciones y el checkout antes de dejarlo activo.' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-4 itb:text-[13px]">
+				{ scripts.forced_off && <Notice level="warning">{ `${ __( 'Apagado por solapamiento con otro plugin:' ) } ${ scripts.forced_off }` }</Notice> }
+				{ ! scripts.enabled && ! scripts.forced_off && (
+					<Notice level="info">
+						<div className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-3">
+							<span>{ __( 'El módulo está apagado: puedes preparar los ajustes, pero no se aplican hasta activarlo.' ) }</span>
+							<Button size="sm" onClick={ () => setOpen( true ) }>
+								{ __( 'Activar' ) }
+							</Button>
+						</div>
+						{ enable.error && <div className="itb:mt-2">{ enable.error.message }</div> }
+						<ConfirmDialog
+							open={ open }
+							onOpenChange={ setOpen }
+							title={ __( '¿Activar la carga de scripts?' ) }
+							description={ __( 'Es de riesgo moderado: cambia cuándo se ejecuta el JavaScript de la página. Solo aplica lo que actives abajo.' ) }
+							confirmLabel={ __( 'Activar' ) }
+							pending={ enable.isPending }
+							onConfirm={ () =>
+								enable.mutate( undefined, {
+									onSettled: () => setOpen( false ),
+									onSuccess: () => void client.invalidateQueries( { queryKey: KEY } ),
+								} )
+							}
+						/>
+					</Notice>
+				) }
+
+				<div className="itb:flex itb:flex-col itb:gap-2">
+					<label className="itb:flex itb:items-start itb:justify-between itb:gap-3">
+						<span>
+							<span className="itb:block itb:font-medium">{ __( 'Diferido nativo de WordPress' ) }</span>
+							<span className="itb:block itb:text-xs itb:text-zinc-500">
+								{ __( 'Pide defer para los scripts registrados. WordPress solo lo aplica si todo lo que depende de cada script también puede esperar; jQuery, las pasarelas de pago y sus dependencias no se tocan. Se descargan en paralelo y corren antes de DOMContentLoaded.' ) }
+							</span>
+						</span>
+						<Switch checked={ defer } onCheckedChange={ setDefer } aria-label={ __( 'Diferido nativo de WordPress' ) } />
+					</label>
+					{ scripts.cache_defers && <Notice level="info">{ __( 'El plugin de caché ya difiere o retrasa el JavaScript: este ajuste no hace nada mientras siga así.' ) }</Notice> }
+					<label className="itb:flex itb:flex-col itb:gap-1">
+						<span className="itb:text-xs itb:text-zinc-500">{ __( 'Handles que no se difieren (uno por línea)' ) }</span>
+						<Textarea value={ exclude } onChange={ ( e ) => setExclude( e.target.value ) } placeholder="wc-add-to-cart-variation" />
+					</label>
+				</div>
+
+				<div className="itb:flex itb:flex-col itb:gap-2">
+					<span className="itb:block itb:font-medium">{ __( 'Retrasar solo estos scripts de terceros' ) }</span>
+					<span className="itb:block itb:text-xs itb:text-zinc-500">
+						{ __( 'Un patrón por línea: parte de la URL del script o de su código en línea. Se cargan en la primera interacción o al cumplirse el plazo. Solo se puede retrasar lo que pasa por la API de scripts de WordPress; lo que un plugin imprime directamente sigue igual.' ) }
+					</span>
+					{ scripts.cache_delays && <Notice level="info">{ __( 'El plugin de caché ya retrasa todo el JavaScript: este ajuste no hace nada mientras siga así.' ) }</Notice> }
+					<Textarea value={ delay } onChange={ ( e ) => setDelay( e.target.value ) } placeholder="googletagmanager.com" />
+					<div className="itb:flex itb:flex-wrap itb:gap-1.5">
+						{ DELAY_SUGGESTIONS.map( ( p ) => (
+							<Button key={ p } variant="outline" size="sm" onClick={ () => add( p ) }>
+								<Plus aria-hidden />
+								<code className="itb:text-xs">{ p }</code>
+							</Button>
+						) ) }
+					</div>
+					<label className="itb:flex itb:items-center itb:gap-2">
+						<span className="itb:text-xs itb:text-zinc-500">{ __( 'Cargar también sin interacción después de' ) }</span>
+						<Select value={ timeout } onChange={ ( e ) => setTimeoutValue( e.target.value ) } className="itb:w-auto">
+							<option value="0">{ __( 'nunca (solo al interactuar)' ) }</option>
+							<option value="3">3 s</option>
+							<option value="5">5 s</option>
+							<option value="10">10 s</option>
+						</Select>
+					</label>
+					<p className="itb:m-0 itb:text-xs itb:text-zinc-500">{ __( 'Con analítica o píxeles conviene un plazo (5–10 s): sin él, una visita que se va sin tocar nada no se registra.' ) }</p>
+				</div>
+
+				<div className="itb:flex itb:items-center itb:gap-3">
+					<Button
+						size="sm"
+						disabled={ save.isPending }
+						onClick={ () => save.mutate( undefined, { onSuccess: ( data ) => client.setQueryData( KEY, data ) } ) }
+					>
+						{ __( 'Guardar' ) }
+					</Button>
+					{ save.isSuccess && <span className="itb:text-xs itb:text-emerald-600">{ __( 'Guardado. La caché se purgó.' ) }</span> }
+				</div>
+				{ save.error && <Notice level="error">{ save.error.message }</Notice> }
 			</CardContent>
 		</Card>
 	);

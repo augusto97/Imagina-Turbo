@@ -52,6 +52,7 @@ export function Navigation() {
 					</div>
 					<LazyRenderCard status={ data } />
 					<VitalsCard report={ data.report } />
+					<TtfbCard report={ data.report } />
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 						<InsightsCard insights={ data.insights } report={ data.report } />
 						<BfcacheCard status={ data } />
@@ -296,6 +297,52 @@ function VitalsCard( { report }: { report: RumReportData } ) {
 										<Badge tone={ tone( v.cls, 0.1, 0.25 ) }>{ v.cls === null ? '—' : v.cls.toFixed( 3 ) }</Badge>
 									</td>
 									<td className="itb:py-1.5 itb:text-right itb:tabular-nums">{ ms( v.ttfb ) }</td>
+								</tr>
+							) ) }
+						</tbody>
+					</table>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+function TtfbCard( { report }: { report: RumReportData } ) {
+	const rows = report.ttfb ?? [];
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'De dónde sale el TTFB (p75, 7 días)' ) }</CardTitle>
+				<CardDescription>{ __( 'Conexión: redirecciones, DNS, TCP y TLS en la red del visitante (la acorta un nodo cercano). Espera: lo que tarda en llegar el primer byte después de pedir la página, con copia guardada o generada para esa visita (lo acortan más aciertos de caché y un servidor rápido).' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:overflow-x-auto itb:text-[13px]">
+				{ rows.length === 0 ? (
+					<p className="itb:m-0 itb:text-zinc-500">{ __( 'Todavía no hay datos (se miden desde la 0.14.0).' ) }</p>
+				) : (
+					<table className="itb:w-full itb:border-collapse">
+						<thead>
+							<tr className="itb:text-left itb:text-xs itb:text-zinc-500">
+								<th className="itb:py-1 itb:pr-3 itb:font-medium">{ __( 'Disp.' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">TTFB</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Conexión' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Espera con copia' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Espera sin copia' ) }</th>
+								<th className="itb:py-1 itb:text-right itb:font-medium">{ __( 'Visitas con copia' ) }</th>
+							</tr>
+						</thead>
+						<tbody>
+							{ rows.map( ( r ) => (
+								<tr key={ r.device } className="itb:border-t itb:border-zinc-100">
+									<td className="itb:py-1.5 itb:pr-3">{ r.device === 'm' ? __( 'Móvil' ) : __( 'Escritorio' ) }</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right">
+										<Badge tone={ tone( r.ttfb, 800, 1800 ) }>{ ms( r.ttfb ) }</Badge>
+									</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ ms( r.conn ) }</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ ms( r.wait_cached ) }</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ ms( r.wait_generated ) }</td>
+									<td className="itb:py-1.5 itb:text-right">
+										<Badge tone={ r.cached_pct === null ? 'neutral' : r.cached_pct >= 90 ? 'green' : 'amber' }>{ pct( r.cached_pct ) }</Badge>
+									</td>
 								</tr>
 							) ) }
 						</tbody>

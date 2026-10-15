@@ -281,6 +281,30 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 
 ---
 
+### Carga de scripts (`ScriptLoading`, 0.14.0)
+
+Módulo aparte del gestor de assets, riesgo moderado, apagado por defecto. Se ajusta en la pantalla Assets. Sin output buffering: todo va por los filtros de scripts del núcleo.
+
+- **Diferido nativo:** pide la estrategia `defer` de WordPress 6.3+ (`add_data( $handle, 'strategy', 'defer' )`) solo para los scripts que el núcleo de verdad va a diferir.
+  - Se replica `WP_Scripts::filter_eligible_strategies`: un script es elegible si no lleva código en línea «after» y todos sus dependientes que se imprimen también son diferibles. Los alias son transparentes.
+  - Motivo: si un script de la cabecera pide `defer` y no es elegible, WordPress 6.4+ lo mueve al pie (`do_item`, «Move this script to the footer»). Un código en línea del cuerpo que lo usara fallaría. Se vio en pruebas.
+  - Quedan como están: jQuery (`jquery`, `jquery-core`, `jquery-migrate`), los scripts propios, los handles excluidos a mano, y las exclusiones de la matriz y de LiteSpeed Cache con sus dependencias (`DelayJsExclusions::exclusionPatterns`).
+- **Retraso selectivo:** solo los scripts cuyo `src` o código en línea contiene uno de los patrones indicados.
+  - Las etiquetas pasan a `type="text/plain" data-itb-delay`, con `src` → `data-itb-src`, en `script_loader_tag`, `wp_script_attributes` y `wp_inline_script_attributes`. El código «before», «after» y las traducciones de un handle retrasado también se retrasan.
+  - `itb-delay.js` (< 1 KB, en línea) los activa en orden en la primera interacción o tras el plazo configurado. Espera a cada script externo sin `async`/`defer` antes de ejecutar el siguiente.
+  - Lo que un plugin imprime con `echo` no se puede retrasar.
+- **Coexistencia:**
+  - Si LiteSpeed Cache tiene «Load JS Deferred» (cualquier modo) o el modo invitado, o WP Rocket tiene `defer_all_js`/`delay_js`, el diferido no hace nada.
+  - Si LiteSpeed «Delayed» o WP Rocket `delay_js` ya retrasan todo, el retraso tampoco.
+  - Perfmatters, FlyingPress y NitroPack apagan el módulo.
+- **Aceptación** (verificado en una instancia local con WooCommerce 11.2.1, LiteSpeed Cache y EWWW):
+  - Librería y dependiente diferidos en orden, con jQuery disponible.
+  - El script con código «after» se queda en la cabecera.
+  - Los terceros, inertes hasta la interacción y ejecutados en orden después.
+  - Con plazo, cargan sin interacción.
+  - Agregar al carrito funciona.
+  - Sin errores de consola.
+
 ## 9. Pistas de frontend (`FrontendHints`)
 
 - **Riesgo:** seguro. **Por defecto:** activo cuando hay datos de RUM.

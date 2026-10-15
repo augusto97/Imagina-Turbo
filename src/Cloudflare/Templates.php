@@ -86,7 +86,7 @@ final class Templates {
 	 *
 	 * @return list<array{id: string, label: string, recommended: mixed, risk: string, read_only: bool, note: string}>
 	 */
-	public static function settings(): array {
+	public static function settings( bool $edgeHtml = false ): array {
 		return [
 			[
 				'id'          => 'http3',
@@ -119,6 +119,16 @@ final class Templates {
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => __( 'Respetar las cabeceras del sitio (0) en lugar de imponer 4 horas.', 'imagina-turbo' ),
+			],
+			[
+				'id'          => 'speed_brain',
+				'label'       => 'Speed Brain',
+				'recommended' => $edgeHtml ? 'on' : 'off',
+				'risk'        => 'safe',
+				'read_only'   => false,
+				'note'        => $edgeHtml
+					? __( 'Precarga al pulsar desde la caché del edge; Imagina Turbo precarga antes, al pasar el cursor.', 'imagina-turbo' )
+					: __( 'Sin el HTML en la caché del edge, Speed Brain no precarga nada y Cloudflare rechaza también las precargas de Imagina Turbo (503).', 'imagina-turbo' ),
 			],
 			[
 				'id'          => 'rocket_loader',
@@ -239,6 +249,13 @@ final class Templates {
 					],
 				],
 			];
+		}
+		// El plugin de caché guarda una copia para móviles: el edge separa por tipo de dispositivo
+		// (cache_key.cache_by_device_type, todos los planes; Cloudflare envía CF-Device-Type al origen).
+		// Sin esto, el primer visitante decide qué versión reciben todos.
+		if ( $this->site->deviceCache ) {
+			$params['cache_key']                         = is_array( $params['cache_key'] ?? null ) ? $params['cache_key'] : [];
+			$params['cache_key']['cache_by_device_type'] = true;
 		}
 		return $params;
 	}

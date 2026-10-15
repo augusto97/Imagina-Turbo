@@ -38,7 +38,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET / PUT | `/modules` · `/modules/{id}` | Leer/cambiar estado y ajustes de un módulo |
 | GET | `/profiler/summary` · `/profiler/plugins` · `/profiler/routes` | Datos del perfilador (`period`: 1h, 24h, 48h desde muestras; 7d, 30d desde agregados · `type`: tipo de request) |
 | GET | `/profiler/workers` | Trabajadores PHP ocupados (48 h de muestreo aleatorio): media, hora pico, procesos del servidor si LiteSpeed los expone (`LSAPI_CHILDREN`) y qué rutas ocupan el tiempo |
-| GET | `/diagnostics/platform` | Ajustes de Elementor, WooCommerce (caché de pedidos HPOS, tabla de atributos), caché de objetos e índices, con recomendación. Solo lectura |
+| GET | `/diagnostics/platform` | Ajustes de Elementor, WoodMart, WooCommerce (caché de pedidos HPOS, tabla de atributos), caché de objetos e índices, con recomendación. Solo lectura |
 | GET | `/profiler/per-visit` | Peticiones AJAX, REST y Store API de visitantes sin sesión (48 h de muestreo aleatorio): por día, CPU por día y, con datos del RUM, por página vista; regla de carga condicional y qué hacer |
 | PUT / POST | `/profiler/settings` · `/profiler/intensive` | Tasa de muestreo · muestreo intensivo de 15 min |
 | GET / POST | `/diagnostics/audit` | Última auditoría de cacheabilidad · ejecutarla ahora (loopback) |

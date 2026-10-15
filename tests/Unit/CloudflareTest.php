@@ -498,4 +498,20 @@ final class CloudflareTest extends TestCase {
 		$this->assertSame( 'on', $state->originals()['rocket_loader']['value'], 'volver a cambiarlo no pisa el original' );
 		$this->assertSame( 1, $state->footprint()['settings'] );
 	}
+
+	public function test_device_type_cache_and_speed_brain(): void {
+		$plain = ( new Templates( self::site(), self::limits( 'pro' ) ) )->htmlParameters();
+		$this->assertArrayNotHasKey( 'cache_by_device_type', $plain['cache_key'] ?? [], 'una sola copia si el plugin de caché no separa móviles' );
+
+		$mobile = new SiteContext( 'tienda.example.com', '', 'wp-json', [], [ 'wordpress_logged_in_' ], [ 'utm_source' ], [], 'itb-k7-', true, 86400, false, [], true );
+		$params = ( new Templates( $mobile, self::limits( 'free' ) ) )->htmlParameters();
+		$this->assertSame( [ 'cache_by_device_type' => true ], $params['cache_key'], 'copia por dispositivo, como el plugin de caché (todos los planes)' );
+		$enterprise = ( new Templates( $mobile, self::limits( 'enterprise' ) ) )->htmlParameters();
+		$this->assertTrue( $enterprise['cache_key']['cache_by_device_type'] );
+		$this->assertArrayHasKey( 'custom_key', $enterprise['cache_key'], 'sin perder las exclusiones de parámetros de campaña' );
+
+		$brain = static fn( bool $edge ): string => (string) array_column( Templates::settings( $edge ), 'recommended', 'id' )['speed_brain'];
+		$this->assertSame( 'off', $brain( false ), 'sin HTML en el edge, Speed Brain bloquea las precargas' );
+		$this->assertSame( 'on', $brain( true ) );
+	}
 }

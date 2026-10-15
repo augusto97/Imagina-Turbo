@@ -14,6 +14,7 @@ use ImaginaTurbo\Core\Request\RequestContext;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
 use ImaginaTurbo\Modules\Profiler\Collector;
+use ImaginaTurbo\Modules\Profiler\QueryReport;
 use ImaginaTurbo\Modules\Profiler\Report;
 use ImaginaTurbo\Modules\Profiler\Rollup;
 use ImaginaTurbo\Modules\Profiler\RouteKey;
@@ -600,7 +601,42 @@ final class ProfilerTest extends TestCase {
 		$this->assertSame( 'info', $status( \ImaginaTurbo\Core\PlatformAudit::woocommerce( $woo, false ) )['wc_hpos_cache'], 'sin caché de objetos no rinde' );
 		$this->assertSame( [ 'wc_lookup' => 'warn' ], $status( \ImaginaTurbo\Core\PlatformAudit::woocommerce( [ 'hpos' => false, 'lookup_aborted' => true ] + $woo, true ) ) );
 
+		$wd = [
+			'local_fonts'  => false,
+			'font_display' => 'disable',
+			'icon_preload' => false,
+			'lazy'         => false,
+			'lcp_preload'  => false,
+		];
+		$this->assertSame( [ 'wd_local_fonts' => 'warn', 'wd_font_display' => 'warn', 'wd_icon_preload' => 'warn' ], $status( \ImaginaTurbo\Core\PlatformAudit::woodmart( $wd, true, true ) ), 'el sitio real' );
+		$both = $status( \ImaginaTurbo\Core\PlatformAudit::woodmart( [ 'lazy' => true, 'lcp_preload' => true, 'font_display' => 'swap' ] + $wd, true, true ) );
+		$this->assertSame( 'warn', $both['wd_lazy'], 'dos lazy load' );
+		$this->assertSame( 'info', $both['wd_lcp'], 'dos precargas de la imagen principal' );
+		$this->assertSame( 'ok', $both['wd_font_display'] );
+
 		$this->assertSame( [ 'object_cache' => 'warn', 'indexes' => 'warn' ], $status( \ImaginaTurbo\Core\PlatformAudit::server( false, true, 250000, false ) ) );
 		$this->assertSame( [ 'object_cache' => 'ok' ], $status( \ImaginaTurbo\Core\PlatformAudit::server( true, true, 43000, false ) ), 'el sitio real: Redis activo, postmeta chico' );
+	}
+
+	public function test_query_report_masks_values_and_groups_repeats(): void {
+		$this->assertSame( "SELECT * FROM wp_postmeta WHERE post_id = ? AND meta_key = ?", QueryReport::normalize( "SELECT *  FROM wp_postmeta\n WHERE post_id = 123 AND meta_key = '_price'" ) );
+		$this->assertSame( 'SELECT ID FROM wp_users WHERE user_email = ?', QueryReport::normalize( "SELECT ID FROM wp_users WHERE user_email = 'ana@correo.com'" ), 'sin datos personales' );
+		$this->assertSame( 'SELECT * FROM t WHERE id IN (…)', QueryReport::normalize( 'SELECT * FROM t WHERE id IN (1, 2, 3)' ) );
+		$this->assertSame( 'SELECT ? FROM t WHERE a = ?', QueryReport::normalize( "SELECT 'it\'s' FROM t WHERE a = \"x\"" ) );
+
+		$queries = [];
+		foreach ( [ 10, 11, 12, 13 ] as $id ) {
+			$queries[] = [ "SELECT meta_value FROM wp_postmeta WHERE post_id = $id", 0.002, 'stack', 0, [ 'itb_component' => 'plugin:yith-woocommerce-request-a-quote' ] ];
+		}
+		$queries[] = [ "SELECT * FROM wp_options WHERE option_name = 'x'", 0.120, 'stack', 0, [ 'itb_component' => 'theme:woodmart' ] ];
+		$queries[] = [ 'SELECT 1', 0.001, 'stack', 0, [] ];
+		$r = QueryReport::build( $queries );
+		$this->assertSame( 6, $r['count'] );
+		$this->assertSame( 129.0, $r['ms'] );
+		$this->assertSame( [ 'theme:woodmart' ], array_column( $r['slow'], 'component' ), 'solo las de 50 ms o más' );
+		$this->assertSame( 4, $r['repeated'][0]['count'], 'el bucle que pregunta producto por producto' );
+		$this->assertSame( 'plugin:yith-woocommerce-request-a-quote', $r['repeated'][0]['component'] );
+		$this->assertSame( 'theme:woodmart', $r['components'][0]['component'], 'ordenado por tiempo' );
+		$this->assertSame( 'core', $r['components'][2]['component'] );
 	}
 }

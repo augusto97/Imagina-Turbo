@@ -40,6 +40,7 @@ final class SiteContext {
 		public readonly int $edgeTtl,
 		public readonly bool $xmlrpcRequired = false,
 		public readonly array $webhookPaths = [],
+		public readonly bool $deviceCache = false,
 	) {
 	}
 
@@ -97,6 +98,7 @@ final class SiteContext {
 			$cache['edge_ttl'],
 			$xmlrpc,
 			$list( $requires['webhook_paths'] ?? [] ),
+			$cache['mobile_split'],
 		);
 	}
 

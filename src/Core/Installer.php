@@ -35,7 +35,7 @@ final class Installer {
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION, AssetRules::OPTION, 'itb_db_audit', 'itb_db_schedule_state', 'itb_fleet', 'itb_fleet_snapshots', 'itb_hub_nonces' ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION, AssetRules::OPTION, 'itb_db_audit', 'itb_db_schedule_state', 'itb_fleet', 'itb_fleet_snapshots', 'itb_hub_nonces', 'itb_diag_queries' ];
 
 	/** Tablas propias sin prefijo. */
 	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots', 'itb_rum_hist', 'itb_rum_events', 'itb_db_backups' ];

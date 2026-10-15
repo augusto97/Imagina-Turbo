@@ -224,6 +224,10 @@ final class EarlyLoader {
 			}
 			if ( AdminBypassCookie::isValidRequest( $_COOKIE, null, self::DIAG_COOKIE ) ) {
 				$source = 2; // Collector::SOURCE_DIAG (la clase aún no está cargada).
+				// Solo en el request de diagnóstico de un administrador: registrar las consultas.
+				if ( ! defined( 'SAVEQUERIES' ) ) {
+					define( 'SAVEQUERIES', true ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- constante del core.
+				}
 			}
 		}
 		if ( null === $source && is_int( $profiler['intensive_until'] ?? null ) && $profiler['intensive_until'] > time() ) {

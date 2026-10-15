@@ -1,7 +1,7 @@
 {
   "name": "imagina-turbo-admin",
   "private": true,
-  "version": "0.12.0",
+  "version": "0.13.0",
   "type": "module",
   "description": "Admin de Imagina Turbo (React + Vite).",
   "license": "GPL-2.0-or-later",
@@ -29,7 +29,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@kucrut/vite-for-wp": "^0.12.0",
+    "@kucrut/vite-for-wp": "^0.13.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.31",

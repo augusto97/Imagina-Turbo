@@ -37,6 +37,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/status` | Estado general, entorno detectado, alertas |
 | GET / PUT | `/modules` · `/modules/{id}` | Leer/cambiar estado y ajustes de un módulo |
 | GET | `/profiler/summary` · `/profiler/plugins` · `/profiler/routes` | Datos del perfilador (`period`: 1h, 24h, 48h desde muestras; 7d, 30d desde agregados · `type`: tipo de request) |
+| GET | `/profiler/per-visit` | Peticiones AJAX, REST y Store API de visitantes sin sesión (48 h de muestreo aleatorio): por día, CPU por día y, con datos del RUM, por página vista; regla de carga condicional y qué hacer |
 | PUT / POST | `/profiler/settings` · `/profiler/intensive` | Tasa de muestreo · muestreo intensivo de 15 min |
 | GET / POST | `/diagnostics/audit` | Última auditoría de cacheabilidad · ejecutarla ahora (loopback) |
 | GET / PUT / DELETE | `/hub` | Estado · URL del hub · olvidar el registro |
@@ -68,7 +69,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET / POST | `/tweaks/perfmatters` · `/tweaks/perfmatters/import` | Equivalencias de `perfmatters_options` (lo que se mapea y lo que no, con dónde vive) · importarlas (`confirm`) |
 | GET / PUT | `/woo/status` · `/woo/settings` | Carrito por Store API: tema y selectores en uso (verificados o no), selectores propios, productos vistos, geolocalización · guardar selectores propios y productos vistos (recompila la config) |
 | POST | `/woo/inspect` | Pide la portada sin carrito y con carrito: cabecera del edge, script del carrito, cart-fragments original y Set-Cookie |
-| GET | `/navigation/status` | Módulos, ajustes, si el core trae la API de Speculation Rules, enlaces permanentes, informe del RUM (7 días), insights y páginas propias con no-store (48 h) |
+| GET | `/navigation/status` | Módulos, ajustes (incluye `lazy_render`), si el core trae la API de Speculation Rules, enlaces permanentes, informe del RUM (7 días), insights, páginas propias con no-store (48 h), reglas de renderizado diferido sugeridas para el tema y `prefetch_probe` (`refused` si Cloudflare rechaza las precargas) |
 | PUT | `/navigation/settings` | `spec_mode`, `spec_eagerness`, `spec_predictive`, `spec_fallback`, `view_transitions`, `hints_lcp`, `hints_facades`, `rum_rate`. Pasar a prerender exige `confirm` (428) |
 | GET / POST | `/navigation/report?days=7\|30` · `/navigation/insights` | Informe del RUM · recalcular ahora las páginas predichas y la imagen LCP |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
@@ -78,7 +79,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/assets/preview` | `{on}`: cookie firmada `itb_assets_prev` (HttpOnly, 2 h) para ver las reglas en prueba; purga la caché privada de ese admin (LSCache, WP Rocket) |
 | GET / POST | `/db/status` · `/db/audit` | Última auditoría, lotes de respaldo, ajustes · auditar ahora (solo lectura) |
 | POST | `/db/actions/{transients\|action_scheduler\|revisions\|autoload}` | Con el módulo activo y `confirm` (428). `autoload` recibe `options[]` y solo acepta opciones atribuidas a plugins inactivos |
-| POST / PUT | `/db/restore/{lote}` · `/db/settings` | Restaurar un lote (`confirm`) · `db_keep_revisions`, `db_schedule`, `db_schedule_days` |
+| POST / PUT | `/db/restore/{lote}` · `/db/settings` | Restaurar un lote (`confirm`) · `db_keep_revisions`, `db_schedule`, `db_schedule_days`, `db_as_retention` (0, o 3–30 días de historial de Action Scheduler) |
 | GET / POST | `/fleet/status` · `/fleet/sync` | Plantilla, desviaciones, última aplicación, autorización del hub y snapshots · consultar el hub ahora |
 | POST | `/fleet/apply` · `/fleet/revert/{id}` | Aplicar la plantilla (`confirm`, 428) · volver a los ajustes de un snapshot (`confirm`) |
 | PUT | `/fleet/settings` | `fleet_remote`: autorizar que el hub aplique la plantilla (activarlo exige `confirm`) |

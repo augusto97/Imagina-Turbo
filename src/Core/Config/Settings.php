@@ -78,6 +78,7 @@ final class Settings {
 			'db_keep_revisions'        => 5,
 			'db_schedule'              => [],
 			'db_schedule_days'         => 7,
+			'db_as_retention'          => 0,
 			'fleet_remote'             => false,
 		];
 	}
@@ -258,6 +259,7 @@ final class Settings {
 			'tweak_autosave'          => [ 30, DAY_IN_SECONDS ],
 			'db_keep_revisions'       => [ 1, 100 ],
 			'db_schedule_days'        => [ 1, 90 ],
+			'db_as_retention'         => [ 0, 30 ],
 		] as $key => [ $min, $max ] ) {
 			if ( isset( $input[ $key ] ) && is_numeric( $input[ $key ] ) ) {
 				$out[ $key ] = (int) max( $min, min( $max, (int) $input[ $key ] ) );

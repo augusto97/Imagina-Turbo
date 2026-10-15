@@ -260,6 +260,8 @@ final class ConfigCompiler {
 			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
 			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( $compat['delay_js'] ?? [] ) : [],
 			'rum'                         => $this->rumConfig(),
+			// Retención de Action Scheduler: solo con el módulo Base de datos activo (0 = la de Action Scheduler).
+			'database'                    => [ 'as_retention' => true === ( $modules['database'] ?? false ) ? (int) $this->settings->get( 'db_as_retention', 0 ) : 0 ],
 			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
 			'hints'                       => [
 				'lcp'     => (bool) $this->settings->get( 'hints_lcp', true ),

@@ -20,6 +20,7 @@ use ImaginaTurbo\Modules\AssetManager\AssetScanner;
 use ImaginaTurbo\Modules\AssetManager\AssetSuggestions;
 use ImaginaTurbo\Modules\CacheCoordinator\DelayJsExclusions;
 use ImaginaTurbo\Modules\Database\DatabaseAudit;
+use ImaginaTurbo\Modules\Database\DatabaseModule;
 use ImaginaTurbo\Rest\AssetsController;
 
 final class AssetsDatabaseTest extends TestCase {
@@ -288,5 +289,44 @@ final class AssetsDatabaseTest extends TestCase {
 		$this->assertSame( 'core', DatabaseAudit::owner( 'wp_user_roles', $plugins )['kind'] );
 		$this->assertSame( 'unknown', DatabaseAudit::owner( 'seo_titles', $plugins )['kind'], 'prefijos de menos de 4 letras no se atribuyen' );
 		$this->assertSame( [ 'mi-plugin', 'mi_plugin' ], DatabaseAudit::prefixes( 'mi-plugin-pro' ) );
+	}
+
+	public function test_table_owner_and_retention(): void {
+		$plugins = [
+			'woocommerce'      => [
+				'name'   => 'WooCommerce',
+				'active' => true,
+			],
+			'simple-history'   => [
+				'name'   => 'Simple History',
+				'active' => false,
+			],
+			'jet-form-builder' => [
+				'name'   => 'JetFormBuilder',
+				'active' => true,
+			],
+		];
+		$kind = static fn( string $t ): string => DatabaseAudit::tableOwner( $t, $plugins )['kind'] . ':' . DatabaseAudit::tableOwner( $t, $plugins )['plugin'];
+		$this->assertSame( 'core:', $kind( 'postmeta' ) );
+		$this->assertSame( 'core:', $kind( 'actionscheduler_logs' ) );
+		$this->assertSame( 'removed:wordfence', $kind( 'wffilemods' ), 'tablas que dejó Wordfence al desinstalarse' );
+		$this->assertSame( 'inactive:simple-history', $kind( 'simple_history_contexts' ) );
+		$this->assertSame( 'active:woocommerce', $kind( 'wc_orders' ) );
+		$this->assertSame( 'active:jet-form-builder', $kind( 'jet_form_builder_records' ), 'por la carpeta del plugin' );
+		$this->assertSame( 'unknown:', $kind( 'tabla_rara' ) );
+
+		$this->assertSame( 0, DatabaseModule::retentionDays(), 'sin configuración no se toca la retención' );
+		$config          = static fn( int $days ): ?CompiledConfig => CompiledConfig::fromArray(
+			[
+				'v'        => CompiledConfig::FORMAT_VERSION,
+				'hash'     => 'x',
+				'database' => [ 'as_retention' => $days ],
+			]
+		);
+		Runtime::$config = $config( 1 );
+		$this->assertSame( 3, DatabaseModule::retentionDays(), 'mínimo 3 días' );
+		$this->assertSame( 3 * DAY_IN_SECONDS, DatabaseModule::retention( 2678400 ) );
+		Runtime::$config = $config( 0 );
+		$this->assertSame( 2678400, DatabaseModule::retention( 2678400 ), 'el valor de Action Scheduler' );
 	}
 }

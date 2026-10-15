@@ -30,6 +30,29 @@ final class DatabaseAudit {
 	/** Opciones del núcleo que nunca se atribuyen a un plugin (nombres exactos y prefijos). */
 	public const CORE = [ 'siteurl', 'home', 'blogname', 'active_plugins', 'cron', 'rewrite_rules', 'template', 'stylesheet', 'sidebars_widgets', 'widget_', 'theme_mods_', 'user_roles', '_transient_', '_site_transient_', 'can_compress_scripts', 'recently_activated', 'uninstall_plugins', 'auto_update_' ];
 
+	/** Tablas del núcleo (sin prefijo). */
+	public const CORE_TABLES = [ 'posts', 'postmeta', 'options', 'users', 'usermeta', 'comments', 'commentmeta', 'terms', 'termmeta', 'term_taxonomy', 'term_relationships', 'links', 'actionscheduler_actions', 'actionscheduler_logs', 'actionscheduler_groups', 'actionscheduler_claims' ];
+
+	/** Prefijos de tabla que no se deducen de la carpeta del plugin. */
+	public const KNOWN_TABLES = [
+		'wf'             => 'wordfence',
+		'wc_'            => 'woocommerce',
+		'woocommerce_'   => 'woocommerce',
+		'e_'             => 'elementor',
+		'itb_'           => 'imagina-turbo',
+		'litespeed_'     => 'litespeed-cache',
+		'ewwwio_'        => 'ewww-image-optimizer',
+		'yoast_'         => 'wordpress-seo',
+		'rank_math'      => 'seo-by-rank-math',
+		'mainwp_'        => 'mainwp-child',
+		'simple_history' => 'simple-history',
+		'wpforms_'       => 'wpforms-lite',
+		'gf_'            => 'gravityforms',
+		'redirection_'   => 'redirection',
+		'aiowps_'        => 'all-in-one-wp-security-and-firewall',
+		'nf3_'           => 'ninja-forms',
+	];
+
 	public function __construct( private readonly \wpdb $db ) {
 	}
 
@@ -54,7 +77,7 @@ final class DatabaseAudit {
 			'orphan_postmeta'  => $this->orphanPostmeta(),
 			'hpos'             => $this->hpos(),
 			'postmeta_index'   => $this->postmetaIndex(),
-			'tables'           => $this->tables(),
+			'tables'           => $this->tables( $plugins ),
 		];
 		update_option( self::OPTION, $result, false );
 		return $result;
@@ -152,6 +175,42 @@ final class DatabaseAudit {
 			'kind'   => 'unknown',
 			'plugin' => '',
 		];
+	}
+
+	/**
+	 * A quién pertenece una tabla (nombre sin el prefijo de la instalación). "removed": un plugin conocido
+	 * que ya no está instalado (sus tablas quedaron al desinstalarlo).
+	 *
+	 * @param array<string, array{name: string, active: bool}> $plugins Plugins instalados.
+	 * @return Owner
+	 */
+	public static function tableOwner( string $table, array $plugins ): array {
+		$name = strtolower( $table );
+		if ( in_array( $name, self::CORE_TABLES, true ) ) {
+			return [
+				'kind'   => 'core',
+				'plugin' => '',
+			];
+		}
+		foreach ( self::KNOWN_TABLES as $prefix => $folder ) {
+			if ( str_starts_with( $name, $prefix ) ) {
+				if ( ! isset( $plugins[ $folder ] ) ) {
+					return [
+						'kind'   => 'removed',
+						'plugin' => $folder,
+					];
+				}
+				return [
+					'kind'   => $plugins[ $folder ]['active'] ? 'active' : 'inactive',
+					'plugin' => $folder,
+				];
+			}
+		}
+		$owner = self::owner( $name, $plugins );
+		return 'core' === $owner['kind'] ? [
+			'kind'   => 'unknown',
+			'plugin' => '',
+		] : $owner;
 	}
 
 	/**
@@ -328,7 +387,7 @@ final class DatabaseAudit {
 	/**
 	 * Estado de HPOS de WooCommerce.
 	 *
-	 * @return array{woo: bool, enabled: bool, sync: bool, posts_orders: int, recommendation: string}
+	 * @return array{woo: bool, enabled: bool, sync: bool, posts_orders: int, recommendation: string, incompatible?: list<string>}
 	 */
 	private function hpos(): array {
 		$woo = class_exists( 'WooCommerce' );
@@ -357,7 +416,39 @@ final class DatabaseAudit {
 			'sync'           => $sync,
 			'posts_orders'   => $orders,
 			'recommendation' => $advice,
+			'incompatible'   => self::hposIncompatible(),
 		];
+	}
+
+	/**
+	 * Plugins activos que declaran no ser compatibles con HPOS (FeaturesUtil, API pública de WooCommerce
+	 * desde la 7.x). Con alguno activo, WooCommerce no deja activar HPOS.
+	 *
+	 * @return list<string>
+	 */
+	public static function hposIncompatible(): array {
+		$callback = [ 'Automattic\\WooCommerce\\Utilities\\FeaturesUtil', 'get_compatible_plugins_for_feature' ];
+		if ( ! is_callable( $callback ) ) {
+			return [];
+		}
+		try {
+			$info = call_user_func( $callback, 'custom_order_tables' );
+		} catch ( \Throwable ) {
+			return [];
+		}
+		$files = is_array( $info ) && is_array( $info['incompatible'] ?? null ) ? $info['incompatible'] : [];
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$active    = (array) get_option( 'active_plugins', [] );
+		$installed = get_plugins();
+		$names     = [];
+		foreach ( $files as $file ) {
+			if ( is_string( $file ) && in_array( $file, $active, true ) ) {
+				$names[] = (string) ( $installed[ $file ]['Name'] ?? $file );
+			}
+		}
+		return $names;
 	}
 
 	/**
@@ -400,19 +491,24 @@ final class DatabaseAudit {
 	}
 
 	/**
-	 * Las 15 tablas más grandes de esta instalación.
+	 * Las 25 tablas más grandes de esta instalación, con su dueño. Las de plugins inactivos o
+	 * desinstalados no frenan el sitio (nadie las consulta), pero ocupan espacio y alargan las copias.
 	 *
-	 * @return list<array{name: string, rows: int, bytes: int}>
+	 * @param array<string, array{name: string, active: bool}> $plugins Plugins instalados.
+	 * @return list<array{name: string, rows: int, bytes: int, owner: string, plugin: string}>
 	 */
-	private function tables(): array {
-		$sql  = $this->db->prepare( 'SELECT TABLE_NAME AS name, TABLE_ROWS AS n, DATA_LENGTH + INDEX_LENGTH AS bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE %s ORDER BY bytes DESC LIMIT 15', $this->db->esc_like( $this->db->prefix ) . '%' );
+	private function tables( array $plugins ): array {
+		$sql  = $this->db->prepare( 'SELECT TABLE_NAME AS name, TABLE_ROWS AS n, DATA_LENGTH + INDEX_LENGTH AS bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE %s ORDER BY bytes DESC LIMIT 25', $this->db->esc_like( $this->db->prefix ) . '%' );
 		$rows = null === $sql ? [] : $this->db->get_results( $sql, ARRAY_A );
 		$out  = [];
 		foreach ( is_array( $rows ) ? $rows : [] as $row ) {
+			$owner = self::tableOwner( substr( (string) $row['name'], strlen( $this->db->prefix ) ), $plugins );
 			$out[] = [
-				'name'  => (string) $row['name'],
-				'rows'  => (int) $row['n'],
-				'bytes' => (int) $row['bytes'],
+				'name'   => (string) $row['name'],
+				'rows'   => (int) $row['n'],
+				'bytes'  => (int) $row['bytes'],
+				'owner'  => $owner['kind'],
+				'plugin' => $owner['plugin'],
 			];
 		}
 		return $out;

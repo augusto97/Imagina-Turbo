@@ -637,9 +637,9 @@ export interface DbAudit {
 	action_scheduler: { available: boolean; old: number; complete: number; failed: number; canceled: number; pending: number; total: number; logs: number };
 	revisions: { total: number; excess: number; posts: number; keep: number; wp_limit: number };
 	orphan_postmeta: number;
-	hpos: { woo: boolean; enabled: boolean; sync: boolean; posts_orders: number; recommendation: string };
+	hpos: { woo: boolean; enabled: boolean; sync: boolean; posts_orders: number; recommendation: string; incompatible?: string[] };
 	postmeta_index: { rows: number; indexes: string[]; recommendation: string };
-	tables: { name: string; rows: number; bytes: number }[];
+	tables: { name: string; rows: number; bytes: number; owner?: 'core' | 'active' | 'inactive' | 'removed' | 'unknown'; plugin?: string }[];
 }
 
 export interface DbStatus {
@@ -647,7 +647,7 @@ export interface DbStatus {
 	audit: DbAudit | null;
 	batches: { batch: string; created_at: string; action: string; rows: number; restored: boolean }[];
 	keep: number;
-	settings: { db_keep_revisions: number; db_schedule: string[]; db_schedule_days: number };
+	settings: { db_keep_revisions: number; db_schedule: string[]; db_schedule_days: number; db_as_retention: number };
 	last_run: number;
 	result?: { action: string; batch: string; affected: number; backed_up: number; more: boolean };
 	restored?: { batch: string; restored: number; skipped: number };

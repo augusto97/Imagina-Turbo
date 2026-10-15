@@ -499,3 +499,12 @@ Lo que salió del análisis de cómo cargan rápido Shopify, Tiendanube y VTEX. 
 
 - **Purga por impacto.** Antes, cada venta purgaba la portada, la tienda y todas las categorías del producto. Ahora una venta (solo cambia la cantidad) purga únicamente la página del producto. Un producto agotado, de vuelta en stock o con cambio de precio purga todo lo que lo muestra, incluidas las páginas donde aparece como relacionado o en un carrusel (tag `l-ID`, anotado al generar cada página). En la práctica hay menos purgas que antes y los precios y el stock quedan bien también en los relacionados. Ver docs/02, «Purga por impacto».
 - **Aviso de LiteSpeed Cache** con «Product Update Interval» en 0 (su valor por defecto) o 3: purga en cada venta y, con sus reglas de purga automática, también la portada, las páginas y las categorías. Se recomienda la opción 1 (purgar el producto y las categorías solo cuando cambia el estado del stock). Verificado en `thirdparty/woocommerce.cls.php` y `data/const.default.json` de LiteSpeed Cache.
+
+## Versión 0.14.2
+
+- **Searchanise: productos vistos en el navegador.** Al verificar la 0.14.1 en un sitio real, las páginas de producto seguían sin refresco de nonces ni tags. Causa: Smart Search & Product Filter (Searchanise, `smart-search-for-woocommerce` 1.0.21) escribe la cookie `se-recently-viewed-products` con `wc_setcookie` en cada producto e imprime su valor en `searchanise_options.recentlyViewedProducts`.
+  - La página quedaba personal: LiteSpeed Cache guardaba la lista de quien la regeneró y se la servía a todos. Verificado enviando una cookie con IDs inventados: aparecían en el HTML.
+  - `Integrations\SearchaniseRecentlyViewed` (con el coordinador de caché activo) hace tres cosas:
+    - bloquea esa cookie en `woocommerce_set_cookie_enabled`;
+    - genera la página sin la lista, salvo en la búsqueda, que no se cachea;
+    - agrega antes del script de Searchanise uno en línea que actualiza la cookie en el navegador con la misma lógica (el producto primero, sin repetir, máximo 20, 180 días) y completa la configuración con la lista anterior a esa vista, como hacía el servidor.

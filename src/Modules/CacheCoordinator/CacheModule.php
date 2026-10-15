@@ -22,6 +22,7 @@ use ImaginaTurbo\Core\ModuleInterface;
 use ImaginaTurbo\Core\Request\RequestContext;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Integrations\SearchaniseRecentlyViewed;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\CacheAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\WpRocketAdapter;
 
@@ -57,6 +58,11 @@ final class CacheModule implements ModuleInterface {
 			}
 			$cartCookies = array_values( array_filter( is_array( $cart ) ? $cart : [], 'is_string' ) );
 			( new HeaderEmitter( $settings, $cookies, $container->get( TagBuilder::class ), $container->get( CacheAdapter::class ), $request, $onCacheable, $cartCookies ) )->register();
+		}
+
+		// Searchanise escribe los productos vistos con Set-Cookie y los imprime en la página: al navegador.
+		if ( RequestType::FrontendHtml === $type ) {
+			( new SearchaniseRecentlyViewed() )->register();
 		}
 
 		// Sesión de WooCommerce de un invitado: itb-nonce.js refresca sus nonces woocommerce* al cargar.

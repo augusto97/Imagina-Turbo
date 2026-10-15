@@ -44,7 +44,7 @@ final class CacheabilityAudit {
 		'wordpress_test_cookie'       => 'Página de login o formulario que comprueba cookies.',
 		'_fbp'                        => 'Meta (Facebook): píxel o API de conversiones, p. ej. Meta for WooCommerce o PixelYourSite.',
 		'_fbc'                        => 'Meta (Facebook): identificador de clic de anuncios.',
-		'se-recently-viewed'          => 'Smart Search & Product Filter (Searchanise): productos vistos.',
+		'se-recently-viewed'          => 'Smart Search & Product Filter (Searchanise): productos vistos. Con el coordinador de caché activo (0.14.2), Imagina Turbo la escribe en el navegador.',
 		'woodmart_recently_viewed'    => 'WoodMart: productos vistos recientemente.',
 		'yith_ywraq_'                 => 'YITH Request a Quote: lista de cotización.',
 		'sbjs_'                       => 'WooCommerce: atribución de pedidos (sourcebuster).',

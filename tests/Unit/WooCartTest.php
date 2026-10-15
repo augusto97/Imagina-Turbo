@@ -11,6 +11,7 @@ namespace ImaginaTurbo\Tests\Unit;
 
 use Brain\Monkey\Functions;
 use ImaginaTurbo\Core\Config\Settings;
+use ImaginaTurbo\Integrations\SearchaniseRecentlyViewed;
 use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\WooCart\ThemeSelectors;
 use ImaginaTurbo\Modules\WooCart\WooCartModule;
@@ -70,6 +71,17 @@ final class WooCartTest extends TestCase {
 		$this->assertStringNotContainsString( '<', $js );
 		// Un path con comillas no rompe el script.
 		$this->assertStringContainsString( '"\/a\"b\/"', WooCartModule::recentlyViewedScript( 1, '/a"b/' ) );
+	}
+
+	public function test_searchanise_recently_viewed_moves_to_browser(): void {
+		$this->assertTrue( SearchaniseRecentlyViewed::blockCookie( true, 'otra' ), 'sin Searchanise no toca nada' );
+		define( 'SE_PLUGIN_VERSION', '1.0.21' );
+		$this->assertFalse( SearchaniseRecentlyViewed::blockCookie( true, 'se-recently-viewed-products' ) );
+		$this->assertTrue( SearchaniseRecentlyViewed::blockCookie( true, 'woocommerce_cart_hash' ) );
+		$js = SearchaniseRecentlyViewed::script( 4694, '/' );
+		$this->assertStringContainsString( '})(4694,', $js );
+		$this->assertStringContainsString( 'slice(0,20)', $js );
+		$this->assertStringContainsString( 'searchanise_options.recentlyViewedProducts', $js );
 	}
 
 	public function test_yields_to_mini_cart_block_only_without_theme_counters(): void {

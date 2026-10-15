@@ -12,6 +12,11 @@
  *
  * Lo que cambie durante el render (DONOTCACHEPAGE, un Set-Cookie) se revisa en shutdown: ver lateCheck().
  *
+ * 0.14.1: mientras se genera una página cacheable se anotan los productos que muestra en listados,
+ * carruseles y relacionados (acción the_post, que también dispara setup_postdata) y en shutdown se
+ * agregan como tags l-ID. Así, cuando un producto se agota o cambia de precio, se purgan también las
+ * páginas que lo muestran (PurgeMap); una venta normal ya no las toca.
+ *
  * @package ImaginaTurbo
  */
 
@@ -29,8 +34,17 @@ final class HeaderEmitter {
 
 	public const HEADER = 'Cloudflare-CDN-Cache-Control';
 
+	/** Productos anotados como máximo por página (la cabecera Cache-Tag tiene límite). */
+	public const MAX_LISTED = 100;
+
 	/** @var array{cacheable: bool, reason: string, ttl: int}|null */
 	private ?array $verdict = null;
+
+	/** @var list<string> Tags emitidos en template_redirect. */
+	private array $tagsSent = [];
+
+	/** @var array<int, true> Productos que la página muestra fuera de su contenido principal. */
+	private array $listed = [];
 
 	/**
 	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>} $settings Ajustes compilados.
@@ -97,7 +111,11 @@ final class HeaderEmitter {
 			$this->adapter->noCache( 'cart' );
 		}
 
-		$tags = $this->verdict['cacheable'] ? $this->tags->tags( TagBuilder::namesForCurrentQuery() ) : [];
+		$tags           = $this->verdict['cacheable'] ? $this->tags->tags( TagBuilder::namesForCurrentQuery() ) : [];
+		$this->tagsSent = $tags;
+		if ( $this->verdict['cacheable'] ) {
+			add_action( 'the_post', [ $this, 'noteListed' ] );
+		}
 		// LSCache recibe nuestros tags aunque no emitamos cabeceras al edge: así purgar por tag también
 		// purga la caché del servidor.
 		$this->adapter->addResponseTags( $tags );
@@ -127,6 +145,7 @@ final class HeaderEmitter {
 		}
 		$reason = self::lateReason( defined( 'DONOTCACHEPAGE' ) && DONOTCACHEPAGE, headers_list() );
 		if ( null === $reason ) {
+			$this->addListedTags();
 			return;
 		}
 		$this->verdict = [
@@ -139,6 +158,43 @@ final class HeaderEmitter {
 			header( self::HEADER . ': no-store', true );
 			header_remove( 'Cache-Tag' );
 		}
+	}
+
+	/**
+	 * @param mixed $post Entrada que se prepara en un bucle.
+	 */
+	public function noteListed( mixed $post ): void {
+		if ( $post instanceof \WP_Post && 'product' === $post->post_type && count( $this->listed ) < self::MAX_LISTED && get_queried_object_id() !== $post->ID ) {
+			$this->listed[ $post->ID ] = true;
+		}
+	}
+
+	/**
+	 * Agrega los tags l-ID de los productos anotados (LSCache los recibe aunque no haya edge).
+	 */
+	private function addListedTags(): void {
+		$listed = $this->tags->tags( self::listedNames( array_keys( $this->listed ) ) );
+		if ( [] === $listed ) {
+			return;
+		}
+		$this->adapter->addResponseTags( $listed );
+		if ( 'headers' === $this->settings['mode'] && $this->settings['edge_html'] ) {
+			header( 'Cache-Tag: ' . implode( ',', array_values( array_unique( array_merge( $this->tagsSent, $listed ) ) ) ), true );
+		}
+	}
+
+	/**
+	 * @param array<int> $ids Productos.
+	 * @return list<string>
+	 */
+	public static function listedNames( array $ids ): array {
+		$names = [];
+		foreach ( array_slice( $ids, 0, self::MAX_LISTED ) as $id ) {
+			if ( (int) $id > 0 ) {
+				$names[] = 'l-' . (int) $id;
+			}
+		}
+		return $names;
 	}
 
 	/**

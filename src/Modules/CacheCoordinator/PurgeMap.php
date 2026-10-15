@@ -7,6 +7,17 @@
  * un cambio solo de precio no pasa por wp_update_post, por eso se escuchan sus hooks propios. Las
  * ofertas programadas llegan por woocommerce_update_product (Action Scheduler por producto).
  *
+ * 0.14.1, purga por impacto. Una venta descuenta stock por SQL (wc_update_product_stock) y después
+ * guarda el producto: dispara woocommerce_product_set_stock y woocommerce_update_product, y antes
+ * purgaba la portada, la tienda y todas las categorías en cada venta. Ahora:
+ * - solo cambió la cantidad (el guardado no trae más cambios que stock_quantity o date_modified):
+ *   solo la página del producto;
+ * - cambió el estado del stock, el precio u otro dato, o se editó en el admin: el producto, sus
+ *   términos, la tienda, la portada y las páginas que lo muestran en un listado o como relacionado
+ *   (tag l-ID, que pone HeaderEmitter).
+ * Los cambios se leen en woocommerce_before_{product,product_variation}_object_save, el único punto en
+ * que get_changes() todavía los tiene (WC_Data::save, verificado en 11.2.1).
+ *
  * @package ImaginaTurbo
  */
 
@@ -33,6 +44,12 @@ final class PurgeMap {
 		'update_option_permalink_structure',
 	];
 
+	/** Cambios de un guardado que no se ven fuera de la página del producto. */
+	public const MINOR_CHANGES = [ 'stock_quantity', 'date_modified' ];
+
+	/** @var array<int, array<string, true>> Campos cambiados por id de producto o variación. */
+	private array $changes = [];
+
 	/**
 	 * @param \Closure(): Purger $purger    Fábrica del Purger.
 	 * @param list<string>       $allHooks  Hooks de "purgar todo" de la matriz (Elementor, etc.).
@@ -52,12 +69,14 @@ final class PurgeMap {
 		add_action( 'edited_term', [ $this, 'onTerm' ], 10, 3 );
 		add_action( 'delete_term', [ $this, 'onTerm' ], 10, 3 );
 
-		add_action( 'woocommerce_product_set_stock', [ $this, 'onProduct' ] );
-		add_action( 'woocommerce_variation_set_stock', [ $this, 'onProduct' ] );
+		add_action( 'woocommerce_before_product_object_save', [ $this, 'noteChanges' ] );
+		add_action( 'woocommerce_before_product_variation_object_save', [ $this, 'noteChanges' ] );
+		add_action( 'woocommerce_product_set_stock', [ $this, 'onStockQuantity' ] );
+		add_action( 'woocommerce_variation_set_stock', [ $this, 'onStockQuantity' ] );
 		add_action( 'woocommerce_product_set_stock_status', [ $this, 'onProductId' ] );
 		add_action( 'woocommerce_variation_set_stock_status', [ $this, 'onProductId' ] );
-		add_action( 'woocommerce_update_product', [ $this, 'onProductId' ] );
-		add_action( 'woocommerce_update_product_variation', [ $this, 'onProductId' ] );
+		add_action( 'woocommerce_update_product', [ $this, 'onProductSaved' ] );
+		add_action( 'woocommerce_update_product_variation', [ $this, 'onProductSaved' ] );
 
 		foreach ( array_unique( array_merge( self::ALL_HOOKS, $this->allHooks ) ) as $hook ) {
 			add_action( $hook, fn() => $this->purgeAll( $hook ), 99 );
@@ -157,10 +176,56 @@ final class PurgeMap {
 	/**
 	 * @param mixed $product Producto de WooCommerce.
 	 */
-	public function onProduct( mixed $product ): void {
-		if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
-			$this->onProductId( $product->get_id() );
+	/**
+	 * Antes de guardar: qué campos cambian (después de guardar ya no se sabe).
+	 *
+	 * @param mixed $product Producto o variación.
+	 */
+	public function noteChanges( mixed $product ): void {
+		if ( is_object( $product ) && method_exists( $product, 'get_id' ) && method_exists( $product, 'get_changes' ) ) {
+			$id      = (int) $product->get_id();
+			$changes = $product->get_changes();
+			foreach ( is_array( $changes ) ? array_keys( $changes ) : [] as $key ) {
+				$this->changes[ $id ][ (string) $key ] = true;
+			}
+			$this->changes[ $id ] ??= [];
 		}
+	}
+
+	/**
+	 * Cambió la cantidad en stock (una venta, una devolución): solo la página del producto.
+	 *
+	 * @param mixed $product Producto o variación.
+	 */
+	public function onStockQuantity( mixed $product ): void {
+		if ( is_object( $product ) && method_exists( $product, 'get_id' ) ) {
+			$this->purgeProductPage( (int) $product->get_id() );
+		}
+	}
+
+	/**
+	 * Se guardó un producto: según lo que cambió, solo su página o todo lo que lo muestra.
+	 *
+	 * @param mixed $productId Id del producto o la variación.
+	 */
+	public function onProductSaved( mixed $productId ): void {
+		$id      = (int) $productId;
+		$changes = $this->changes[ $id ] ?? null;
+		unset( $this->changes[ $id ] );
+		if ( null !== $changes && self::minor( array_keys( $changes ) ) ) {
+			$this->purgeProductPage( $id );
+			return;
+		}
+		$this->onProductId( $id );
+	}
+
+	/**
+	 * El guardado solo trae cambios que no se ven fuera de la página del producto.
+	 *
+	 * @param list<string> $changes Campos cambiados.
+	 */
+	public static function minor( array $changes ): bool {
+		return [] === array_diff( $changes, self::MINOR_CHANGES );
 	}
 
 	/**
@@ -171,6 +236,21 @@ final class PurgeMap {
 		if ( $post instanceof \WP_Post && ( 'publish' === $post->post_status || 'product_variation' === $post->post_type ) ) {
 			( $this->purger )()->purgePost( $post, 'product' );
 		}
+	}
+
+	/**
+	 * Solo la página del producto (la de su padre si es una variación).
+	 */
+	private function purgeProductPage( int $id ): void {
+		$post = get_post( $id );
+		if ( $post instanceof \WP_Post && 'product_variation' === $post->post_type && $post->post_parent > 0 ) {
+			$post = get_post( $post->post_parent );
+		}
+		if ( ! ( $post instanceof \WP_Post ) || 'publish' !== $post->post_status ) {
+			return;
+		}
+		$url = get_permalink( $post );
+		( $this->purger )()->purge( new PurgeRequest( [ 'p-' . $post->ID ], is_string( $url ) ? [ $url ] : [], false, 'stock' ) );
 	}
 
 	public function purgeAll( string $hook ): void {

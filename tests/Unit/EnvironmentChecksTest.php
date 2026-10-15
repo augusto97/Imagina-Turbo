@@ -87,6 +87,13 @@ final class EnvironmentChecksTest extends TestCase {
 		$this->assertSame( [ 'webp_htaccess_cloudflare' ], array_column( EnvironmentChecks::evaluate( null, $htaccess, null, true ), 'code' ) );
 	}
 
+	public function test_litespeed_woo_interval(): void {
+		$this->assertSame( 'lscache_woo_interval', EnvironmentChecks::litespeedWooInterval( 0 )['code'] ?? null );
+		$this->assertNotNull( EnvironmentChecks::litespeedWooInterval( '3' ) );
+		$this->assertNull( EnvironmentChecks::litespeedWooInterval( 1 ) );
+		$this->assertNull( EnvironmentChecks::litespeedWooInterval( 2 ) );
+	}
+
 	public function test_mini_cart_block_alert(): void {
 		$info = EnvironmentChecks::miniCartBlock( false );
 		$this->assertSame( 'mini_cart_block', $info['code'] );

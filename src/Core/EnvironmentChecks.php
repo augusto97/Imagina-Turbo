@@ -63,6 +63,12 @@ final class EnvironmentChecks {
 		if ( 'refused' === \ImaginaTurbo\Modules\Speculation\PrefetchProbe::cached() ) {
 			$alerts[] = self::prefetchRefused();
 		}
+		if ( defined( 'LSCWP_V' ) && function_exists( 'WC' ) && null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cache_coordinator' ) ) {
+			$interval = self::litespeedWooInterval( get_option( 'litespeed.conf.wc_update_interval', 0 ) );
+			if ( null !== $interval ) {
+				$alerts[] = $interval;
+			}
+		}
 		if ( function_exists( 'WC' ) && \ImaginaTurbo\Modules\WooCart\WooCartModule::iapiRefreshes() && self::themeHasMiniCartBlock() ) {
 			$alerts[] = self::miniCartBlock( 'prerender' === \ImaginaTurbo\Modules\Speculation\SpeculationModule::settings()['mode'] );
 		}
@@ -132,6 +138,26 @@ final class EnvironmentChecks {
 		}
 
 		return $alerts;
+	}
+
+	/**
+	 * LiteSpeed Cache → WooCommerce → «Intervalo de actualización del producto» (wc_update_interval,
+	 * thirdparty/woocommerce.cls.php): con 0 (por defecto) o 3 purga el producto en cada cambio de
+	 * cantidad, es decir en cada venta, y su purga de entrada aplica las reglas de purga automática
+	 * (portada, páginas, categorías…). Imagina Turbo ya purga la página del producto cuando cambia la
+	 * cantidad (0.14.1); con 1 LiteSpeed solo purga cuando cambia el estado del stock.
+	 *
+	 * @return array{level: string, code: string, message: string}|null
+	 */
+	public static function litespeedWooInterval( mixed $value ): ?array {
+		if ( ! in_array( (int) $value, [ 0, 3 ], true ) ) {
+			return null;
+		}
+		return [
+			'level'   => 'info',
+			'code'    => 'lscache_woo_interval',
+			'message' => __( 'LiteSpeed Cache purga en cada venta la página del producto y, con sus reglas de purga automática, también la portada, las páginas y las categorías: esas páginas se regeneran sin necesidad. Imagina Turbo ya purga la página del producto cuando cambia la cantidad y todo lo que lo muestra cuando se agota o cambia de precio. En LiteSpeed Cache → Caché → WooCommerce → «Product Update Interval» (Intervalo de actualización del producto), elige «Purge product and categories only when the stock status changes» (purgar el producto y las categorías solo cuando cambie el estado del stock).', 'imagina-turbo' ),
+		];
 	}
 
 	/**

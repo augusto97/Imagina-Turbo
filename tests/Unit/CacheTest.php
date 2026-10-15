@@ -18,6 +18,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
 use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\CacheCoordinator\SessionMarker;
 use ImaginaTurbo\Modules\CacheCoordinator\NonceRefresh;
+use ImaginaTurbo\Modules\CacheCoordinator\PurgeMap;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
 use ImaginaTurbo\Modules\CacheCoordinator\Purger;
 use ImaginaTurbo\Modules\CacheCoordinator\TagBuilder;
@@ -199,6 +200,24 @@ final class CacheTest extends TestCase {
 		$this->assertSame( 'set_cookie', Cacheability::decide( self::SETTINGS, self::request( [ 'headers' => [ 'Set-Cookie: _fbpx=1' ] ] ) )['reason'] );
 		$this->assertNull( HeaderEmitter::lateReason( false, [ 'Set-Cookie: _fbp=fb.1.2.3' ] ) );
 		$this->assertSame( 'set_cookie', HeaderEmitter::lateReason( false, [ 'Set-Cookie: _fbp=1', 'Set-Cookie: se-recently-viewed-products=4690' ] ) );
+	}
+
+	public function test_purge_by_impact(): void {
+		// Una venta: el guardado no trae cambios (la cantidad va por SQL) o solo la fecha.
+		$this->assertTrue( PurgeMap::minor( [] ) );
+		$this->assertTrue( PurgeMap::minor( [ 'date_modified', 'stock_quantity' ] ) );
+		// Se agotó, cambió el precio o el nombre: se purga todo lo que lo muestra.
+		$this->assertFalse( PurgeMap::minor( [ 'stock_status' ] ) );
+		$this->assertFalse( PurgeMap::minor( [ 'regular_price', 'price' ] ) );
+		$this->assertFalse( PurgeMap::minor( [ 'date_modified', 'name' ] ) );
+	}
+
+	public function test_listed_product_tags(): void {
+		$this->assertSame( [ 'l-12', 'l-30' ], HeaderEmitter::listedNames( [ 12, 0, 30 ] ) );
+		$this->assertCount( HeaderEmitter::MAX_LISTED, HeaderEmitter::listedNames( range( 1, 500 ) ) );
+		$tags = new TagBuilder( 'k7' );
+		$this->assertSame( 'k7-l-12', $tags->tag( 'l-12' ) );
+		$this->assertSame( 'l-12', $tags->strip( 'k7-l-12' ) );
 	}
 
 	public function test_session_marker_expiry(): void {

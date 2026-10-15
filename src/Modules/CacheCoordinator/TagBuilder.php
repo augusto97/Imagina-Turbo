@@ -16,7 +16,7 @@ namespace ImaginaTurbo\Modules\CacheCoordinator;
 final class TagBuilder {
 
 	/** Tags propios con su forma: all, home, feed, search, shop, p-{id}, t-{id}, a-{id}, pt-{tipo}. */
-	private const PATTERN = '/^(all|home|feed|search|shop|[pta]-\d{1,20}|pt-[a-z0-9_\-]{1,40})$/';
+	private const PATTERN = '/^(all|home|feed|search|shop|[ptal]-\d{1,20}|pt-[a-z0-9_\-]{1,40})$/';
 
 	private readonly string $prefix;
 
@@ -117,6 +117,8 @@ final class TagBuilder {
 		}
 		if ( 'product' === $post->post_type ) {
 			$names[] = 'shop';
+			// Las páginas que lo muestran en un listado o como relacionado (0.14.1).
+			$names[] = 'l-' . $post->ID;
 		}
 		foreach ( get_object_taxonomies( $post->post_type, 'objects' ) as $taxonomy ) {
 			if ( ! is_taxonomy_viewable( $taxonomy ) ) {

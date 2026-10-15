@@ -188,5 +188,10 @@ final class EnvironmentChecksTest extends TestCase {
 		$this->assertSame( 2, substr_count( $out, 'data-no-defer="1" nowprocket' ), 'el externo y su código en línea' );
 		$this->assertSame( $out, DelayJsExclusions::markTag( $out ), 'no se duplica' );
 		$this->assertSame( '<scripts>', DelayJsExclusions::markTag( '<scripts>' ) );
+		$this->assertStringNotContainsString( 'data-no-optimize', $out, 'sin Delayed, LSCache los sigue minificando' );
+
+		$delayed = DelayJsExclusions::markTag( $tag, true );
+		$this->assertSame( 2, substr_count( $delayed, 'data-no-defer="1" nowprocket data-no-optimize="1"' ), 'con Delayed, LSCache no los toca: no reescribe DOMContentLoaded' );
+		$this->assertSame( $delayed, DelayJsExclusions::markTag( $delayed, true ) );
 	}
 }

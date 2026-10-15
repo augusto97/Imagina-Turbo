@@ -183,7 +183,9 @@
 	if ( document.prerendering ) {
 		document.addEventListener( 'prerenderingchange', start, { once: true } );
 	} else if ( document.readyState === 'loading' ) {
-		document.addEventListener( 'DOMContentLoaded', start );
+		// Sin el nombre literal del evento: LiteSpeed Cache en modo "Delayed" lo reescribe en el JS que
+		// minifica y el contador esperaría a la primera interacción.
+		document.addEventListener( [ 'DOMContent', 'Loaded' ].join( '' ), start );
 	} else {
 		start();
 	}

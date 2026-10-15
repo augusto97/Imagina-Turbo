@@ -109,7 +109,7 @@ final class DelayJsExclusions {
 		if ( ! is_string( $tag ) || ! is_string( $handle ) ) {
 			return $tag;
 		}
-		return isset( self::pinned()[ $handle ] ) ? self::markTag( $tag ) : $tag;
+		return isset( self::pinned()[ $handle ] ) ? self::markTag( $tag, self::litespeedDelays() ) : $tag;
 	}
 
 	/**
@@ -128,6 +128,9 @@ final class DelayJsExclusions {
 		if ( isset( self::pinned()[ $m[1] ] ) ) {
 			$attributes['data-no-defer'] = '1';
 			$attributes['nowprocket']    = true;
+			if ( self::litespeedDelays() ) {
+				$attributes['data-no-optimize'] = '1';
+			}
 		}
 		return $attributes;
 	}
@@ -297,9 +300,16 @@ final class DelayJsExclusions {
 
 	/**
 	 * Agrega los atributos a cada <script> de la etiqueta (el externo y su código en línea).
+	 *
+	 * Con "Delayed", LSCache cambia "DOMContentLoaded" por "DOMContentLiteSpeedLoaded" en todo el JS que
+	 * minifica (filtro litespeed_optm_cssjs, src/optimize.cls.php 7.9.1), también en los scripts que no
+	 * retrasa: el del carrito esperaba a la interacción aunque se cargaba al leer la página y el
+	 * contador quedaba en 0. Por eso, en ese modo, los marcados además llevan data-no-optimize (LSCache
+	 * los deja intactos: ni minifica ni combina ni retrasa). En los demás modos se siguen minificando.
 	 */
-	public static function markTag( string $tag ): string {
-		return (string) preg_replace( '/<script(?![^>]*\bdata-no-defer\b)(?=[\s>])/i', '<script data-no-defer="1" nowprocket', $tag );
+	public static function markTag( string $tag, bool $noOptimize = false ): string {
+		$attributes = 'data-no-defer="1" nowprocket' . ( $noOptimize ? ' data-no-optimize="1"' : '' );
+		return (string) preg_replace( '/<script(?![^>]*\bdata-no-defer\b)(?=[\s>])/i', '<script ' . $attributes, $tag );
 	}
 
 	/**

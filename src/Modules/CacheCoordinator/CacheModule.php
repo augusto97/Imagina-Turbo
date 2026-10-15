@@ -59,6 +59,11 @@ final class CacheModule implements ModuleInterface {
 			( new HeaderEmitter( $settings, $cookies, $container->get( TagBuilder::class ), $container->get( CacheAdapter::class ), $request, $onCacheable, $cartCookies ) )->register();
 		}
 
+		// Sesión de WooCommerce de un invitado: itb-nonce.js refresca sus nonces woocommerce* al cargar.
+		if ( $settings['nonce_refresh'] && ! in_array( $type, [ RequestType::Cron, RequestType::Cli, RequestType::Admin ], true ) ) {
+			( new SessionMarker() )->register();
+		}
+
 		// Purgas: los cambios llegan desde admin, REST, AJAX, cron y, en tiendas, desde el checkout.
 		$purger = static fn(): Purger => $container->get( Purger::class );
 		( new PurgeMap( $purger, $settings['purge_all_hooks'] ) )->register();

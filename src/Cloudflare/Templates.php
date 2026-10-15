@@ -131,6 +131,14 @@ final class Templates {
 					: __( 'Sin el HTML en la caché del edge, Speed Brain no precarga nada y Cloudflare rechaza también las precargas de Imagina Turbo (503).', 'imagina-turbo' ),
 			],
 			[
+				'id'          => 'always_online',
+				'label'       => 'Always Online',
+				'recommended' => 'off',
+				'risk'        => 'safe',
+				'read_only'   => false,
+				'note'        => __( 'Con Always Online activo, Cloudflare ignora stale-while-revalidate: tras caducar una página, el visitante espera al servidor en lugar de recibir la copia anterior. Si el servidor cae, stale-if-error ya sirve la copia guardada.', 'imagina-turbo' ),
+			],
+			[
 				'id'          => 'rocket_loader',
 				'label'       => 'Rocket Loader',
 				'recommended' => 'off',

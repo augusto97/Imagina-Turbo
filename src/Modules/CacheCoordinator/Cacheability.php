@@ -27,6 +27,15 @@ final class Cacheability {
 	public const TTL_404 = 600;
 
 	/**
+	 * Cookies que un plugin envía solo a quien todavía no las tiene (la petición que regenera la copia)
+	 * y cuyo valor no aparece en el HTML: no hacen la página personal. La respuesta que las lleva no la
+	 * guarda Cloudflare (respeta al origen ante Set-Cookie), y la copia de la caché de página sale sin
+	 * ellas. Antes de 0.13.1 contaban como Set-Cookie y esa copia quedaba marcada no-store para siempre.
+	 * Meta for WooCommerce 3.7.8 envía _fbp en init y _fbc ante un fbclid (ParamBuilder).
+	 */
+	public const REGEN_COOKIES = [ '_fbp', '_fbc' ];
+
+	/**
 	 * @param array{edge_ttl: int, nonce_refresh: bool} $settings Ajustes de caché.
 	 * @param array{
 	 *     type: RequestType,
@@ -84,7 +93,7 @@ final class Cacheability {
 		}
 		foreach ( $request['headers'] as $header ) {
 			$lower = strtolower( $header );
-			if ( str_starts_with( $lower, 'set-cookie:' ) ) {
+			if ( str_starts_with( $lower, 'set-cookie:' ) && ! self::regenCookie( $header ) ) {
 				return $no( 'set_cookie' );
 			}
 			if ( str_starts_with( $lower, 'cache-control:' ) && 1 === preg_match( '/\b(private|no-store)\b/', $lower ) ) {
@@ -142,6 +151,15 @@ final class Cacheability {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * La cabecera Set-Cookie es de una cookie de REGEN_COOKIES.
+	 */
+	public static function regenCookie( string $header ): bool {
+		$value = trim( substr( $header, strlen( 'set-cookie:' ) ) );
+		$name  = trim( explode( '=', $value, 2 )[0] );
+		return in_array( $name, self::REGEN_COOKIES, true );
 	}
 
 	/**

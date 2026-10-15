@@ -72,6 +72,13 @@ final class WooCartTest extends TestCase {
 		$this->assertStringContainsString( '"\/a\"b\/"', WooCartModule::recentlyViewedScript( 1, '/a"b/' ) );
 	}
 
+	public function test_yields_to_mini_cart_block_only_without_theme_counters(): void {
+		$this->assertTrue( WooCartModule::shouldYield( true, [], [] ) );
+		$this->assertFalse( WooCartModule::shouldYield( false, [], [] ) );
+		$this->assertFalse( WooCartModule::shouldYield( true, [ '.wd-cart-number' ], [] ) );
+		$this->assertFalse( WooCartModule::shouldYield( true, [], [ '.wd-cart-subtotal' ] ) );
+	}
+
 	public function test_cart_script_stays_under_budget(): void {
 		$min = self::pluginDir() . '/assets/js/itb-cart.min.js';
 		$src = self::pluginDir() . '/assets/js/itb-cart.js';

@@ -18,6 +18,7 @@ use ImaginaTurbo\Modules\Rum\RumCollector;
 use ImaginaTurbo\Modules\Rum\RumInsights;
 use ImaginaTurbo\Modules\Rum\RumReport;
 use ImaginaTurbo\Modules\Speculation\SpeculationModule;
+use ImaginaTurbo\Rest\NavigationController;
 
 final class NavigationTest extends TestCase {
 
@@ -294,6 +295,14 @@ final class NavigationTest extends TestCase {
 		$this->assertNull( FrontendHintsModule::facadeHtml( '<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ?enablejsapi=1"></iframe>' ), 'otro script controla el reproductor' );
 		$this->assertNull( FrontendHintsModule::facadeHtml( '<iframe src="https://open.spotify.com/embed/track/x"></iframe>' ) );
 		$this->assertNull( FrontendHintsModule::facadeHtml( '<blockquote>tweet</blockquote>' ) );
+	}
+
+	public function test_own_no_store_ignores_sessions_and_404(): void {
+		$cc = 'no-cache, must-revalidate, max-age=0, no-store, private';
+		$this->assertTrue( NavigationController::ownNoStore( [ 'anon' => 1, 'status' => 200, 'cache_control' => $cc ] ) );
+		$this->assertFalse( NavigationController::ownNoStore( [ 'anon' => 0, 'status' => 200, 'cache_control' => $cc ] ) );
+		$this->assertFalse( NavigationController::ownNoStore( [ 'anon' => 1, 'status' => 404, 'cache_control' => $cc ] ) );
+		$this->assertFalse( NavigationController::ownNoStore( [ 'anon' => 1, 'status' => 200, 'cache_control' => 'max-age=0' ] ) );
 	}
 
 	public function test_scripts_stay_under_budget(): void {

@@ -16,6 +16,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\Adapters\LiteSpeedAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\WpRocketAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
 use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
+use ImaginaTurbo\Modules\CacheCoordinator\SessionMarker;
 use ImaginaTurbo\Modules\CacheCoordinator\NonceRefresh;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
 use ImaginaTurbo\Modules\CacheCoordinator\Purger;
@@ -187,6 +188,25 @@ final class CacheTest extends TestCase {
 		$this->assertSame( 'donotcachepage', HeaderEmitter::lateReason( true, [] ) );
 		$this->assertSame( 'set_cookie', HeaderEmitter::lateReason( false, [ 'Set-Cookie: woocommerce_recently_viewed=12' ] ) );
 		$this->assertSame( 'private', HeaderEmitter::lateReason( false, [ 'Cache-Control: no-cache, must-revalidate, max-age=0, no-store, private' ] ) );
+	}
+
+	public function test_regen_only_cookies_do_not_block_the_edge(): void {
+		// Meta for WooCommerce envía _fbp a quien no la tiene: la copia guardada sale sin ella.
+		$this->assertTrue( Cacheability::decide( self::SETTINGS, self::request( [ 'headers' => [ 'Set-Cookie: _fbp=fb.1.1792043220805.793230305.AQECAQMC; expires=Wed, 13 Jan 2027 05:47:00 GMT; Max-Age=7776000; path=/' ] ] ) )['cacheable'] );
+		$this->assertTrue( Cacheability::decide( self::SETTINGS, self::request( [ 'headers' => [ 'set-cookie: _fbc=fb.1.1.abc; path=/', 'Set-Cookie: _fbp=x' ] ] ) )['cacheable'] );
+		// Cualquier otra, sola o junto a _fbp, sigue impidiéndolo.
+		$this->assertSame( 'set_cookie', Cacheability::decide( self::SETTINGS, self::request( [ 'headers' => [ 'Set-Cookie: _fbp=x', 'Set-Cookie: wp_woocommerce_session_a=1' ] ] ) )['reason'] );
+		$this->assertSame( 'set_cookie', Cacheability::decide( self::SETTINGS, self::request( [ 'headers' => [ 'Set-Cookie: _fbpx=1' ] ] ) )['reason'] );
+		$this->assertNull( HeaderEmitter::lateReason( false, [ 'Set-Cookie: _fbp=fb.1.2.3' ] ) );
+		$this->assertSame( 'set_cookie', HeaderEmitter::lateReason( false, [ 'Set-Cookie: _fbp=1', 'Set-Cookie: se-recently-viewed-products=4690' ] ) );
+	}
+
+	public function test_session_marker_expiry(): void {
+		$this->assertSame( 2000, SessionMarker::expiry( 't_abc||2000||1900||hash', 2000, 1000 ) );
+		// WooCommerce borra la sesión (valor vacío o caducidad pasada): la marca también.
+		$this->assertSame( 0, SessionMarker::expiry( '', 2000, 1000 ) );
+		$this->assertSame( 0, SessionMarker::expiry( 't_abc', 500, 1000 ) );
+		$this->assertSame( 0, SessionMarker::expiry( null, 'x', 1000 ) );
 	}
 
 	public function test_purge_request_merge(): void {

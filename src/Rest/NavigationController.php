@@ -108,14 +108,26 @@ final class NavigationController extends Controller {
 	}
 
 	/**
-	 * Páginas del frontend que salieron con Cache-Control: no-store (lo propio que impide el bfcache).
+	 * Muestra de una página anónima con estado 200 que salió con no-store.
+	 *
+	 * @param array<string, mixed> $row Muestra.
+	 */
+	public static function ownNoStore( array $row ): bool {
+		return 1 === (int) ( $row['anon'] ?? 0 ) && 200 === (int) ( $row['status'] ?? 0 ) && str_contains( (string) ( $row['cache_control'] ?? '' ), 'no-store' );
+	}
+
+	/**
+	 * Páginas del frontend que salieron con Cache-Control: no-store para visitantes anónimos (lo propio
+	 * que impide el bfcache en Firefox; Chrome sí las guarda y las descarta si cambian las cookies).
+	 * Desde 0.13.1 no cuenta las visitas con sesión (WordPress les envía no-store desde la 6.3) ni los
+	 * 404 (desde la 6.8): eso es del core y es correcto.
 	 *
 	 * @return list<array{route: string, n: int}>
 	 */
 	private function noStore(): array {
 		$out = [];
 		foreach ( $this->container->get( SampleRepository::class )->recent( 48, 'FrontendHtml' ) as $row ) {
-			if ( str_contains( (string) ( $row['cache_control'] ?? '' ), 'no-store' ) ) {
+			if ( self::ownNoStore( $row ) ) {
 				$route         = (string) ( $row['route_key'] ?? '' );
 				$out[ $route ] = ( $out[ $route ] ?? 0 ) + 1;
 			}

@@ -10,6 +10,10 @@
  * - wc_track_product_view (Set-Cookie en cada página de producto si está el widget de vistos) pasa al
  *   navegador: la página ya no envía cookies y se puede cachear.
  *
+ * 0.13.1, Mini-Cart de bloques (Interactivity API): desde WooCommerce 10.7 su store pide
+ * GET /wc/store/v1/cart sin caché en cada vista y refresca su propio nonce. Si la página lo pinta y el
+ * tema no tiene contadores que Turbo deba corregir, itb-cart.js no repite la petición (itbCart.b).
+ *
  * Sin output buffering: todo por hooks de scripts (regla 2).
  *
  * @package ImaginaTurbo
@@ -34,11 +38,20 @@ final class WooCartModule implements ModuleInterface {
 
 	public const COOKIE = 'woocommerce_items_in_cart';
 
+	/** Versión de WooCommerce desde la que el Mini-Cart de bloques refresca el carrito al cargar. */
+	public const IAPI_REFRESH_SINCE = '10.7.0';
+
+	private bool $miniCartBlock = false;
+
 	public function register( Container $container, RequestContext $request ): void {
 		if ( ! in_array( $request->type, [ RequestType::FrontendHtml, RequestType::Cart, RequestType::Account ], true ) ) {
 			return;
 		}
 		add_action( 'wp_enqueue_scripts', [ $this, 'replaceFragments' ], PHP_INT_MAX );
+		if ( self::iapiRefreshes() ) {
+			add_filter( 'render_block_woocommerce/mini-cart', [ $this, 'noteMiniCart' ] );
+			add_action( 'wp_footer', [ $this, 'yieldToMiniCart' ], 19 );
+		}
 		if ( RequestType::FrontendHtml === $request->type && self::settings()['recently_viewed'] ) {
 			add_action( 'template_redirect', [ $this, 'moveProductViewToBrowser' ], 0 );
 		}
@@ -59,6 +72,41 @@ final class WooCartModule implements ModuleInterface {
 			'theme'           => is_string( $woo['theme'] ?? null ) ? $woo['theme'] : '',
 			'tax_incl'        => true === ( $woo['tax_incl'] ?? false ),
 		];
+	}
+
+	/**
+	 * WooCommerce refresca el Mini-Cart de bloques por su cuenta al cargar la página.
+	 */
+	public static function iapiRefreshes(): bool {
+		return defined( 'WC_VERSION' ) && is_string( WC_VERSION ) && version_compare( WC_VERSION, self::IAPI_REFRESH_SINCE, '>=' );
+	}
+
+	/**
+	 * @param mixed $html HTML del bloque (sin cambios).
+	 * @return mixed
+	 */
+	public function noteMiniCart( mixed $html ): mixed {
+		$this->miniCartBlock = true;
+		return $html;
+	}
+
+	/**
+	 * Antes de imprimir los scripts del pie: si el Mini-Cart de bloques está en la página y no hay
+	 * contadores del tema, itb-cart.js no pide nada (su petición se sumaría a la de WooCommerce).
+	 */
+	public function yieldToMiniCart(): void {
+		$settings = self::settings();
+		if ( self::shouldYield( $this->miniCartBlock, $settings['count'], $settings['total'] ) ) {
+			wp_add_inline_script( self::HANDLE, 'itbCart.b=1;', 'before' );
+		}
+	}
+
+	/**
+	 * @param list<string> $count Selectores de contador del tema.
+	 * @param list<string> $total Selectores de total del tema.
+	 */
+	public static function shouldYield( bool $miniCartBlock, array $count, array $total ): bool {
+		return $miniCartBlock && [] === $count && [] === $total;
 	}
 
 	public function replaceFragments(): void {

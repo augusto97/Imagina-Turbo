@@ -152,7 +152,7 @@ final class HeaderEmitter {
 		}
 		foreach ( $headers as $header ) {
 			$lower = strtolower( $header );
-			if ( str_starts_with( $lower, 'set-cookie:' ) ) {
+			if ( str_starts_with( $lower, 'set-cookie:' ) && ! Cacheability::regenCookie( $header ) ) {
 				return 'set_cookie';
 			}
 			if ( str_starts_with( $lower, 'cache-control:' ) && 1 === preg_match( '/\b(private|no-store)\b/', $lower ) ) {

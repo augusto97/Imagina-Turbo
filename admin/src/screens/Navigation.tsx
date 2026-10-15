@@ -410,7 +410,7 @@ function BfcacheCard( { status }: { status: NavigationStatus } ) {
 							) ) }
 						</ul>
 					) }
-					<p className="itb:m-0 itb:mt-1 itb:text-xs itb:text-zinc-500">{ __( 'Carrito, checkout y cuenta llevan no-store a propósito. Una página pública con no-store se revisa en Caché y en Diagnóstico.' ) }</p>
+					<p className="itb:m-0 itb:mt-1 itb:text-xs itb:text-zinc-500">{ __( 'Solo visitantes anónimos y respuestas 200: el no-store de las sesiones y de los 404 es de WordPress y es correcto. Firefox no guarda en el bfcache una página con no-store; Chrome sí, y la descarta si cambian las cookies. Una página pública con no-store se revisa en Caché y en Diagnóstico.' ) }</p>
 				</div>
 			</CardContent>
 		</Card>

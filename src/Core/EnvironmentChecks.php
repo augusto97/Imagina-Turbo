@@ -63,6 +63,9 @@ final class EnvironmentChecks {
 		if ( 'refused' === \ImaginaTurbo\Modules\Speculation\PrefetchProbe::cached() ) {
 			$alerts[] = self::prefetchRefused();
 		}
+		if ( function_exists( 'WC' ) && \ImaginaTurbo\Modules\WooCart\WooCartModule::iapiRefreshes() && self::themeHasMiniCartBlock() ) {
+			$alerts[] = self::miniCartBlock( 'prerender' === \ImaginaTurbo\Modules\Speculation\SpeculationModule::settings()['mode'] );
+		}
 		return $alerts;
 	}
 
@@ -129,6 +132,40 @@ final class EnvironmentChecks {
 		}
 
 		return $alerts;
+	}
+
+	/**
+	 * El tema de bloques pinta el Mini-Cart de WooCommerce en alguna parte de plantilla.
+	 */
+	public static function themeHasMiniCartBlock(): bool {
+		if ( ! function_exists( 'wp_is_block_theme' ) || ! wp_is_block_theme() || ! function_exists( 'get_block_templates' ) ) {
+			return false;
+		}
+		foreach ( [ 'wp_template_part', 'wp_template' ] as $type ) {
+			foreach ( get_block_templates( [], $type ) as $template ) {
+				if ( is_string( $template->content ) && str_contains( $template->content, 'wp:woocommerce/mini-cart' ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * WooCommerce 10.7+: el Mini-Cart de bloques pide el carrito sin caché en cada vista.
+	 *
+	 * @return array{level: string, code: string, message: string}
+	 */
+	public static function miniCartBlock( bool $prerender ): array {
+		$message = __( 'El Mini-Cart de bloques de WooCommerce (10.7 o posterior) pide el carrito a la Store API sin caché en cada vista, también con el carrito vacío: una petición PHP por página aunque el HTML salga de la caché. No es de Imagina Turbo y no se puede quitar sin romper el bloque; Imagina Turbo deja de sumar la suya.', 'imagina-turbo' );
+		if ( $prerender ) {
+			$message .= ' ' . __( 'Con la navegación en modo prerender, cada página precargada hace esa petición aunque nadie la abra: usa el modo prefetch en este sitio.', 'imagina-turbo' );
+		}
+		return [
+			'level'   => $prerender ? 'warning' : 'info',
+			'code'    => 'mini_cart_block',
+			'message' => $message,
+		];
 	}
 
 	/**

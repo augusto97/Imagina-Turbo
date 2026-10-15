@@ -67,6 +67,9 @@ final class FrontendHintsModule implements ModuleInterface {
 	/** @var array<string, string|null> URL => URL .webp (o null), por request. */
 	private static array $webp = [];
 
+	/** @var array{src: string, srcset: string, sizes: string}|null Precarga de la imagen principal (producto o primer producto del listado). */
+	private static ?array $hint = null;
+
 	/** Atributo que marca las imágenes priorizadas (y las saca de la reescritura de WebP por JS de EWWW). */
 	public const MARK = 'data-itb-lcp';
 
@@ -201,6 +204,21 @@ final class FrontendHintsModule implements ModuleInterface {
 		}
 		if ( $loop ) {
 			add_action( 'woocommerce_before_shop_loop_item', [ self::class, 'nextProduct' ], 1 );
+		}
+		// Precarga (y cabecera Link para Early Hints) con el mismo tamaño que pedirá WooCommerce, así el
+		// navegador elige del srcset el mismo archivo que la etiqueta img y no lo baja dos veces.
+		if ( $id > 0 && self::$featuredOnly && 'single:product' === $template ) {
+			self::$hint = self::imageHint( $id, apply_filters( 'woocommerce_gallery_image_size', 'woocommerce_single' ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro de WooCommerce.
+		} elseif ( $loop ) {
+			$first = $GLOBALS['wp_query']->posts[0] ?? null;
+			$thumb = $first instanceof \WP_Post && 'product' === $first->post_type ? get_post_thumbnail_id( $first ) : 0;
+			if ( is_int( $thumb ) && $thumb > 0 ) {
+				self::$hint = self::imageHint( $thumb, apply_filters( 'single_product_archive_thumbnail_size', 'woocommerce_thumbnail' ) ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro de WooCommerce.
+			}
+		}
+		if ( null !== self::$hint ) {
+			add_action( 'template_redirect', [ self::class, 'sendLinkHeader' ], 99 );
+			add_action( 'wp_head', [ self::class, 'printHint' ], 2 );
 		}
 		if ( '' !== self::$lcpSrc ) {
 			add_action( 'wp_head', [ self::class, 'printPreload' ], 2 );
@@ -367,6 +385,75 @@ final class FrontendHintsModule implements ModuleInterface {
 		self::$loopIndex    = 0;
 		self::$loopMarked   = 0;
 		self::$webp         = [];
+		self::$hint         = null;
+	}
+
+	/**
+	 * src, srcset y sizes de un adjunto en un tamaño, apuntando a las copias .webp.
+	 *
+	 * @param mixed $size Tamaño registrado (o [ancho, alto]).
+	 * @return array{src: string, srcset: string, sizes: string}|null
+	 */
+	public static function imageHint( int $id, mixed $size ): ?array {
+		if ( ! is_string( $size ) && ! is_array( $size ) ) {
+			$size = 'woocommerce_single';
+		}
+		$image = wp_get_attachment_image_src( $id, $size );
+		if ( ! is_array( $image ) || ! is_string( $image[0] ?? null ) ) {
+			return null;
+		}
+		$srcset = wp_get_attachment_image_srcset( $id, $size );
+		$sizes  = wp_get_attachment_image_sizes( $id, $size );
+		return [
+			'src'    => self::webpUrl( $image[0] ) ?? $image[0],
+			'srcset' => is_string( $srcset ) && '' !== $srcset ? self::webpSrcset( $srcset ) : '',
+			'sizes'  => is_string( $sizes ) ? $sizes : '',
+		];
+	}
+
+	/**
+	 * Cabecera Link: Cloudflare la guarda y la envía como Early Hints (103) mientras el origen responde.
+	 */
+	public static function sendLinkHeader(): void {
+		if ( null === self::$hint || headers_sent() ) {
+			return;
+		}
+		header( 'Link: ' . self::linkHeader( self::$hint ), false );
+	}
+
+	/**
+	 * @param array{src: string, srcset: string, sizes: string} $hint Imagen.
+	 */
+	public static function linkHeader( array $hint ): string {
+		$value = '<' . self::headerSafe( $hint['src'] ) . '>; rel=preload; as=image; fetchpriority=high';
+		if ( '' !== $hint['srcset'] ) {
+			$value .= '; imagesrcset="' . self::headerSafe( $hint['srcset'] ) . '"';
+			if ( '' !== $hint['sizes'] ) {
+				$value .= '; imagesizes="' . self::headerSafe( $hint['sizes'] ) . '"';
+			}
+		}
+		return $value;
+	}
+
+	/**
+	 * Sin comillas, saltos de línea ni caracteres de control: no se puede salir del parámetro.
+	 */
+	private static function headerSafe( string $value ): string {
+		return (string) preg_replace( '/["\\x00-\\x1f\\x7f<>]/', '', $value );
+	}
+
+	public static function printHint(): void {
+		if ( null === self::$hint ) {
+			return;
+		}
+		$attrs = ' href="' . esc_url( self::$hint['src'] ) . '"';
+		if ( '' !== self::$hint['srcset'] ) {
+			$attrs .= ' imagesrcset="' . esc_attr( self::$hint['srcset'] ) . '"';
+			if ( '' !== self::$hint['sizes'] ) {
+				$attrs .= ' imagesizes="' . esc_attr( self::$hint['sizes'] ) . '"';
+			}
+		}
+		echo '<link rel="preload" as="image"' . $attrs . ' fetchpriority="high">' . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- atributos escapados arriba.
 	}
 
 	public static function printPreload(): void {

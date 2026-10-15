@@ -347,4 +347,28 @@ final class NavigationTest extends TestCase {
 			$this->assertSame( $presets, Settings::lazyRender( $presets ), 'las sugerencias pasan la validación: ' . $theme );
 		}
 	}
+
+	public function test_link_header_for_early_hints(): void {
+		$this->assertSame(
+			'<https://t.test/a.webp>; rel=preload; as=image; fetchpriority=high; imagesrcset="https://t.test/a.webp 600w, https://t.test/b.webp 300w"; imagesizes="(max-width: 600px) 100vw, 600px"',
+			FrontendHintsModule::linkHeader(
+				[
+					'src'    => 'https://t.test/a.webp',
+					'srcset' => 'https://t.test/a.webp 600w, https://t.test/b.webp 300w',
+					'sizes'  => '(max-width: 600px) 100vw, 600px',
+				]
+			)
+		);
+		$this->assertSame(
+			'<https://t.test/a.webp>; rel=preload; as=image; fetchpriority=high; imagesrcset="x.webp 1w, evil=1"',
+			FrontendHintsModule::linkHeader(
+				[
+					'src'    => "https://t.test/a.webp\r\n",
+					'srcset' => "x.webp 1w, \"evil=1",
+					'sizes'  => '',
+				]
+			),
+			'sin comillas ni saltos de línea: no se puede inyectar otra cabecera'
+		);
+	}
 }

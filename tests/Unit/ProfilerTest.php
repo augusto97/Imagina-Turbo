@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Tests\Unit;
 
+use Brain\Monkey\Functions;
 use ImaginaTurbo\Core\Request\RequestContext;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
@@ -521,5 +522,85 @@ final class ProfilerTest extends TestCase {
 
 		$this->assertTrue( SampleWriter::anonymous( [ 'woocommerce_items_in_cart' => '1' ] ) );
 		$this->assertFalse( SampleWriter::anonymous( [ 'wordpress_logged_in_abc' => 'x' ] ) );
+	}
+
+	public function test_php_workers_estimate(): void {
+		$rows = [];
+		// 48 h al 1 %: 10 muestras de 3,6 s en una hora = 3.600 s de PHP en esa hora = 1 proceso todo el tiempo.
+		for ( $i = 0; $i < 10; $i++ ) {
+			$rows[] = [
+				'created_at'   => '2026-10-15 14:' . str_pad( (string) $i, 2, '0', STR_PAD_LEFT ) . ':00',
+				'request_type' => 'AdminAjax',
+				'route_key'    => 'woodmart_load_html_dropdowns',
+				'ms'           => 3600,
+				'source'       => Collector::SOURCE_RANDOM,
+			];
+		}
+		$rows[] = [
+			'created_at'   => '2026-10-15 03:00:00',
+			'request_type' => 'Cron',
+			'route_key'    => 'cron',
+			'ms'           => 6000,
+			'source'       => Collector::SOURCE_RANDOM,
+		];
+		$rows[] = [
+			'created_at'   => '2026-10-15 14:30:00',
+			'request_type' => 'Admin',
+			'route_key'    => 'x',
+			'ms'           => 90000,
+			'source'       => Collector::SOURCE_INTENSIVE,
+		];
+		$w = Report::workers( $rows, 0.01, 48 );
+		$this->assertSame( 1.0, $w['peak'] );
+		$this->assertSame( '2026-10-15 14', $w['peak_hour'] );
+		$this->assertSame( 0.02, $w['avg'], '42.000 s de PHP en 48 h' );
+		$this->assertSame( 'woodmart_load_html_dropdowns', $w['top'][0]['route_key'] );
+		$this->assertSame( 1, $w['top'][1]['slow'], 'más de 5 s' );
+		$this->assertSame( 0.0, Report::workers( [], 0.01, 48 )['avg'] );
+	}
+
+	public function test_platform_audit(): void {
+		Functions\when( 'number_format_i18n' )->alias( static fn( $n ): string => number_format( (float) $n ) );
+		$base   = [
+			'icons_svg'        => true,
+			'optimized_markup' => false,
+			'element_cache'    => true,
+			'css_print'        => 'external',
+			'google_fonts'     => true,
+			'local_fonts'      => false,
+			'font_display'     => 'swap',
+			'lazy_bg'          => true,
+			'fa4_shim'         => false,
+		];
+		$status = static fn( array $checks ): array => array_combine( array_column( $checks, 'id' ), array_column( $checks, 'status' ) );
+		$this->assertSame(
+			[
+				'el_icons'   => 'ok',
+				'el_cache'   => 'ok',
+				'el_css'     => 'ok',
+				'el_fa4'     => 'ok',
+				'el_display' => 'ok',
+				'el_lazy_bg' => 'ok',
+				'el_fonts'   => 'warn',
+				'el_markup'  => 'info',
+			],
+			$status( \ImaginaTurbo\Core\PlatformAudit::elementor( $base ) ),
+			'el sitio real: solo las fuentes de Google desde Google'
+		);
+		$this->assertSame( 'warn', $status( \ImaginaTurbo\Core\PlatformAudit::elementor( [ 'css_print' => 'internal', 'fa4_shim' => true ] + $base ) )['el_css'] );
+
+		$woo = [
+			'hpos'           => true,
+			'hpos_cache'     => false,
+			'lookup'         => false,
+			'lookup_running' => false,
+			'lookup_aborted' => false,
+		];
+		$this->assertSame( [ 'wc_hpos_cache' => 'warn', 'wc_lookup' => 'warn' ], $status( \ImaginaTurbo\Core\PlatformAudit::woocommerce( $woo, true ) ) );
+		$this->assertSame( 'info', $status( \ImaginaTurbo\Core\PlatformAudit::woocommerce( $woo, false ) )['wc_hpos_cache'], 'sin caché de objetos no rinde' );
+		$this->assertSame( [ 'wc_lookup' => 'warn' ], $status( \ImaginaTurbo\Core\PlatformAudit::woocommerce( [ 'hpos' => false, 'lookup_aborted' => true ] + $woo, true ) ) );
+
+		$this->assertSame( [ 'object_cache' => 'warn', 'indexes' => 'warn' ], $status( \ImaginaTurbo\Core\PlatformAudit::server( false, true, 250000, false ) ) );
+		$this->assertSame( [ 'object_cache' => 'ok' ], $status( \ImaginaTurbo\Core\PlatformAudit::server( true, true, 43000, false ) ), 'el sitio real: Redis activo, postmeta chico' );
 	}
 }

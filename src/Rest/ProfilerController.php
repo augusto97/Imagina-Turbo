@@ -13,6 +13,7 @@ namespace ImaginaTurbo\Rest;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
+use ImaginaTurbo\Core\PlatformAudit;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
@@ -49,6 +50,17 @@ final class ProfilerController extends Controller {
 		$this->route( '/profiler/routes', \WP_REST_Server::READABLE, [ $this, 'routes' ], $filters );
 		$this->route( '/profiler/per-visit', \WP_REST_Server::READABLE, [ $this, 'perVisit' ] );
 		$this->route(
+			'/profiler/workers',
+			\WP_REST_Server::READABLE,
+			fn(): \WP_REST_Response => $this->ok(
+				[
+					'hours'    => 48,
+					'rate'     => (float) $this->sampling()['rate'],
+					'children' => self::phpChildren(),
+				] + Report::workers( $this->container->get( SampleRepository::class )->recent( 48 ), (float) $this->sampling()['rate'], 48 )
+			)
+		);
+		$this->route(
 			'/profiler/settings',
 			'PUT',
 			[ $this, 'updateSettings' ],
@@ -74,6 +86,7 @@ final class ProfilerController extends Controller {
 		);
 		$this->route( '/diagnostics/audit', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->container->get( CacheabilityAudit::class )->last() ) );
 		$this->route( '/diagnostics/audit', \WP_REST_Server::CREATABLE, [ $this, 'runAudit' ] );
+		$this->route( '/diagnostics/platform', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( PlatformAudit::current() ) );
 	}
 
 	/**
@@ -247,6 +260,15 @@ final class ProfilerController extends Controller {
 	/**
 	 * Horas de muestras crudas para un periodo (las muestras viven 48 h).
 	 */
+	/**
+	 * Procesos PHP del servidor si se pueden saber: LSAPI_CHILDREN (LiteSpeed) o pm.max_children de
+	 * PHP-FPM no están al alcance de PHP en general; LiteSpeed sí expone su variable de entorno.
+	 */
+	private static function phpChildren(): ?int {
+		$value = getenv( 'LSAPI_CHILDREN' );
+		return is_string( $value ) && ctype_digit( $value ) && (int) $value > 0 ? (int) $value : null;
+	}
+
 	private static function sampleHours( string $period ): int {
 		return match ( $period ) {
 			'1h'    => 1,

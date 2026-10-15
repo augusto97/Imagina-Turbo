@@ -201,6 +201,29 @@ export interface PerVisitReport {
 	items: PerVisitItem[];
 }
 
+export interface PlatformCheck {
+	id: string;
+	label: string;
+	status: 'ok' | 'warn' | 'info';
+	advice: string;
+}
+
+export interface PlatformReport {
+	elementor: PlatformCheck[] | null;
+	woocommerce: PlatformCheck[] | null;
+	server: PlatformCheck[];
+}
+
+export interface WorkersReport {
+	hours: number;
+	rate: number;
+	children: number | null;
+	avg: number;
+	peak: number;
+	peak_hour: string;
+	top: { request_type: string; route_key: string; share_pct: number; ms_p95: number; slow: number }[];
+}
+
 export interface AuditResult {
 	label: string;
 	url: string;

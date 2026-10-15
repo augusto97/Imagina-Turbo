@@ -291,4 +291,66 @@ final class Report {
 		}
 		return __( 'Busca qué script de la página la pide (pestaña Red del navegador) y si el plugin tiene un ajuste para no hacerlo en cada visita. Si es necesaria, una regla de carga condicional reduce lo que carga cada petición.', 'imagina-turbo' );
 	}
+
+	/** Desde aquí una petición retiene un trabajador lo bastante como para hacer cola con poco tráfico. */
+	public const SLOW_MS = 5000;
+
+	/**
+	 * Trabajadores PHP ocupados (ley de Little: tiempo de PHP por segundo de reloj), estimados con el
+	 * muestreo aleatorio. Cuando la media o el pico se acercan al número de procesos PHP del servidor,
+	 * las peticiones hacen cola y aparecen los 502/503 aunque cada una sea "rápida".
+	 *
+	 * @param list<array<string, mixed>> $rows  Muestras (recent()).
+	 * @param float                      $rate  Tasa de muestreo aleatorio.
+	 * @param int                        $hours Horas que cubren las muestras.
+	 * @return array{avg: float, peak: float, peak_hour: string, top: list<array{request_type: string, route_key: string, share_pct: float, ms_p95: int, slow: int}>}
+	 */
+	public static function workers( array $rows, float $rate, int $hours ): array {
+		$empty = [
+			'avg'       => 0.0,
+			'peak'      => 0.0,
+			'peak_hour' => '',
+			'top'       => [],
+		];
+		if ( $rate <= 0 || $hours <= 0 ) {
+			return $empty;
+		}
+		$total  = 0;
+		$byHour = [];
+		$routes = [];
+		foreach ( $rows as $row ) {
+			if ( Collector::SOURCE_RANDOM !== (int) $row['source'] ) {
+				continue;
+			}
+			$ms               = (int) $row['ms'];
+			$total           += $ms;
+			$hour             = substr( (string) $row['created_at'], 0, 13 );
+			$byHour[ $hour ]  = ( $byHour[ $hour ] ?? 0 ) + $ms;
+			$key              = $row['request_type'] . ':' . $row['route_key'];
+			$routes[ $key ][] = $ms;
+		}
+		if ( 0 === $total ) {
+			return $empty;
+		}
+		arsort( $byHour );
+		$peakHour = (string) array_key_first( $byHour );
+		$top      = [];
+		foreach ( $routes as $key => $values ) {
+			[ $type, $route ] = explode( ':', (string) $key, 2 );
+			$top[]            = [
+				'request_type' => $type,
+				'route_key'    => $route,
+				'share_pct'    => round( 100 * array_sum( $values ) / $total, 1 ),
+				'ms_p95'       => Rollup::percentile( $values, 95 ),
+				'slow'         => count( array_filter( $values, static fn( int $ms ): bool => $ms >= self::SLOW_MS ) ),
+			];
+		}
+		usort( $top, static fn( array $a, array $b ): int => $b['share_pct'] <=> $a['share_pct'] );
+		return [
+			'avg'       => round( $total / $rate / ( $hours * 3600000 ), 2 ),
+			'peak'      => round( $byHour[ $peakHour ] / $rate / 3600000, 2 ),
+			'peak_hour' => $peakHour,
+			'top'       => array_slice( $top, 0, 8 ),
+		];
+	}
 }

@@ -12,7 +12,7 @@ import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
 import { useRouter } from '@/lib/router';
-import type { AuditReport, Period, PerVisitReport, PhaseCost, PluginCost, ProfilerSummary, RouteCost, Sampling } from '@/lib/types';
+import type { AuditReport, Period, PerVisitReport, PhaseCost, PlatformCheck, PlatformReport, PluginCost, ProfilerSummary, RouteCost, Sampling, WorkersReport } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -128,8 +128,10 @@ export function Diagnostics() {
 							</div>
 							<RoutesCard items={ routes.data?.items } source={ routes.data?.source } loading={ routes.isLoading } />
 							<PerVisitCard />
+							<WorkersCard />
 						</>
 					) }
+					<PlatformCard />
 					<div className="itb:grid itb:gap-4 itb:xl:grid-cols-2">
 						<AuditCard />
 						<PassiveCard data={ summary.data } />
@@ -514,6 +516,96 @@ function PerVisitCard() {
 						</table>
 					</div>
 				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+function WorkersCard() {
+	const report = useQuery( { queryKey: [ 'profiler', 'workers' ], queryFn: () => api<WorkersReport>( 'profiler/workers' ) } );
+	const data = report.data;
+	const near = data && data.children !== null && data.peak >= data.children * 0.7;
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Trabajadores PHP ocupados' ) }</CardTitle>
+				<CardDescription>
+					{ __( 'Cuántos procesos PHP están trabajando a la vez, en promedio y en la hora más cargada (48 h, estimado con el muestreo). Si se acerca al número de procesos del servidor, las peticiones hacen cola y aparecen errores 502/503 aunque cada una sea rápida.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ report.isLoading && <Skeleton className="itb:h-20" /> }
+				{ report.error && <Notice level="error">{ report.error.message }</Notice> }
+				{ data && data.top.length === 0 && <Notice level="info">{ __( 'Sin muestras aleatorias en las últimas 48 h.' ) }</Notice> }
+				{ data && data.top.length > 0 && (
+					<>
+						<div className="itb:flex itb:flex-wrap itb:gap-6">
+							<KeyValue label={ __( 'Promedio' ) }>{ number.format( data.avg ) }</KeyValue>
+							<KeyValue label={ __( 'Hora pico' ) }>{ `${ number.format( data.peak ) } (${ data.peak_hour }:00 UTC)` }</KeyValue>
+							{ data.children !== null && <KeyValue label={ __( 'Procesos del servidor' ) }>{ data.children }</KeyValue> }
+						</div>
+						{ near && <Notice level="warning">{ __( 'En la hora pico se usa más del 70 % de los procesos PHP: reduce lo que ocupa más tiempo abajo o pide más procesos al servidor.' ) }</Notice> }
+						<table className="itb:w-full itb:border-collapse itb:text-left">
+							<thead className="itb:text-xs itb:text-zinc-500">
+								<tr>
+									<th className="itb:py-1 itb:pr-3 itb:font-medium">{ __( 'Qué los ocupa' ) }</th>
+									<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Del tiempo' ) }</th>
+									<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">p95</th>
+									<th className="itb:py-1 itb:text-right itb:font-medium">{ __( 'Más de 5 s' ) }</th>
+								</tr>
+							</thead>
+							<tbody>
+								{ data.top.map( ( row ) => (
+									<tr key={ row.request_type + row.route_key } className="itb:border-t itb:border-zinc-100">
+										<td className="itb:py-1 itb:pr-3">
+											<Badge>{ TYPES[ row.request_type ] ?? row.request_type }</Badge> <span className="itb:font-mono itb:text-xs">{ row.route_key }</span>
+										</td>
+										<td className="itb:py-1 itb:pr-3 itb:text-right itb:tabular-nums">{ number.format( row.share_pct ) } %</td>
+										<td className="itb:py-1 itb:pr-3 itb:text-right itb:tabular-nums">{ ms( row.ms_p95 ) }</td>
+										<td className={ cn( 'itb:py-1 itb:text-right itb:tabular-nums', row.slow > 0 && 'itb:font-semibold itb:text-red-700' ) }>{ row.slow }</td>
+									</tr>
+								) ) }
+							</tbody>
+						</table>
+					</>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+function PlatformCard() {
+	const report = useQuery( { queryKey: [ 'platform' ], queryFn: () => api<PlatformReport>( 'diagnostics/platform' ) } );
+	const groups: [ string, PlatformCheck[] | null | undefined ][] = [
+		[ 'Elementor', report.data?.elementor ],
+		[ 'WooCommerce', report.data?.woocommerce ],
+		[ __( 'Servidor y base de datos' ), report.data?.server ],
+	];
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Ajustes de la plataforma' ) }</CardTitle>
+				<CardDescription>{ __( 'Ajustes de Elementor, WooCommerce y el servidor que cambian la velocidad. Solo recomendaciones: Imagina Turbo no los cambia.' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-4 itb:text-[13px]">
+				{ report.isLoading && <Skeleton className="itb:h-24" /> }
+				{ report.error && <Notice level="error">{ report.error.message }</Notice> }
+				{ groups
+					.filter( ( [ , checks ] ) => checks && checks.length > 0 )
+					.map( ( [ title, checks ] ) => (
+						<div key={ title } className="itb:flex itb:flex-col itb:gap-2">
+							<div className="itb:text-xs itb:font-medium itb:uppercase itb:text-zinc-500">{ title }</div>
+							{ ( checks ?? [] ).map( ( c ) => (
+								<div key={ c.id } className="itb:flex itb:items-start itb:gap-2">
+									<Badge tone={ c.status === 'ok' ? 'green' : c.status === 'warn' ? 'amber' : 'neutral' }>{ c.status === 'ok' ? __( 'Bien' ) : c.status === 'warn' ? __( 'Revisar' ) : __( 'Info' ) }</Badge>
+									<span>
+										<span className="itb:font-medium">{ c.label }</span>
+										{ c.advice && <span className="itb:block itb:text-xs itb:text-zinc-500">{ c.advice }</span> }
+									</span>
+								</div>
+							) ) }
+						</div>
+					) ) }
 			</CardContent>
 		</Card>
 	);

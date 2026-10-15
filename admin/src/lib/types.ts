@@ -365,7 +365,7 @@ export interface WooInspect {
 
 export interface ShieldStatus {
 	enabled: boolean;
-	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
+	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
 	required: { xmlrpc: boolean; rest_users: boolean };
 	cron: { disabled: boolean; command: string; wp_cli: string };
 }
@@ -553,6 +553,7 @@ export interface NavigationStatus {
 	core_api: boolean;
 	lazy_presets: LazyRenderRule[];
 	theme: string;
+	prefetch_probe: '' | 'refused' | 'ok' | 'direct';
 	permalink: boolean;
 	hub_rum: boolean;
 	report: RumReportData;

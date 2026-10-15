@@ -328,8 +328,18 @@ final class CacheabilityAudit {
 			$issues[] = __( 'Cache-Control: private impide la caché en el edge.', 'imagina-turbo' );
 		}
 
+		// Speed Brain de Cloudflare (cabecera Speculation-Rules a /cdn-cgi/speculation): prefetch de todos
+		// los enlaces al pulsar, servido solo desde la caché del edge (en un fallo responde 503 y no llega
+		// al origen, según la documentación de Cloudflare).
+		if ( str_contains( self::headerValue( $headers['speculation-rules'] ?? '' ), '/cdn-cgi/speculation' ) ) {
+			$edge    = strtoupper( self::headerValue( $headers['cf-cache-status'] ?? '' ) );
+			$notes[] = in_array( $edge, [ 'HIT', 'REVALIDATED', 'UPDATING', 'STALE' ], true )
+				? __( 'Speed Brain de Cloudflare está activo y la página está en el edge: Cloudflare la precarga al pulsar un enlace. Imagina Turbo la precarga antes, al pasar el cursor; el navegador no la descarga dos veces.', 'imagina-turbo' )
+				: __( 'Speed Brain de Cloudflare está activo, pero esta página no se guarda en el edge: Speed Brain solo precarga desde la caché de Cloudflare y aquí sus intentos terminan en 503. La navegación instantánea la hace Imagina Turbo; Speed Brain empezará a servir cuando las reglas de caché de Cloudflare guarden el HTML.', 'imagina-turbo' );
+		}
+
 		$keep = [];
-		foreach ( [ 'cache-control', 'x-litespeed-cache', 'x-litespeed-cache-control', 'cf-cache-status', 'x-cache', 'age', 'vary' ] as $name ) {
+		foreach ( [ 'cache-control', 'x-litespeed-cache', 'x-litespeed-cache-control', 'cf-cache-status', 'x-cache', 'age', 'vary', 'speculation-rules' ] as $name ) {
 			if ( isset( $headers[ $name ] ) ) {
 				$keep[ $name ] = substr( self::headerValue( $headers[ $name ] ), 0, 200 );
 			}

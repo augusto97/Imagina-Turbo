@@ -59,7 +59,11 @@ final class EnvironmentChecks {
 			];
 		}
 
-		return self::evaluate( $opcache, $ewww, $lscache, $cloudflare );
+		$alerts = self::evaluate( $opcache, $ewww, $lscache, $cloudflare );
+		if ( 'refused' === \ImaginaTurbo\Modules\Speculation\PrefetchProbe::cached() ) {
+			$alerts[] = self::prefetchRefused();
+		}
+		return $alerts;
 	}
 
 	/**
@@ -125,6 +129,19 @@ final class EnvironmentChecks {
 		}
 
 		return $alerts;
+	}
+
+	/**
+	 * Cloudflare (Speed Brain) rechaza las precargas de páginas que no están en su caché.
+	 *
+	 * @return array{level: string, code: string, message: string}
+	 */
+	public static function prefetchRefused(): array {
+		return [
+			'level'   => 'warning',
+			'code'    => 'prefetch_refused',
+			'message' => __( 'Cloudflare rechaza las precargas de páginas (Speed Brain activo y el HTML no se guarda en el edge): la navegación instantánea de Imagina Turbo no tiene efecto. Desactiva Speed Brain en Cloudflare → Velocidad → Optimización → Contenido, o activa la caché de HTML en Cloudflare, o usa el modo prerender en Navegación.', 'imagina-turbo' ),
+		];
 	}
 
 	/**

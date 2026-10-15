@@ -41,6 +41,11 @@ export function Navigation() {
 			{ data && (
 				<div className="itb:flex itb:flex-col itb:gap-4">
 					{ ! data.permalink && <Notice level="warning">{ __( 'Sin enlaces permanentes, WordPress no especula ninguna navegación.' ) }</Notice> }
+					{ data.prefetch_probe === 'refused' && data.settings.spec_mode === 'prefetch' && (
+						<Notice level="warning">
+							{ __( 'Cloudflare rechaza las precargas (responde 503 a las peticiones con Sec-Purpose: prefetch): Speed Brain está activo y el HTML no se guarda en el edge. Así ninguna navegación sale precargada. Desactiva Speed Brain en Cloudflare → Velocidad → Optimización → Contenido, activa la caché de HTML en Cloudflare, o cambia el modo a prerender (Cloudflare sí lo deja pasar).' ) }
+						</Notice>
+					) }
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 						<SettingsCard status={ data } />
 						<SummaryCard report={ data.report } status={ data } />

@@ -16,6 +16,7 @@ use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule;
 use ImaginaTurbo\Modules\Rum\RumService;
+use ImaginaTurbo\Modules\Speculation\PrefetchProbe;
 use ImaginaTurbo\Repository\SampleRepository;
 
 /**
@@ -92,16 +93,17 @@ final class NavigationController extends Controller {
 			$values[ $key ] = (bool) $settings->get( $key, 'view_transitions' !== $key );
 		}
 		return [
-			'modules'      => $modules,
-			'settings'     => $values,
-			'core_api'     => function_exists( 'wp_get_speculation_rules' ),
-			'lazy_presets' => FrontendHintsModule::lazyRenderPresets( (string) get_template() ),
-			'theme'        => (string) get_template(),
-			'permalink'    => '' !== (string) get_option( 'permalink_structure' ),
-			'hub_rum'      => '' !== (string) $settings->get( 'hub_url', '' ),
-			'report'       => $this->container->get( RumService::class )->report( 7 ),
-			'insights'     => RumService::stored(),
-			'no_store'     => $this->noStore(),
+			'modules'        => $modules,
+			'settings'       => $values,
+			'core_api'       => function_exists( 'wp_get_speculation_rules' ),
+			'lazy_presets'   => FrontendHintsModule::lazyRenderPresets( (string) get_template() ),
+			'theme'          => (string) get_template(),
+			'prefetch_probe' => PrefetchProbe::run(),
+			'permalink'      => '' !== (string) get_option( 'permalink_structure' ),
+			'hub_rum'        => '' !== (string) $settings->get( 'hub_url', '' ),
+			'report'         => $this->container->get( RumService::class )->report( 7 ),
+			'insights'       => RumService::stored(),
+			'no_store'       => $this->noStore(),
 		];
 	}
 

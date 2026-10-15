@@ -129,12 +129,12 @@ final class ProfilerController extends Controller {
 	 * Peticiones dinámicas de los visitantes (48 h de muestras) con su frecuencia y costo por día.
 	 */
 	public function perVisit(): \WP_REST_Response {
-		$hours    = 48;
-		$rate     = (float) $this->sampling()['rate'];
-		$rows     = $this->container->get( SampleRepository::class )->recent( $hours );
-		$rumRate  = (float) $this->container->get( Settings::class )->get( 'rum_rate', 0.05 );
-		$views    = null;
-		$beacons  = 0;
+		$hours   = 48;
+		$rate    = (float) $this->sampling()['rate'];
+		$rows    = $this->container->get( SampleRepository::class )->recent( $hours );
+		$rumRate = (float) $this->container->get( Settings::class )->get( 'rum_rate', 0.05 );
+		$views   = null;
+		$beacons = 0;
 		if ( $rumRate > 0 ) {
 			foreach ( $this->container->get( RumRepository::class )->histogram( 2 ) as $row ) {
 				// Navegaciones hacia adelante (normal, prerender, prefetch): una por página vista.

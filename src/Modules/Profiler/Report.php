@@ -242,10 +242,10 @@ final class Report {
 			if ( Collector::SOURCE_RANDOM !== (int) $row['source'] || 1 !== (int) ( $row['anon'] ?? 0 ) || ! in_array( $row['request_type'], self::DYNAMIC, true ) ) {
 				continue;
 			}
-			$key                       = $row['request_type'] . ':' . $row['route_key'];
-			$groups[ $key ]['type']    = (string) $row['request_type'];
-			$groups[ $key ]['route']   = (string) $row['route_key'];
-			$groups[ $key ]['ms'][]    = (int) $row['ms'];
+			$key                     = $row['request_type'] . ':' . $row['route_key'];
+			$groups[ $key ]['type']  = (string) $row['request_type'];
+			$groups[ $key ]['route'] = (string) $row['route_key'];
+			$groups[ $key ]['ms'][]  = (int) $row['ms'];
 		}
 		$out = [];
 		foreach ( $groups as $key => $g ) {

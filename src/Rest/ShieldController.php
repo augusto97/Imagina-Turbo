@@ -22,7 +22,7 @@ use ImaginaTurbo\Support\CloudflareAccess;
  */
 final class ShieldController extends Controller {
 
-	private const BOOLS = [ 'static', 'author', 'xmlrpc', 'rest_users', 'heartbeat' ];
+	private const BOOLS = [ 'static', 'author', 'xmlrpc', 'rest_users', 'heartbeat', 'prefetch' ];
 
 	public function registerRoutes(): void {
 		$this->route( '/shield/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );

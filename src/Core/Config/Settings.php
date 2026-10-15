@@ -58,6 +58,7 @@ final class Settings {
 			'shield_xmlrpc'            => true,
 			'shield_rest_users'        => true,
 			'shield_heartbeat'         => true,
+			'shield_prefetch'          => true,
 			'shield_heartbeat_admin'   => 60,
 			'shield_heartbeat_editor'  => 15,
 			'shield_filter_limit'      => 3,
@@ -276,7 +277,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades', 'fleet_remote' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades', 'fleet_remote' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}

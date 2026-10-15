@@ -180,6 +180,27 @@ export interface RouteCost {
 	queries_avg: number;
 }
 
+export interface PerVisitItem {
+	request_type: string;
+	route_key: string;
+	samples: number;
+	per_day: number;
+	ms_avg: number;
+	cpu_s_day: number;
+	per_view: number | null;
+	per_visit: boolean;
+	rule: string;
+	hint: string;
+}
+
+export interface PerVisitReport {
+	hours: number;
+	rate: number;
+	views_per_day: number | null;
+	rum_beacons: number;
+	items: PerVisitItem[];
+}
+
 export interface AuditResult {
 	label: string;
 	url: string;

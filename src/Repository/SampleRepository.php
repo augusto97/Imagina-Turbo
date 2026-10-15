@@ -50,7 +50,7 @@ final class SampleRepository {
 	public function recent( int $hours, string $requestType = '', int $limit = self::REPORT_LIMIT ): array {
 		$since = gmdate( 'Y-m-d H:i:s', time() - max( 1, $hours ) * HOUR_IN_SECONDS );
 		$sql   = $this->db->prepare(
-			"SELECT created_at, request_type, route_key, status, ms, mem_kb, queries, cacheable, via_cf, source, overhead_us, set_cookies, cache_control, phases, plugins_cost FROM %i WHERE created_at >= %s AND source < 2 AND (%s = '' OR request_type = %s) ORDER BY id DESC LIMIT %d",
+			"SELECT created_at, request_type, route_key, status, ms, mem_kb, queries, cacheable, via_cf, source, anon, overhead_us, set_cookies, cache_control, phases, plugins_cost FROM %i WHERE created_at >= %s AND source < 2 AND (%s = '' OR request_type = %s) ORDER BY id DESC LIMIT %d",
 			$this->table(),
 			$since,
 			$requestType,

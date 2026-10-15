@@ -30,7 +30,7 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 8;
+	public const DB_VERSION        = 9;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
@@ -162,6 +162,7 @@ final class Installer {
   cacheable tinyint(1) NOT NULL DEFAULT 0,
   via_cf tinyint(1) NOT NULL DEFAULT 0,
   source tinyint(3) unsigned NOT NULL DEFAULT 0,
+  anon tinyint(1) NOT NULL DEFAULT 0,
   overhead_us int(10) unsigned NOT NULL DEFAULT 0,
   set_cookies varchar(255) NULL,
   cache_control varchar(100) NULL,

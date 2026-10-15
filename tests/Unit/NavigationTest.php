@@ -191,7 +191,91 @@ final class NavigationTest extends TestCase {
 	}
 
 	public function test_lcp_image_prioritized(): void {
-		$this->assertSame( '<img fetchpriority="high" src="a.jpg" class="wp-image-4">', FrontendHintsModule::prioritize( '<img src="a.jpg" loading="lazy" class="wp-image-4" fetchpriority="low">' ) );
+		$this->assertSame( '<img fetchpriority="high" data-skip-lazy="1" data-no-lazy="1" data-itb-lcp="1" src="a.jpg" class="wp-image-4">', FrontendHintsModule::prioritize( '<img src="a.jpg" loading="lazy" class="wp-image-4" fetchpriority="low">' ) );
+	}
+
+	/**
+	 * Biblioteca de medios falsa con las copias .webp de EWWW ("foto.png.webp").
+	 */
+	private function uploads(): string {
+		$base = $this->tmp . '/uploads';
+		mkdir( $base . '/2023/06', 0755, true );
+		foreach ( [ 'a-600x600.png', 'a-600x600.png.webp', 'a-300x300.png', 'b.jpg', 'b.webp', 'c.png' ] as $f ) {
+			touch( $base . '/2023/06/' . $f );
+		}
+		Functions\when( 'wp_get_upload_dir' )->justReturn(
+			[
+				'basedir' => $base,
+				'baseurl' => 'https://tienda.test/wp-content/uploads',
+			]
+		);
+		FrontendHintsModule::reset();
+		return $base;
+	}
+
+	public function test_main_image_points_to_existing_webp(): void {
+		$this->uploads();
+		$u = 'https://tienda.test/wp-content/uploads/2023/06/';
+		$this->assertSame( $u . 'a-600x600.png.webp', FrontendHintsModule::webpUrl( $u . 'a-600x600.png' ), 'EWWW, modo "agregar"' );
+		$this->assertSame( $u . 'b.webp', FrontendHintsModule::webpUrl( $u . 'b.jpg' ), 'modo "reemplazar"' );
+		$this->assertSame( 'http://tienda.test/wp-content/uploads/2023/06/a-600x600.png.webp', FrontendHintsModule::webpUrl( 'http://tienda.test/wp-content/uploads/2023/06/a-600x600.png?v=2' ), 'http o https, sin la consulta' );
+		$this->assertNull( FrontendHintsModule::webpUrl( $u . 'c.png' ), 'sin copia: se queda el original' );
+		$this->assertNull( FrontendHintsModule::webpUrl( 'https://cdn.otro.test/a-600x600.png' ) );
+		$this->assertNull( FrontendHintsModule::webpUrl( $u . '../../a-600x600.png' ) );
+		$this->assertSame( $u . 'a-600x600.png.webp 600w, ' . $u . 'a-300x300.png 300w', FrontendHintsModule::webpSrcset( $u . 'a-600x600.png 600w, ' . $u . 'a-300x300.png 300w' ) );
+
+		$attr = FrontendHintsModule::eager(
+			[
+				'src'     => $u . 'a-600x600.png',
+				'loading' => 'lazy',
+				'class'   => 'wp-post-image',
+			],
+			true
+		);
+		$this->assertSame( 'eager', $attr['loading'] );
+		$this->assertSame( 'high', $attr['fetchpriority'] );
+		$this->assertSame( '1', $attr['data-skip-lazy'], 'EWWW y LiteSpeed Cache' );
+		$this->assertSame( '1', $attr['data-no-lazy'], 'WP Rocket' );
+		$this->assertSame( $u . 'a-600x600.png.webp', $attr['src'] );
+		$this->assertSame( [ 'x', FrontendHintsModule::MARK ], FrontendHintsModule::ewwwExclusions( [ 'x' ] ), 'fuera de la reescritura de WebP por JS' );
+	}
+
+	public function test_featured_and_listing_images_skip_lazy(): void {
+		$this->uploads();
+		if ( ! class_exists( 'WP_Post' ) ) {
+			eval( 'class WP_Post { public $ID = 0; }' ); // phpcs:ignore Squiz.PHP.Eval.Discouraged -- clase mínima para la prueba.
+		}
+		$post     = static function ( int $id ): object {
+			$p     = new \WP_Post();
+			$p->ID = $id;
+			return $p;
+		};
+		$featured = new \ReflectionProperty( FrontendHintsModule::class, 'lcpId' );
+		$featured->setValue( null, 7 );
+		$only = new \ReflectionProperty( FrontendHintsModule::class, 'featuredOnly' );
+		$only->setValue( null, true );
+
+		$menu = FrontendHintsModule::attachmentAttributes( [ 'class' => 'attachment-large' ], $post( 7 ), 'large' );
+		$this->assertArrayNotHasKey( 'data-skip-lazy', $menu, 'la misma foto en el megamenú no es la principal' );
+		$main = FrontendHintsModule::attachmentAttributes( [ 'class' => 'wp-post-image' ], $post( 7 ), 'woocommerce_single' );
+		$this->assertSame( 'high', $main['fetchpriority'] );
+		$thumb = FrontendHintsModule::attachmentAttributes( [ 'class' => 'wp-post-image' ], $post( 7 ), 'woocommerce_gallery_thumbnail' );
+		$this->assertArrayNotHasKey( 'data-skip-lazy', $thumb, 'una sola vez' );
+
+		FrontendHintsModule::reset();
+		$this->assertTrue( FrontendHintsModule::isListing( 'tax:product_cat' ) );
+		$this->assertTrue( FrontendHintsModule::isListing( 'archivo:product' ) );
+		$this->assertFalse( FrontendHintsModule::isListing( 'portada' ) );
+		$this->assertArrayNotHasKey( 'data-skip-lazy', FrontendHintsModule::attachmentAttributes( [], $post( 1 ), 'woocommerce_thumbnail' ), 'antes del listado (menús, cabecera)' );
+		$marked = [];
+		foreach ( [ 1, 2, 3 ] as $product ) {
+			FrontendHintsModule::nextProduct();
+			foreach ( [ 'main', 'hover' ] as $which ) {
+				$a        = FrontendHintsModule::attachmentAttributes( [], $post( $product * 10 ), 'woocommerce_thumbnail' );
+				$marked[] = $product . $which . ':' . ( isset( $a['data-skip-lazy'] ) ? ( $a['fetchpriority'] ?? 'eager' ) : '-' );
+			}
+		}
+		$this->assertSame( [ '1main:high', '1hover:-', '2main:eager', '2hover:-', '3main:-', '3hover:-' ], $marked );
 	}
 
 	public function test_facades(): void {

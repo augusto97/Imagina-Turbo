@@ -7,6 +7,17 @@
  *   siempre la misma imagen, además <link rel="preload"> con la URL que midió el RUM en móvil, limitado
  *   a pantallas móviles (en escritorio el navegador elegiría otro tamaño y la precarga se desperdiciaría).
  *   "featured" = la imagen destacada de cada página (fichas de producto, entradas).
+ * - 0.11.0, la imagen principal nunca espera a JavaScript. En un sitio real (EWWW con lazy load y
+ *   "Reescritura de WebP por JS", WoodMart) la imagen LCP de producto y de categoría salía con
+ *   src="data:..." y la cargaba un script: 8,7 y 11 s de LCP en móvil con 4G lento. EWWW ignora
+ *   fetchpriority="high" cuando la imagen tiene srcset, y su reescritura de WebP por JS cambia el src
+ *   por un marcador aunque la imagen no sea perezosa. Ahora la imagen principal lleva data-skip-lazy y
+ *   data-no-lazy (los respetan EWWW, LiteSpeed Cache y WP Rocket), queda fuera de la reescritura por JS
+ *   (filtro ewwwio_js_webp_exclusions) y apunta directamente a la copia .webp que ya existe en disco.
+ *   Sin datos del RUM: la imagen principal de la ficha de producto (clase wp-post-image) y la primera
+ *   imagen de los primeros productos de un listado (woocommerce_before_shop_loop_item, tamaño
+ *   woocommerce_thumbnail). No vale "la primera imagen de la página": el megamenú de WoodMart imprime
+ *   decenas de imágenes de producto antes del contenido.
  * - Fachadas de YouTube y Vimeo (embed_oembed_html): miniatura y botón; el iframe se crea al tocar.
  *   No se tocan los iframes con enablejsapi (otro script los controla).
  * - El delay de JS y de fuentes de terceros es del plugin de caché.
@@ -36,12 +47,30 @@ final class FrontendHintsModule implements ModuleInterface {
 
 	private static bool $facadeUsed = false;
 
+	/** "featured": solo la imagen principal (wp-post-image), no sus repeticiones en menús o miniaturas. */
+	private static bool $featuredOnly = false;
+
+	private static bool $lcpDone = false;
+
+	/** Productos del listado cuyo primer imagen no espera al lazy load (el primero, además, con prioridad alta). */
+	public const LOOP_EAGER = 2;
+
+	private static int $loopIndex = 0;
+
+	private static int $loopMarked = 0;
+
+	/** @var array<string, string|null> URL => URL .webp (o null), por request. */
+	private static array $webp = [];
+
+	/** Atributo que marca las imágenes priorizadas (y las saca de la reescritura de WebP por JS de EWWW). */
+	public const MARK = 'data-itb-lcp';
+
 	public function register( Container $container, RequestContext $request ): void {
 		if ( RequestType::FrontendHtml !== $request->type ) {
 			return;
 		}
 		$s = self::settings();
-		if ( $s['lcp'] && [] !== $s['images'] ) {
+		if ( $s['lcp'] ) {
 			add_action( 'wp', [ self::class, 'prepare' ] );
 		}
 		if ( $s['facades'] ) {
@@ -64,44 +93,163 @@ final class FrontendHintsModule implements ModuleInterface {
 	}
 
 	/**
-	 * Decide la imagen LCP de esta página cuando ya se conoce la plantilla.
+	 * Decide la imagen LCP de esta página cuando ya se conoce la plantilla: la que midió el RUM o, sin
+	 * datos, la imagen principal del producto y los primeros productos de un listado.
 	 */
 	public static function prepare(): void {
-		$entry = self::settings()['images'][ RouteKey::template() ] ?? null;
-		if ( ! is_array( $entry ) ) {
-			return;
+		$template = RouteKey::template();
+		$entry    = self::settings()['images'][ $template ] ?? null;
+		if ( ! is_array( $entry ) && 'single:product' === $template ) {
+			$entry = [ 'kind' => 'featured' ];
 		}
 		$id = 0;
-		if ( 'featured' === ( $entry['kind'] ?? '' ) && is_singular() ) {
-			$thumb = get_post_thumbnail_id( get_queried_object_id() );
-			$id    = is_int( $thumb ) ? $thumb : 0;
-		} elseif ( 'image' === ( $entry['kind'] ?? '' ) ) {
+		if ( is_array( $entry ) && 'featured' === ( $entry['kind'] ?? '' ) && is_singular() ) {
+			$thumb              = get_post_thumbnail_id( get_queried_object_id() );
+			$id                 = is_int( $thumb ) ? $thumb : 0;
+			self::$featuredOnly = true;
+		} elseif ( is_array( $entry ) && 'image' === ( $entry['kind'] ?? '' ) ) {
 			$id           = (int) ( $entry['id'] ?? 0 );
 			self::$lcpSrc = is_string( $entry['src'] ?? null ) ? $entry['src'] : '';
 		}
-		if ( $id <= 0 ) {
+		$loop = ! is_array( $entry ) && self::isListing( $template );
+		if ( $id <= 0 && ! $loop ) {
 			return;
 		}
 		self::$lcpId = $id;
-		add_filter( 'wp_get_attachment_image_attributes', [ self::class, 'attachmentAttributes' ], 20, 2 );
-		add_filter( 'wp_content_img_tag', [ self::class, 'contentImage' ], 20, 3 );
+		add_filter( 'wp_get_attachment_image_attributes', [ self::class, 'attachmentAttributes' ], 20, 3 );
+		add_filter( 'ewwwio_js_webp_exclusions', [ self::class, 'ewwwExclusions' ] ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro de EWWW Image Optimizer.
+		if ( $id > 0 ) {
+			add_filter( 'wp_content_img_tag', [ self::class, 'contentImage' ], 20, 3 );
+		}
+		if ( $loop ) {
+			add_action( 'woocommerce_before_shop_loop_item', [ self::class, 'nextProduct' ], 1 );
+		}
 		if ( '' !== self::$lcpSrc ) {
 			add_action( 'wp_head', [ self::class, 'printPreload' ], 2 );
 		}
 	}
 
 	/**
+	 * Listados de productos (tienda, categorías, etiquetas, atributos, búsqueda).
+	 */
+	public static function isListing( string $template ): bool {
+		return 'archivo:product' === $template || 'busqueda' === $template || str_starts_with( $template, 'tax:product_' ) || str_starts_with( $template, 'tax:pa_' );
+	}
+
+	public static function nextProduct(): void {
+		++self::$loopIndex;
+	}
+
+	/**
 	 * @param mixed $attr       Atributos.
 	 * @param mixed $attachment Adjunto.
+	 * @param mixed $size       Tamaño pedido.
 	 * @return mixed
 	 */
-	public static function attachmentAttributes( mixed $attr, mixed $attachment ): mixed {
-		if ( is_array( $attr ) && $attachment instanceof \WP_Post && $attachment->ID === self::$lcpId ) {
-			$attr['fetchpriority'] = 'high';
-			$attr['loading']       = 'eager';
-			unset( $attr['decoding'] );
+	public static function attachmentAttributes( mixed $attr, mixed $attachment, mixed $size = null ): mixed {
+		if ( ! is_array( $attr ) || ! $attachment instanceof \WP_Post ) {
+			return $attr;
+		}
+		if ( self::$lcpId > 0 && $attachment->ID === self::$lcpId && ! self::$lcpDone ) {
+			if ( self::$featuredOnly && ! str_contains( (string) ( $attr['class'] ?? '' ), 'wp-post-image' ) ) {
+				return $attr;
+			}
+			// La destacada se prioriza una vez; una imagen fija del RUM (cabecera, portada), donde aparezca.
+			self::$lcpDone = self::$featuredOnly;
+			return self::eager( $attr, true );
+		}
+		// La primera imagen de cada uno de los primeros productos del listado (no la de "hover").
+		if ( self::$loopIndex > self::$loopMarked && self::$loopIndex <= self::LOOP_EAGER && 'woocommerce_thumbnail' === $size ) {
+			self::$loopMarked = self::$loopIndex;
+			return self::eager( $attr, 1 === self::$loopIndex );
 		}
 		return $attr;
+	}
+
+	/**
+	 * Atributos de una imagen que no debe esperar a JavaScript.
+	 *
+	 * @param array<string, mixed> $attr Atributos.
+	 * @return array<string, mixed>
+	 */
+	public static function eager( array $attr, bool $high ): array {
+		$attr['loading'] = 'eager';
+		if ( $high ) {
+			$attr['fetchpriority'] = 'high';
+		}
+		$attr['data-skip-lazy'] = '1';
+		$attr['data-no-lazy']   = '1';
+		$attr[ self::MARK ]     = '1';
+		if ( is_string( $attr['src'] ?? null ) ) {
+			$attr['src'] = self::webpUrl( $attr['src'] ) ?? $attr['src'];
+		}
+		if ( is_string( $attr['srcset'] ?? null ) ) {
+			$attr['srcset'] = self::webpSrcset( $attr['srcset'] );
+		}
+		return $attr;
+	}
+
+	/**
+	 * Cada candidato del srcset con su copia .webp, si existe.
+	 */
+	public static function webpSrcset( string $srcset ): string {
+		$out = [];
+		foreach ( explode( ',', $srcset ) as $candidate ) {
+			$parts = preg_split( '/\s+/', trim( $candidate ), 2 ) ?: [];
+			$url   = (string) ( $parts[0] ?? '' );
+			if ( '' === $url ) {
+				continue;
+			}
+			$out[] = trim( ( self::webpUrl( $url ) ?? $url ) . ' ' . ( $parts[1] ?? '' ) );
+		}
+		return implode( ', ', $out );
+	}
+
+	/**
+	 * URL de la copia WebP de una imagen de la biblioteca si existe en disco: "foto.png.webp" (EWWW,
+	 * modo por defecto) o "foto.webp". Null si no hay copia o la URL no es de uploads.
+	 */
+	public static function webpUrl( string $url ): ?string {
+		if ( array_key_exists( $url, self::$webp ) ) {
+			return self::$webp[ $url ];
+		}
+		$found = null;
+		$dir   = function_exists( 'wp_get_upload_dir' ) ? wp_get_upload_dir() : [];
+		$base  = is_string( $dir['baseurl'] ?? null ) ? $dir['baseurl'] : '';
+		$path  = (string) strtok( $url, '?#' );
+		if ( '' !== $base && 1 === preg_match( '/\.(jpe?g|png|gif)$/i', $path ) ) {
+			// Mismo archivo con http o https.
+			$relative = null;
+			foreach ( [ $base, (string) preg_replace( '#^https?:#', 'https:', $base ), (string) preg_replace( '#^https?:#', 'http:', $base ) ] as $prefix ) {
+				if ( str_starts_with( $path, $prefix . '/' ) ) {
+					$relative = substr( $path, strlen( $prefix ) );
+					break;
+				}
+			}
+			if ( null !== $relative && ! str_contains( $relative, '..' ) ) {
+				$file = rawurldecode( (string) $dir['basedir'] . $relative );
+				if ( is_file( $file . '.webp' ) ) {
+					$found = $path . '.webp';
+				} elseif ( is_file( (string) preg_replace( '/\.\w+$/', '.webp', $file ) ) ) {
+					$found = (string) preg_replace( '/\.\w+$/', '.webp', $path );
+				}
+			}
+		}
+		self::$webp[ $url ] = $found;
+		return $found;
+	}
+
+	/**
+	 * EWWW: las imágenes priorizadas no pasan por la reescritura de WebP por JS (ya apuntan al .webp).
+	 *
+	 * @param mixed $exclusions Subcadenas excluidas.
+	 * @return mixed
+	 */
+	public static function ewwwExclusions( mixed $exclusions ): mixed {
+		if ( is_array( $exclusions ) ) {
+			$exclusions[] = self::MARK;
+		}
+		return $exclusions;
 	}
 
 	/**
@@ -112,19 +260,35 @@ final class FrontendHintsModule implements ModuleInterface {
 	 */
 	public static function contentImage( mixed $html, mixed $context, mixed $attachment ): mixed {
 		unset( $context );
-		if ( ! is_string( $html ) || (int) $attachment !== self::$lcpId ) {
+		if ( ! is_string( $html ) || (int) $attachment !== self::$lcpId || self::$lcpDone ) {
 			return $html;
 		}
 		return self::prioritize( $html );
 	}
 
 	/**
-	 * Quita loading="lazy" y agrega fetchpriority="high" a una etiqueta img.
+	 * Quita loading="lazy", agrega fetchpriority="high" y la saca de los lazy load por JS.
 	 */
 	public static function prioritize( string $img ): string {
 		$img = (string) preg_replace( '/\sloading=(["\'])lazy\1/i', '', $img );
 		$img = (string) preg_replace( '/\sfetchpriority=(["\'])[a-z]+\1/i', '', $img );
+		if ( ! str_contains( $img, self::MARK ) ) {
+			$img = (string) preg_replace( '/^<img\b/i', '<img data-skip-lazy="1" data-no-lazy="1" ' . self::MARK . '="1"', $img, 1 );
+		}
 		return (string) preg_replace( '/^<img\b/i', '<img fetchpriority="high"', $img, 1 );
+	}
+
+	/**
+	 * Vacía el estado (pruebas).
+	 */
+	public static function reset(): void {
+		self::$lcpId        = 0;
+		self::$lcpSrc       = '';
+		self::$featuredOnly = false;
+		self::$lcpDone      = false;
+		self::$loopIndex    = 0;
+		self::$loopMarked   = 0;
+		self::$webp         = [];
 	}
 
 	public static function printPreload(): void {

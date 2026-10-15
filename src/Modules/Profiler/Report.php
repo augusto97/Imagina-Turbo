@@ -210,4 +210,85 @@ final class Report {
 			'eligible'      => $eligible,
 		];
 	}
+
+	/** Tipos de request que dispara una página ya cargada (AJAX y APIs). */
+	public const DYNAMIC = [ 'AdminAjax', 'WcAjax', 'Rest', 'StoreApi' ];
+
+	/** Muestras mínimas de un endpoint para estimar su frecuencia. */
+	public const PER_VISIT_MIN_SAMPLES = 3;
+
+	/** Desde esta proporción (peticiones por página vista) se considera "en cada visita". */
+	public const PER_VISIT_SHARE = 0.3;
+
+	/**
+	 * Peticiones que hacen los visitantes después de cargar la página (AJAX, REST, Store API), con su
+	 * frecuencia y su costo estimados a partir del muestreo aleatorio. Una página en caché no llega a PHP,
+	 * pero estas peticiones sí: son las que mantienen ocupado el servidor aunque todo esté en caché (el
+	 * menú por AJAX de WoodMart costaba 0,75–1,6 s en cada visita).
+	 *
+	 * @param list<array<string, mixed>>               $rows        Muestras (recent()).
+	 * @param float                                    $rate        Tasa de muestreo aleatorio.
+	 * @param int                                      $hours       Horas que cubren las muestras.
+	 * @param float|null                               $viewsPerDay Páginas vistas por día (RUM), o null.
+	 * @param array<string, string>                    $rules       Clave "Tipo:endpoint" => estado de su regla de carga condicional.
+	 * @return list<array{request_type: string, route_key: string, samples: int, per_day: int, ms_avg: int, cpu_s_day: int, per_view: float|null, per_visit: bool, rule: string, hint: string}>
+	 */
+	public static function perVisit( array $rows, float $rate, int $hours, ?float $viewsPerDay, array $rules = [] ): array {
+		if ( $rate <= 0 || $hours <= 0 ) {
+			return [];
+		}
+		$groups = [];
+		foreach ( $rows as $row ) {
+			if ( Collector::SOURCE_RANDOM !== (int) $row['source'] || 1 !== (int) ( $row['anon'] ?? 0 ) || ! in_array( $row['request_type'], self::DYNAMIC, true ) ) {
+				continue;
+			}
+			$key                       = $row['request_type'] . ':' . $row['route_key'];
+			$groups[ $key ]['type']    = (string) $row['request_type'];
+			$groups[ $key ]['route']   = (string) $row['route_key'];
+			$groups[ $key ]['ms'][]    = (int) $row['ms'];
+		}
+		$out = [];
+		foreach ( $groups as $key => $g ) {
+			$n = count( $g['ms'] );
+			if ( $n < self::PER_VISIT_MIN_SAMPLES ) {
+				continue;
+			}
+			$perDay  = $n / $rate * 24 / $hours;
+			$msAvg   = array_sum( $g['ms'] ) / $n;
+			$perView = null !== $viewsPerDay && $viewsPerDay > 0 ? round( $perDay / $viewsPerDay, 2 ) : null;
+			$out[]   = [
+				'request_type' => $g['type'],
+				'route_key'    => $g['route'],
+				'samples'      => $n,
+				'per_day'      => (int) round( $perDay ),
+				'ms_avg'       => (int) round( $msAvg ),
+				'cpu_s_day'    => (int) round( $perDay * $msAvg / 1000 ),
+				'per_view'     => $perView,
+				'per_visit'    => null !== $perView && $perView >= self::PER_VISIT_SHARE,
+				'rule'         => $rules[ (string) $key ] ?? '',
+				'hint'         => self::perVisitHint( $g['type'], $g['route'] ),
+			];
+		}
+		usort( $out, static fn( array $a, array $b ): int => $b['cpu_s_day'] <=> $a['cpu_s_day'] );
+		return array_slice( $out, 0, 20 );
+	}
+
+	/**
+	 * Qué hacer con un endpoint conocido; para el resto, el camino general.
+	 */
+	public static function perVisitHint( string $type, string $route ): string {
+		if ( 'WcAjax' === $type && 'get_refreshed_fragments' === $route ) {
+			return __( 'Fragmentos del carrito de WooCommerce: activa el módulo «Carrito por Store API» de Imagina Turbo, que pinta el contador solo cuando hay carrito.', 'imagina-turbo' );
+		}
+		if ( 'AdminAjax' === $type && str_starts_with( $route, 'woodmart_load_html_dropdowns' ) ) {
+			return __( 'Menús desplegables de WoodMart cargados por AJAX. El navegador los guarda tras la primera visita; si sigue pesando, crea una regla de carga condicional para esta acción (cargar solo los plugins que necesita).', 'imagina-turbo' );
+		}
+		if ( 'StoreApi' === $type ) {
+			return __( 'Store API de WooCommerce: es normal con carrito (contador, bloques del carrito). Si aparece en visitas sin carrito, revisa qué script la llama.', 'imagina-turbo' );
+		}
+		if ( 'AdminAjax' === $type && 'heartbeat' === $route ) {
+			return __( 'Heartbeat de WordPress en el frontend: algún plugin lo carga para visitantes sin sesión. Busca cuál encola el script «heartbeat» y desactívalo ahí.', 'imagina-turbo' );
+		}
+		return __( 'Busca qué script de la página la pide (pestaña Red del navegador) y si el plugin tiene un ajuste para no hacerlo en cada visita. Si es necesaria, una regla de carga condicional reduce lo que carga cada petición.', 'imagina-turbo' );
+	}
 }

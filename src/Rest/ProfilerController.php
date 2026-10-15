@@ -18,7 +18,9 @@ use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
 use ImaginaTurbo\Modules\Profiler\Report;
 use ImaginaTurbo\Modules\Profiler\Rollup;
+use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Repository\MetricsRepository;
+use ImaginaTurbo\Repository\RumRepository;
 use ImaginaTurbo\Repository\SampleRepository;
 
 /**
@@ -45,6 +47,7 @@ final class ProfilerController extends Controller {
 		$this->route( '/profiler/summary', \WP_REST_Server::READABLE, [ $this, 'summary' ], $filters );
 		$this->route( '/profiler/plugins', \WP_REST_Server::READABLE, [ $this, 'plugins' ], $filters );
 		$this->route( '/profiler/routes', \WP_REST_Server::READABLE, [ $this, 'routes' ], $filters );
+		$this->route( '/profiler/per-visit', \WP_REST_Server::READABLE, [ $this, 'perVisit' ] );
 		$this->route(
 			'/profiler/settings',
 			'PUT',
@@ -118,6 +121,40 @@ final class ProfilerController extends Controller {
 				'sample_hours' => $hours,
 				'samples'      => count( $rows ),
 				'items'        => Report::plugins( $rows ),
+			]
+		);
+	}
+
+	/**
+	 * Peticiones dinámicas de los visitantes (48 h de muestras) con su frecuencia y costo por día.
+	 */
+	public function perVisit(): \WP_REST_Response {
+		$hours    = 48;
+		$rate     = (float) $this->sampling()['rate'];
+		$rows     = $this->container->get( SampleRepository::class )->recent( $hours );
+		$rumRate  = (float) $this->container->get( Settings::class )->get( 'rum_rate', 0.05 );
+		$views    = null;
+		$beacons  = 0;
+		if ( $rumRate > 0 ) {
+			foreach ( $this->container->get( RumRepository::class )->histogram( 2 ) as $row ) {
+				// Navegaciones hacia adelante (normal, prerender, prefetch): una por página vista.
+				if ( 'nav' === $row['metric'] && in_array( (int) $row['bucket'], [ 0, 4, 5 ], true ) ) {
+					$beacons += (int) $row['n'];
+				}
+			}
+			$views = $beacons >= 20 ? $beacons / $rumRate / 2 : null;
+		}
+		$rules = [];
+		foreach ( ( new RuleStore() )->all() as $rule ) {
+			$rules[ $rule['key'] ] = $rule['status'];
+		}
+		return $this->ok(
+			[
+				'hours'         => $hours,
+				'rate'          => $rate,
+				'views_per_day' => null === $views ? null : (int) round( $views ),
+				'rum_beacons'   => $beacons,
+				'items'         => Report::perVisit( $rows, $rate, $hours, $views, $rules ),
 			]
 		);
 	}

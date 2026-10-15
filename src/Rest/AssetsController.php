@@ -2,7 +2,7 @@
 /**
  * Gestor de assets: GET /assets/status, POST /assets/inspect, POST /assets/suggest,
  * POST /assets/rules, POST /assets/rules/{id}/activate|disable|test, DELETE /assets/rules/{id},
- * POST /assets/preview.
+ * POST /assets/preview, POST /assets/scripts (Carga de scripts, 0.14.0).
  *
  * @package ImaginaTurbo
  */
@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Core\Config\ConfigCompiler;
+use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Safety\AdminBypassCookie;
@@ -22,6 +23,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
 use ImaginaTurbo\Modules\CacheCoordinator\Purger;
 use ImaginaTurbo\Modules\Database\DatabaseAudit;
+use ImaginaTurbo\Modules\ScriptLoading\ScriptLoadingModule;
 
 /**
  * Inventario, sugerencias, reglas y previsualización.
@@ -52,6 +54,7 @@ final class AssetsController extends Controller {
 			]
 		);
 		$this->route( '/assets/suggest', \WP_REST_Server::CREATABLE, [ $this, 'suggest' ] );
+		$this->route( '/assets/scripts', \WP_REST_Server::CREATABLE, [ $this, 'updateScripts' ] );
 		$list = [
 			'type'     => 'array',
 			'maxItems' => 200,
@@ -136,7 +139,58 @@ final class AssetsController extends Controller {
 			'templates'   => $this->templates(),
 			'post_types'  => array_values( get_post_types( [ 'public' => true ] ) ),
 			'home'        => home_url( '/' ),
+			'scripts'     => $this->scriptsStatus(),
 		];
+	}
+
+	/**
+	 * Módulo Carga de scripts (0.14.0): ajustes y si el plugin de caché ya hace lo mismo.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function scriptsStatus(): array {
+		$enabled = false;
+		$forced  = '';
+		foreach ( $this->container->get( Diagnostics::class )->modules() as $module ) {
+			if ( 'script_loading' === ( $module['id'] ?? null ) ) {
+				$enabled = true === ( $module['enabled'] ?? false );
+				$forced  = implode( ', ', is_array( $module['forcedOff'] ?? null ) ? array_filter( $module['forcedOff'], 'is_string' ) : [] );
+			}
+		}
+		$settings = $this->container->get( Settings::class );
+		return [
+			'enabled'       => $enabled,
+			'forced_off'    => $forced,
+			'defer'         => (bool) $settings->get( 'script_defer', false ),
+			'defer_exclude' => Settings::scriptHandles( (array) $settings->get( 'script_defer_exclude', [] ) ),
+			'delay'         => Settings::delayPatterns( (array) $settings->get( 'script_delay', [] ) ),
+			'delay_timeout' => (int) $settings->get( 'script_delay_timeout', 0 ),
+			'cache_defers'  => ScriptLoadingModule::cacheDefers(),
+			'cache_delays'  => ScriptLoadingModule::cacheDelays(),
+		];
+	}
+
+	public function updateScripts( \WP_REST_Request $request ): \WP_REST_Response {
+		$changes = [];
+		foreach ( [ 'script_defer', 'script_defer_exclude', 'script_delay', 'script_delay_timeout' ] as $key ) {
+			if ( null !== $request->get_param( $key ) ) {
+				$changes[ $key ] = $request->get_param( $key );
+			}
+		}
+		$this->container->get( Settings::class )->update( $changes );
+		$this->container->get( ConfigCompiler::class )->compile();
+		// Las páginas guardadas llevan las etiquetas anteriores.
+		$this->purge();
+		$this->container->get( EventLog::class )->info(
+			'script_loading',
+			'settings',
+			__( 'Ajustes de carga de scripts actualizados.', 'imagina-turbo' ),
+			[
+				'user'    => get_current_user_id(),
+				'changes' => $changes,
+			]
+		);
+		return $this->ok( $this->status() );
 	}
 
 	/**

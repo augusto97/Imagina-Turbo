@@ -27,9 +27,9 @@ final class OverlapGuard {
 
 	/** Plugins concretos de "cache_or_full_optimization" que duplican módulos propios. */
 	private const PLUGIN_MODULES = [
-		'perfmatters'  => [ 'plugin_filter', 'asset_manager', 'tweaks' ],
-		'flying-press' => [ 'speculation', 'frontend_hints' ],
-		'nitropack'    => [ 'speculation', 'frontend_hints' ],
+		'perfmatters'  => [ 'plugin_filter', 'asset_manager', 'tweaks', 'script_loading' ],
+		'flying-press' => [ 'speculation', 'frontend_hints', 'script_loading' ],
+		'nitropack'    => [ 'speculation', 'frontend_hints', 'script_loading' ],
 	];
 
 	/** Categorías que solo generan aviso (funciones que no hacemos o que se ajustan por función más adelante). */

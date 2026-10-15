@@ -56,6 +56,9 @@ final class RumModule implements ModuleInterface {
 			'e' => '' !== $s['endpoint'] ? $s['endpoint'] : home_url( '/?' . RumCollector::QUERY . '=1' ),
 			't' => substr( RouteKey::template(), 0, 40 ),
 			'f' => self::featuredNames(),
+			// Hora en que se generó el HTML: en una copia guardada queda la de la regeneración, así el
+			// RUM sabe si la visita recibió una copia o una página generada para ella (0.14.0).
+			'g' => time(),
 		];
 		$file   = is_file( Runtime::$pluginDir . '/assets/js/itb-rum.min.js' ) ? 'itb-rum.min.js' : 'itb-rum.js';
 		$src    = plugins_url( 'assets/js/' . $file, Runtime::$pluginDir . '/imagina-turbo.php' ) . '?ver=' . ITB_VERSION;

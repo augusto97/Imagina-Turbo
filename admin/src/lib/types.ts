@@ -546,10 +546,22 @@ export interface RumEventRow {
 	bits: string;
 }
 
+export interface RumTtfb {
+	device: 'm' | 'd';
+	n: number;
+	ttfb: number | null;
+	conn: number | null;
+	wait_cached: number | null;
+	wait_generated: number | null;
+	cached_pct: number | null;
+	cached_n: number;
+}
+
 export interface RumReportData {
 	days: number;
 	navigation: { navigations: number; speculated_pct: number | null; prerendered: number; prefetched: number; bfcache_pct: number | null; bfcache: number; back_forward: number; reloads: number };
 	vitals: RumVitals[];
+	ttfb: RumTtfb[];
 	bfcache: { reason: string; n: number }[];
 	next: RumEventRow[];
 	lcp: RumEventRow[];
@@ -660,6 +672,18 @@ export interface AssetsStatus {
 	templates: string[];
 	post_types: string[];
 	home: string;
+	scripts: ScriptLoadingStatus;
+}
+
+export interface ScriptLoadingStatus {
+	enabled: boolean;
+	forced_off: string;
+	defer: boolean;
+	defer_exclude: string[];
+	delay: string[];
+	delay_timeout: number;
+	cache_defers: boolean;
+	cache_delays: boolean;
 }
 
 export interface DbAudit {

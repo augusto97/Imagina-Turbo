@@ -31,6 +31,11 @@ use ImaginaTurbo\Modules\Profiler\RouteKey;
 final class SpeculationModule implements ModuleInterface {
 
 	public function register( Container $container, RequestContext $request ): void {
+		// Agregar al carrito, cupones, login y logout llegan por wc-ajax, la Store API, admin-ajax o un
+		// formulario: allí se descarta lo precargado con el estado anterior.
+		if ( in_array( $request->type, [ RequestType::FrontendHtml, RequestType::WcAjax, RequestType::StoreApi, RequestType::AdminAjax, RequestType::Rest, RequestType::Cart, RequestType::Checkout, RequestType::Account, RequestType::Login ], true ) ) {
+			( new ClearSpeculations() )->register();
+		}
 		if ( RequestType::FrontendHtml !== $request->type ) {
 			return;
 		}

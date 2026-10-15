@@ -43,6 +43,12 @@ final class RumCollector {
 	];
 
 	/**
+	 * Edad mínima (s) del HTML para contar la visita como servida desde una copia guardada. Por debajo,
+	 * la página se generó para esa visita (con margen para el desfase del reloj del visitante).
+	 */
+	public const CACHED_AGE = 30;
+
+	/**
 	 * Atiende el request y termina.
 	 */
 	public static function handle(): never {
@@ -113,6 +119,21 @@ final class RumCollector {
 			if ( is_int( $value ) && $value >= 0 && $value <= 120000 ) {
 				$out['hist'][] = [ $hour, $template, $device, $metric, min( $max, intdiv( $value, $step ) ) ];
 			}
+		}
+		// Desglose del TTFB: conexión, espera del servidor (separada por copia guardada o generada) y la
+		// parte de visitas servidas desde una copia (métrica "hit": 1 copia, 0 generada).
+		$conn = $b['k'] ?? null;
+		if ( is_int( $conn ) && $conn >= 0 && $conn <= 120000 ) {
+			$out['hist'][] = [ $hour, $template, $device, 'conn', min( 400, intdiv( $conn, 25 ) ) ];
+		}
+		$age    = $b['a'] ?? null;
+		$cached = is_int( $age ) && $age >= 0 && $age <= 34560000 ? $age >= self::CACHED_AGE : null;
+		if ( null !== $cached ) {
+			$out['hist'][] = [ $hour, $template, $device, 'hit', $cached ? 1 : 0 ];
+		}
+		$wait = $b['w'] ?? null;
+		if ( is_int( $wait ) && $wait >= 0 && $wait <= 120000 ) {
+			$out['hist'][] = [ $hour, $template, $device, null === $cached ? 'wait' : ( $cached ? 'waith' : 'waitm' ), min( 400, intdiv( $wait, 25 ) ) ];
 		}
 		$nav = is_string( $b['n'] ?? null ) && isset( self::NAV[ $b['n'] ] ) ? self::NAV[ $b['n'] ] : null;
 		if ( null !== $nav ) {

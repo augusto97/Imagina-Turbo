@@ -14,6 +14,7 @@ namespace ImaginaTurbo\Modules\Rum;
  *
  * @phpstan-type Row array{template: string, device: string, metric: string, bucket: int|string, n: int|string}
  * @phpstan-type Vitals array{template: string, device: string, n: int, lcp: int|null, inp: int|null, cls: float|null, ttfb: int|null, prerendered: int, prefetched: int, bfcache: int, back_forward: int}
+ * @phpstan-type Breakdown array{device: string, n: int, ttfb: int|null, conn: int|null, wait_cached: int|null, wait_generated: int|null, cached_pct: float|null, cached_n: int}
  */
 final class RumReport {
 
@@ -23,6 +24,8 @@ final class RumReport {
 		'inp'  => 10,
 		'ttfb' => 25,
 		'cls'  => 10,
+		'conn' => 25,
+		'wait' => 25,
 	];
 
 	/** Muestras mínimas para mostrar un p75. */
@@ -81,6 +84,45 @@ final class RumReport {
 			];
 		}
 		usort( $out, static fn( array $a, array $b ): int => $b['n'] <=> $a['n'] );
+		return $out;
+	}
+
+	/**
+	 * Desglose del TTFB por dispositivo (0.14.0): p75 de la conexión (redirecciones, DNS, TCP, TLS) y de
+	 * la espera del servidor, separada según la visita recibió una copia guardada o una página generada
+	 * para ella, y qué parte de las visitas recibió una copia. Dice si el TTFB es de la red del visitante
+	 * (la arregla un nodo cercano) o del servidor (la arreglan más aciertos de caché).
+	 *
+	 * @param list<Row> $rows Filas agrupadas de itb_rum_hist.
+	 * @return list<Breakdown>
+	 */
+	public static function ttfbBreakdown( array $rows ): array {
+		$groups = [];
+		foreach ( $rows as $row ) {
+			if ( in_array( $row['metric'], [ 'ttfb', 'conn', 'wait', 'waith', 'waitm', 'hit' ], true ) ) {
+				$bucket = (int) $row['bucket'];
+				$groups[ $row['device'] ][ $row['metric'] ][ $bucket ] = ( $groups[ $row['device'] ][ $row['metric'] ][ $bucket ] ?? 0 ) + (int) $row['n'];
+			}
+		}
+		$out = [];
+		foreach ( [ 'm', 'd' ] as $device ) {
+			$m = $groups[ $device ] ?? [];
+			if ( [] === $m ) {
+				continue;
+			}
+			$hit   = $m['hit'] ?? [];
+			$total = array_sum( $hit );
+			$out[] = [
+				'device'         => $device,
+				'n'              => array_sum( $m['ttfb'] ?? [] ),
+				'ttfb'           => self::p75( $m['ttfb'] ?? [], self::STEPS['ttfb'] ),
+				'conn'           => self::p75( $m['conn'] ?? [], self::STEPS['conn'] ),
+				'wait_cached'    => self::p75( $m['waith'] ?? [], self::STEPS['wait'] ),
+				'wait_generated' => self::p75( $m['waitm'] ?? [], self::STEPS['wait'] ),
+				'cached_pct'     => $total >= self::MIN_SAMPLES ? round( 100 * ( $hit[1] ?? 0 ) / $total, 1 ) : null,
+				'cached_n'       => $total,
+			];
+		}
 		return $out;
 	}
 

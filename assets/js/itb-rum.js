@@ -1,7 +1,7 @@
 /**
  * Imagina Turbo · RUM (docs/02 módulo 11). Solo se descarga en la muestra (lo decide el script en línea).
  *
- * Mide LCP (y su imagen), INP aproximado, CLS, TTFB, prerender (activationStart), prefetch
+ * Mide LCP (y su imagen), INP aproximado, CLS, TTFB (con conexión, espera y edad de la copia), prerender (activationStart), prefetch
  * (deliveryType), recargas y bfcache (con notRestoredReasons cuando existe), y la transición desde la
  * plantilla anterior. Envía un beacon al ocultarse la página. Sin datos personales.
  */
@@ -38,6 +38,15 @@
 		r.b = Math.max( 0, Math.round( nav.responseStart - act ) );
 		var type = nav.type;
 		r.n = act > 0 ? 'p' : nav.deliveryType === 'navigational-prefetch' ? 'f' : type === 'reload' ? 'r' : type === 'back_forward' ? 'b' : 'n';
+		// Desglose del TTFB (0.14.0): conexión (redirecciones, DNS, TCP, TLS) y espera del servidor, solo
+		// en navegaciones que fueron a la red; edad de la copia según la hora de generación del HTML.
+		if ( r.n === 'n' || r.n === 'r' ) {
+			r.k = Math.max( 0, Math.round( nav.requestStart ) );
+			r.w = Math.max( 0, Math.round( nav.responseStart - nav.requestStart ) );
+			if ( c.g ) {
+				r.a = Math.max( 0, Math.round( performance.timeOrigin / 1000 - c.g ) );
+			}
+		}
 		var nrr = nav.notRestoredReasons;
 		if ( type === 'back_forward' && nrr ) {
 			var x = [];

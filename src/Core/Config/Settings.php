@@ -74,6 +74,7 @@ final class Settings {
 			'view_transitions'         => false,
 			'hints_lcp'                => true,
 			'hints_facades'            => true,
+			'lazy_render'              => [],
 			'db_keep_revisions'        => 5,
 			'db_schedule'              => [],
 			'db_schedule_days'         => 7,
@@ -279,6 +280,10 @@ final class Settings {
 			}
 		}
 
+		if ( isset( $input['lazy_render'] ) && is_array( $input['lazy_render'] ) ) {
+			$out['lazy_render'] = self::lazyRender( $input['lazy_render'] );
+		}
+
 		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).
 		if ( isset( $input['db_schedule'] ) && is_array( $input['db_schedule'] ) ) {
 			$out['db_schedule'] = array_values( array_intersect( [ 'transients', 'action_scheduler', 'revisions' ], $input['db_schedule'] ) );
@@ -309,6 +314,39 @@ final class Settings {
 			}
 		}
 		return array_slice( array_keys( $out ), 0, 20 );
+	}
+
+	/**
+	 * Reglas de renderizado diferido (content-visibility): un selector, las plantillas donde aplica
+	 * (vacío = todas) y la altura estimada mientras no se pinta.
+	 *
+	 * @param array<mixed> $list Reglas.
+	 * @return list<array{selector: string, templates: list<string>, height: int}>
+	 */
+	public static function lazyRender( array $list ): array {
+		$out = [];
+		foreach ( $list as $rule ) {
+			if ( ! is_array( $rule ) || ! is_string( $rule['selector'] ?? null ) ) {
+				continue;
+			}
+			$selector = self::selectors( [ $rule['selector'] ] )[0] ?? '';
+			if ( '' === $selector ) {
+				continue;
+			}
+			$templates = [];
+			foreach ( is_array( $rule['templates'] ?? null ) ? $rule['templates'] : [] as $template ) {
+				if ( is_string( $template ) && 1 === preg_match( '/^[a-z0-9:_\-]{1,40}$/', $template ) ) {
+					$templates[ $template ] = true;
+				}
+			}
+			$height           = is_int( $rule['height'] ?? null ) ? $rule['height'] : 600;
+			$out[ $selector ] = [
+				'selector'  => $selector,
+				'templates' => array_slice( array_keys( $templates ), 0, 20 ),
+				'height'    => max( 50, min( 3000, $height ) ),
+			];
+		}
+		return array_slice( array_values( $out ), 0, 10 );
 	}
 
 	public static function sanitizeHubUrl( string $url ): string {

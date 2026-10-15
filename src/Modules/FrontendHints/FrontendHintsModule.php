@@ -20,6 +20,11 @@
  *   decenas de imágenes de producto antes del contenido.
  * - Fachadas de YouTube y Vimeo (embed_oembed_html): miniatura y botón; el iframe se crea al tocar.
  *   No se tocan los iframes con enablejsapi (otro script los controla).
+ * - Renderizado diferido (0.11.0, riesgo moderado, solo con reglas): content-visibility:auto en
+ *   secciones que empiezan fuera de pantalla (pie, tarjetas de producto a partir de la quinta). El
+ *   navegador no las maqueta ni pinta hasta acercarse; en una categoría de WoodMart con 56 productos,
+ *   el re-maquetado tras una interacción bajó de 267 a 213 ms (móvil, CPU 4x). Una hoja <style> en el
+ *   <head>, solo en las plantillas de cada regla.
  * - El delay de JS y de fuentes de terceros es del plugin de caché.
  *
  * @package ImaginaTurbo
@@ -73,6 +78,9 @@ final class FrontendHintsModule implements ModuleInterface {
 		if ( $s['lcp'] ) {
 			add_action( 'wp', [ self::class, 'prepare' ] );
 		}
+		if ( [] !== $s['lazy'] ) {
+			add_action( 'wp_head', [ self::class, 'printLazyRender' ], 8 );
+		}
 		if ( $s['facades'] ) {
 			add_filter( 'embed_oembed_html', [ self::class, 'facade' ], 20, 2 );
 			add_action( 'wp_footer', [ self::class, 'printFacadeAssets' ], 50 );
@@ -80,7 +88,7 @@ final class FrontendHintsModule implements ModuleInterface {
 	}
 
 	/**
-	 * @return array{lcp: bool, facades: bool, images: array<string, array{kind: string, id: int, src: string}>}
+	 * @return array{lcp: bool, facades: bool, images: array<string, array{kind: string, id: int, src: string}>, lazy: list<array{selector: string, templates: list<string>, height: int}>}
 	 */
 	public static function settings(): array {
 		$s = Runtime::$config?->get( 'hints', [] );
@@ -89,7 +97,77 @@ final class FrontendHintsModule implements ModuleInterface {
 			'lcp'     => false !== ( $s['lcp'] ?? true ),
 			'facades' => false !== ( $s['facades'] ?? true ),
 			'images'  => is_array( $s['images'] ?? null ) ? $s['images'] : [],
+			'lazy'    => is_array( $s['lazy'] ?? null ) ? array_values( $s['lazy'] ) : [],
 		];
+	}
+
+	public static function printLazyRender(): void {
+		$css = self::lazyRenderCss( self::settings()['lazy'], RouteKey::template() );
+		if ( '' !== $css ) {
+			echo '<style id="itb-lazy-render">' . $css . "</style>\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- selectores validados por Settings::selectors (sin llaves, punto y coma ni "<").
+		}
+	}
+
+	/**
+	 * CSS de las reglas que aplican a la plantilla.
+	 *
+	 * @param list<array{selector: string, templates: list<string>, height: int}> $rules    Reglas (ya validadas).
+	 */
+	public static function lazyRenderCss( array $rules, string $template ): string {
+		$css = '';
+		foreach ( $rules as $rule ) {
+			if ( [] !== $rule['templates'] && ! in_array( $template, $rule['templates'], true ) ) {
+				continue;
+			}
+			if ( 1 !== preg_match( '/^[^{};<]{1,200}$/', $rule['selector'] ) ) {
+				continue;
+			}
+			$css .= $rule['selector'] . '{content-visibility:auto;contain-intrinsic-size:auto ' . (int) $rule['height'] . 'px}';
+		}
+		return $css;
+	}
+
+	/**
+	 * Reglas sugeridas para el tema activo: el pie y las tarjetas de producto a partir de la quinta.
+	 *
+	 * @return list<array{selector: string, templates: list<string>, height: int}>
+	 */
+	public static function lazyRenderPresets( string $theme ): array {
+		$listing = [ 'archivo:product', 'tax:product_cat', 'tax:product_tag', 'busqueda' ];
+		return match ( $theme ) {
+			'woodmart' => [
+				[
+					'selector'  => '.wd-footer',
+					'templates' => [],
+					'height'    => 900,
+				],
+				[
+					'selector'  => '.products > .wd-product:nth-child(n+5)',
+					'templates' => $listing,
+					'height'    => 420,
+				],
+			],
+			'astra', 'generatepress', 'kadence', 'oceanwp', 'storefront' => [
+				[
+					'selector'  => '.site-footer',
+					'templates' => [],
+					'height'    => 600,
+				],
+				[
+					'selector'  => 'ul.products > li.product:nth-child(n+5)',
+					'templates' => $listing,
+					'height'    => 420,
+				],
+			],
+			'hello-elementor' => [
+				[
+					'selector'  => '.elementor-location-footer',
+					'templates' => [],
+					'height'    => 600,
+				],
+			],
+			default => [],
+		};
 	}
 
 	/**

@@ -538,12 +538,21 @@ export interface NavigationSettings {
 	view_transitions: boolean;
 	hints_lcp: boolean;
 	hints_facades: boolean;
+	lazy_render: LazyRenderRule[];
+}
+
+export interface LazyRenderRule {
+	selector: string;
+	templates: string[];
+	height: number;
 }
 
 export interface NavigationStatus {
 	modules: Record<'speculation' | 'rum' | 'frontend_hints', { enabled: boolean; forced_off: string }>;
 	settings: NavigationSettings;
 	core_api: boolean;
+	lazy_presets: LazyRenderRule[];
+	theme: string;
 	permalink: boolean;
 	hub_rum: boolean;
 	report: RumReportData;

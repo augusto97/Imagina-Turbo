@@ -11,6 +11,7 @@ namespace ImaginaTurbo\Tests\Unit;
 
 use Brain\Monkey\Functions;
 use ImaginaTurbo\Core\Config\CompiledConfig;
+use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule;
 use ImaginaTurbo\Modules\Rum\RumCollector;
@@ -311,5 +312,39 @@ final class NavigationTest extends TestCase {
 		$prefetch = (string) file_get_contents( self::pluginDir() . '/assets/js/itb-prefetch.js' );
 		$this->assertStringContainsString( "supports( 'speculationrules' )", $prefetch, 'solo donde no hay Speculation Rules' );
 		$this->assertStringContainsString( 'saveData', $prefetch );
+	}
+
+	public function test_lazy_render_rules_and_css(): void {
+		$rules = Settings::lazyRender(
+			[
+				[
+					'selector'  => '.wd-footer',
+					'templates' => [],
+					'height'    => 900,
+				],
+				[
+					'selector'  => '.products > .wd-product:nth-child(n+5)',
+					'templates' => [ 'tax:product_cat', 'MAL plantilla' ],
+					'height'    => 10,
+				],
+				[ 'selector' => '.x{}</style><script>' ],
+				[ 'selector' => 'a;b' ],
+				'basura',
+			]
+		);
+		$this->assertCount( 2, $rules, 'sin llaves, punto y coma ni "<"' );
+		$this->assertSame( [ 'tax:product_cat' ], $rules[1]['templates'] );
+		$this->assertSame( 50, $rules[1]['height'], 'altura mínima' );
+
+		$this->assertSame( '.wd-footer{content-visibility:auto;contain-intrinsic-size:auto 900px}', FrontendHintsModule::lazyRenderCss( $rules, 'single:product' ), 'la tarjeta de producto solo en categorías' );
+		$this->assertStringContainsString( 'nth-child(n+5){content-visibility:auto', FrontendHintsModule::lazyRenderCss( $rules, 'tax:product_cat' ) );
+		$this->assertSame( '', FrontendHintsModule::lazyRenderCss( [], 'portada' ) );
+
+		$this->assertSame( '.wd-footer', FrontendHintsModule::lazyRenderPresets( 'woodmart' )[0]['selector'] );
+		$this->assertSame( [], FrontendHintsModule::lazyRenderPresets( 'tema-desconocido' ) );
+		foreach ( [ 'woodmart', 'astra', 'hello-elementor' ] as $theme ) {
+			$presets = FrontendHintsModule::lazyRenderPresets( $theme );
+			$this->assertSame( $presets, Settings::lazyRender( $presets ), 'las sugerencias pasan la validación: ' . $theme );
+		}
 	}
 }

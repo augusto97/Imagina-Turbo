@@ -264,6 +264,7 @@ final class ConfigCompiler {
 			'hints'                       => [
 				'lcp'     => (bool) $this->settings->get( 'hints_lcp', true ),
 				'facades' => (bool) $this->settings->get( 'hints_facades', true ),
+				'lazy'    => true === ( $modules['frontend_hints'] ?? true ) ? Settings::lazyRender( (array) $this->settings->get( 'lazy_render', [] ) ) : [],
 				'images'  => array_map(
 					static fn( array $i ): array => [
 						'kind' => $i['kind'],

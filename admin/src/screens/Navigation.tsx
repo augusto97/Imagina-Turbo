@@ -13,7 +13,7 @@ import { ApiError, api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { NavigationSettings, NavigationStatus, RumInsightsData, RumReportData } from '@/lib/types';
+import type { LazyRenderRule, NavigationSettings, NavigationStatus, RumInsightsData, RumReportData } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const ms = ( v: number | null ) => ( v === null ? '—' : v >= 1000 ? `${ ( v / 1000 ).toFixed( 2 ) } s` : `${ v } ms` );
@@ -45,6 +45,7 @@ export function Navigation() {
 						<SettingsCard status={ data } />
 						<SummaryCard report={ data.report } status={ data } />
 					</div>
+					<LazyRenderCard status={ data } />
 					<VitalsCard report={ data.report } />
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 						<InsightsCard insights={ data.insights } report={ data.report } />
@@ -114,7 +115,7 @@ function SettingsCard( { status }: { status: NavigationStatus } ) {
 				<Toggle label={ __( 'Prefetch predictivo' ) } help={ __( 'Precarga las 2–4 páginas que los visitantes abren después desde cada plantilla (RUM, recalculado cada día).' ) } checked={ values.spec_predictive } onChange={ ( v ) => set( 'spec_predictive', v ) } />
 				<Toggle label={ __( 'Respaldo para Safari y Firefox' ) } help={ __( 'Script de 1,4 KB que precarga al tocar o pulsar, solo en navegadores sin Speculation Rules.' ) } checked={ values.spec_fallback } onChange={ ( v ) => set( 'spec_fallback', v ) } />
 				<Toggle label={ __( 'View Transitions' ) } help={ __( 'Transición suave entre páginas del mismo sitio (Chrome y Safari recientes). Cambia cómo se ve la navegación: revísala.' ) } checked={ values.view_transitions } onChange={ ( v ) => set( 'view_transitions', v ) } />
-				<Toggle label={ __( 'Prioridad de la imagen LCP' ) } help={ __( 'fetchpriority="high" y sin lazy load en la imagen que el RUM mide como LCP en cada plantilla.' ) } checked={ values.hints_lcp } onChange={ ( v ) => set( 'hints_lcp', v ) } />
+				<Toggle label={ __( 'Prioridad de la imagen LCP' ) } help={ __( 'La imagen principal (la que mide el RUM, la del producto y los primeros productos de un listado) se descarga desde el HTML, sin esperar al lazy load ni a la reescritura de WebP por JavaScript.' ) } checked={ values.hints_lcp } onChange={ ( v ) => set( 'hints_lcp', v ) } />
 				<Toggle label={ __( 'Fachadas de YouTube y Vimeo' ) } help={ __( 'Miniatura y botón; el reproductor se carga al tocar. No se aplica a reproductores controlados por otro script.' ) } checked={ values.hints_facades } onChange={ ( v ) => set( 'hints_facades', v ) } />
 				<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
 					<span>
@@ -149,6 +150,78 @@ function SettingsCard( { status }: { status: NavigationStatus } ) {
 				pending={ save.isPending }
 				onConfirm={ () => submit( true ) }
 			/>
+		</Card>
+	);
+}
+
+function LazyRenderCard( { status }: { status: NavigationStatus } ) {
+	const client = useQueryClient();
+	const saved = status.settings.lazy_render;
+	const [ rules, setRules ] = useState<LazyRenderRule[]>( saved );
+	const [ draft, setDraft ] = useState( { selector: '', templates: '', height: 600 } );
+	useEffect( () => setRules( status.settings.lazy_render ), [ status ] );
+	const save = useAction( ( next: LazyRenderRule[] ) => api<NavigationStatus>( 'navigation/settings', 'PUT', { lazy_render: next } ) );
+	const persist = ( next: LazyRenderRule[] ) => save.mutate( next, { onSuccess: ( s ) => client.setQueryData( [ 'navigation' ], s ) } );
+	const missing = status.lazy_presets.filter( ( p ) => ! rules.some( ( r ) => r.selector === p.selector ) );
+	const add = () => {
+		const templates = draft.templates.split( ',' ).map( ( t ) => t.trim() ).filter( Boolean );
+		persist( [ ...rules, { selector: draft.selector.trim(), templates, height: draft.height } ] );
+		setDraft( { selector: '', templates: '', height: 600 } );
+	};
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:gap-2">
+					<CardTitle>{ __( 'Renderizado diferido' ) }</CardTitle>
+					<Badge tone="amber">{ __( 'Moderado' ) }</Badge>
+				</div>
+				<CardDescription>
+					{ __( 'content-visibility: el navegador no maqueta ni pinta estas secciones hasta que el visitante se acerca. Menos trabajo al cargar y al interactuar en páginas largas. Úsalo solo en secciones que empiezan fuera de pantalla y revisa la página: la barra de desplazamiento puede ajustarse al llegar.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ rules.length === 0 && <Notice level="info">{ __( 'Sin reglas: no se agrega nada a las páginas.' ) }</Notice> }
+				{ rules.map( ( rule ) => (
+					<div key={ rule.selector } className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-2 itb:rounded-md itb:border itb:border-zinc-200 itb:px-3 itb:py-2">
+						<span className="itb:min-w-0">
+							<span className="itb:font-mono itb:text-xs">{ rule.selector }</span>
+							<span className="itb:block itb:text-xs itb:text-zinc-500">
+								{ rule.templates.length ? rule.templates.join( ', ' ) : __( 'Todas las plantillas' ) } · { rule.height } px
+							</span>
+						</span>
+						<Button variant="outline" size="sm" disabled={ save.isPending } onClick={ () => persist( rules.filter( ( r ) => r.selector !== rule.selector ) ) }>
+							{ __( 'Quitar' ) }
+						</Button>
+					</div>
+				) ) }
+				{ missing.length > 0 && (
+					<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+						<Button size="sm" variant="outline" disabled={ save.isPending } onClick={ () => persist( [ ...rules, ...missing ] ) }>
+							<Sparkles aria-hidden />
+							{ `${ __( 'Agregar las sugeridas para' ) } ${ status.theme }` }
+						</Button>
+						<span className="itb:text-xs itb:text-zinc-500">{ missing.map( ( m ) => m.selector ).join( ' · ' ) }</span>
+					</div>
+				) }
+				<div className="itb:grid itb:gap-2 itb:sm:grid-cols-[1fr_1fr_6rem_auto] itb:sm:items-end">
+					<label className="itb:flex itb:flex-col itb:gap-1">
+						<span className="itb:text-xs itb:font-medium">{ __( 'Selector CSS' ) }</span>
+						<Input value={ draft.selector } placeholder=".site-footer" onChange={ ( e ) => setDraft( { ...draft, selector: e.target.value } ) } />
+					</label>
+					<label className="itb:flex itb:flex-col itb:gap-1">
+						<span className="itb:text-xs itb:font-medium">{ __( 'Plantillas (vacío = todas)' ) }</span>
+						<Input value={ draft.templates } placeholder="tax:product_cat, single:product" onChange={ ( e ) => setDraft( { ...draft, templates: e.target.value } ) } />
+					</label>
+					<label className="itb:flex itb:flex-col itb:gap-1">
+						<span className="itb:text-xs itb:font-medium">{ __( 'Alto (px)' ) }</span>
+						<Input type="number" min={ 50 } max={ 3000 } value={ draft.height } onChange={ ( e ) => setDraft( { ...draft, height: Number( e.target.value ) || 600 } ) } />
+					</label>
+					<Button size="sm" className="itb:h-9" disabled={ save.isPending || draft.selector.trim() === '' } onClick={ add }>
+						{ __( 'Agregar' ) }
+					</Button>
+				</div>
+				{ save.error && <Notice level="error">{ save.error.message }</Notice> }
+			</CardContent>
 		</Card>
 	);
 }

@@ -14,6 +14,7 @@ use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Repository\SampleRepository;
 
@@ -39,6 +40,10 @@ final class NavigationController extends Controller {
 				'type'    => 'number',
 				'minimum' => 0,
 				'maximum' => 1,
+			],
+			'lazy_render'    => [
+				'type'  => 'array',
+				'items' => [ 'type' => 'object' ],
 			],
 			'confirm'        => [
 				'type'    => 'boolean',
@@ -78,6 +83,7 @@ final class NavigationController extends Controller {
 			}
 		}
 		$values = [
+			'lazy_render'    => Settings::lazyRender( (array) $settings->get( 'lazy_render', [] ) ),
 			'spec_mode'      => (string) $settings->get( 'spec_mode', 'prefetch' ),
 			'spec_eagerness' => (string) $settings->get( 'spec_eagerness', 'moderate' ),
 			'rum_rate'       => (float) $settings->get( 'rum_rate', 0.05 ),
@@ -86,14 +92,16 @@ final class NavigationController extends Controller {
 			$values[ $key ] = (bool) $settings->get( $key, 'view_transitions' !== $key );
 		}
 		return [
-			'modules'   => $modules,
-			'settings'  => $values,
-			'core_api'  => function_exists( 'wp_get_speculation_rules' ),
-			'permalink' => '' !== (string) get_option( 'permalink_structure' ),
-			'hub_rum'   => '' !== (string) $settings->get( 'hub_url', '' ),
-			'report'    => $this->container->get( RumService::class )->report( 7 ),
-			'insights'  => RumService::stored(),
-			'no_store'  => $this->noStore(),
+			'modules'      => $modules,
+			'settings'     => $values,
+			'core_api'     => function_exists( 'wp_get_speculation_rules' ),
+			'lazy_presets' => FrontendHintsModule::lazyRenderPresets( (string) get_template() ),
+			'theme'        => (string) get_template(),
+			'permalink'    => '' !== (string) get_option( 'permalink_structure' ),
+			'hub_rum'      => '' !== (string) $settings->get( 'hub_url', '' ),
+			'report'       => $this->container->get( RumService::class )->report( 7 ),
+			'insights'     => RumService::stored(),
+			'no_store'     => $this->noStore(),
 		];
 	}
 
@@ -128,7 +136,7 @@ final class NavigationController extends Controller {
 			return $this->error( 'itb_confirm', __( 'Confirma el prerender: ejecuta el JavaScript de las páginas antes de que se abran.', 'imagina-turbo' ), 428 );
 		}
 		$changes = [];
-		foreach ( array_merge( [ 'spec_mode', 'spec_eagerness', 'rum_rate' ], self::BOOLS ) as $key ) {
+		foreach ( array_merge( [ 'spec_mode', 'spec_eagerness', 'rum_rate', 'lazy_render' ], self::BOOLS ) as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ $key ] = $request->get_param( $key );
 			}

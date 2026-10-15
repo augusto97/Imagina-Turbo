@@ -21,6 +21,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Modules\Profiler;
 
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
 use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
@@ -239,7 +240,12 @@ final class CacheabilityAudit {
 		$hit   = self::cacheHit( $headers );
 		$notes = $first['notes'];
 		/* translators: 1: cookies, 2: cabecera que indica la caché (puede ir vacía) */
-		$notes[]          = sprintf( __( 'Solo la visita que regenera la página recibe %1$s: la siguiente llegó de la caché, sin cookies%2$s. No impide la caché.', 'imagina-turbo' ), '«' . implode( '», «', $names ) . '»', '' === $hit ? '' : ' (' . $hit . ')' );
+		$notes[] = sprintf( __( 'Solo la visita que regenera la página recibe %1$s: la siguiente llegó de la caché, sin cookies%2$s. No impide la caché.', 'imagina-turbo' ), '«' . implode( '», «', $names ) . '»', '' === $hit ? '' : ' (' . $hit . ')' );
+		$other   = array_values( array_diff( $names, Cacheability::REGEN_COOKIES ) );
+		if ( [] !== $other ) {
+			/* translators: %s: cookies */
+			$notes[] = sprintf( __( 'Para Cloudflare sí cuenta: Imagina Turbo solo ignora _fbp y _fbc. Si la copia guardada la regenera una visita que recibe %s, sale marcada no-store para el edge hasta la siguiente purga.', 'imagina-turbo' ), '«' . implode( '», «', $other ) . '»' );
+		}
 		$first['issues']  = $issues;
 		$first['notes']   = $notes;
 		$first['verdict'] = self::verdict( $first['status'], $issues, $notes );
@@ -321,9 +327,9 @@ final class CacheabilityAudit {
 		}
 		$lsNoCache = str_contains( strtolower( self::headerValue( $headers['x-litespeed-cache-control'] ?? '' ) ), 'no-cache' );
 		if ( str_contains( $cacheControl, 'no-store' ) && $lsNoCache ) {
-			$notes[] = __( 'Un plugin marcó la página como dinámica a propósito (LiteSpeed: no-cache) y no se guarda en caché ni usa el bfcache. Es lo correcto en resultados de búsqueda, formularios o páginas de cuenta; si es una página normal, revisa qué plugin la marca.', 'imagina-turbo' );
+			$notes[] = __( 'Un plugin marcó la página como dinámica a propósito (LiteSpeed: no-cache) y no se guarda en caché (en Firefox tampoco en el bfcache). Es lo correcto en resultados de búsqueda, formularios o páginas de cuenta; si es una página normal, revisa qué plugin la marca.', 'imagina-turbo' );
 		} elseif ( str_contains( $cacheControl, 'no-store' ) ) {
-			$issues[] = __( 'Cache-Control: no-store impide el bfcache (atrás/adelante instantáneo) y la caché en el edge.', 'imagina-turbo' );
+			$issues[] = __( 'Cache-Control: no-store impide la caché en el edge y el bfcache (atrás/adelante instantáneo) en Firefox. Chrome sí guarda la página en el bfcache, pero la descarta si cambian las cookies.', 'imagina-turbo' );
 		} elseif ( str_contains( $cacheControl, 'private' ) ) {
 			$issues[] = __( 'Cache-Control: private impide la caché en el edge.', 'imagina-turbo' );
 		}

@@ -6,13 +6,16 @@
  * - Deja a WooCommerce Blocks un nonce fresco de la Store API (storeApiNonce, el más reciente gana):
  *   el de una página cacheada puede ser viejo.
  * - En prerender no pide nada hasta que la página se active.
+ * - Con el Mini-Cart de bloques de WooCommerce 10.7+ y sin contadores del tema no hace nada: ese
+ *   bloque ya pide el carrito y su nonce en cada vista.
  * - Se actualiza al agregar o quitar productos (eventos de jQuery y de Blocks) y al volver a la pestaña.
  * - El desplegable con la lista de productos (HTML del tema) se pide a WooCommerce solo cuando el
  *   visitante con carrito pasa el cursor o toca el mini-carrito, una vez por página.
  */
 ( function () {
 	var c = window.itbCart;
-	if ( ! c || ! window.fetch ) {
+	// b: el Mini-Cart de bloques (WooCommerce 10.7+) ya pide el carrito y no hay contador del tema.
+	if ( ! c || ! window.fetch || c.b ) {
 		return;
 	}
 	var KEY = 'itb_cart_' + c.k;

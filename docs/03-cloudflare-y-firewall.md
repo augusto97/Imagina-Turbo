@@ -69,7 +69,7 @@
 
 - **Acción:** `set_cache_settings`.
 - **Parámetros:** `cache: true`; `edge_ttl: { mode: "respect_origin" }`; `browser_ttl: { mode: "respect_origin" }`; `serve_stale: { disable_stale_while_updating: false }`; `respect_strong_etags: true`.
-- La duración real la decide el origen con `Cloudflare-CDN-Cache-Control` (ver módulo `CacheCoordinator`). Si el origen manda `private`/`no-store` o `Set-Cookie`, no se cachea. Así WordPress, que sabe qué es dinámico, manda; y la regla del edge solo habilita.
+- La duración real la decide el origen con `Cloudflare-CDN-Cache-Control` (ver módulo `CacheCoordinator`). Si el origen manda `private`/`no-store` o `Set-Cookie`, no se cachea. Por eso el origen puede marcar cacheable una respuesta que solo envía `_fbp`/`_fbc` (0.13.1): Cloudflare no guarda esa, y sí la copia sin cookie que sirve después el plugin de caché. Así WordPress, que sabe qué es dinámico, manda; y la regla del edge solo habilita.
 - **Expresión** (se genera con las rutas reales del sitio; ejemplo):
 
 ```

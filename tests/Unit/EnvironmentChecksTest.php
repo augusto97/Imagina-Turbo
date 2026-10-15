@@ -87,6 +87,16 @@ final class EnvironmentChecksTest extends TestCase {
 		$this->assertSame( [ 'webp_htaccess_cloudflare' ], array_column( EnvironmentChecks::evaluate( null, $htaccess, null, true ), 'code' ) );
 	}
 
+	public function test_mini_cart_block_alert(): void {
+		$info = EnvironmentChecks::miniCartBlock( false );
+		$this->assertSame( 'mini_cart_block', $info['code'] );
+		$this->assertSame( 'info', $info['level'] );
+		$this->assertStringNotContainsString( 'prerender', $info['message'] );
+		$warn = EnvironmentChecks::miniCartBlock( true );
+		$this->assertSame( 'warning', $warn['level'] );
+		$this->assertStringContainsString( 'prerender', $warn['message'] );
+	}
+
 	public function test_two_lazy_loaders(): void {
 		$ewww = [
 			'webp'         => true,

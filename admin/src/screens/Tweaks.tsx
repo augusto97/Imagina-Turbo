@@ -53,12 +53,13 @@ export function Tweaks() {
 	);
 }
 
-const SHIELD: { id: 'static' | 'author' | 'xmlrpc' | 'rest_users' | 'heartbeat'; label: string; description: string }[] = [
+const SHIELD: { id: 'static' | 'author' | 'xmlrpc' | 'rest_users' | 'heartbeat' | 'prefetch'; label: string; description: string }[] = [
 	{ id: 'static', label: __( '404 baratos para assets' ), description: __( 'Una imagen, CSS o JS que no existe responde 404 antes de cargar plugins y tema, cacheable 10 minutos.' ) },
 	{ id: 'author', label: __( 'Bloquear ?author=N' ), description: __( 'Evita que se descubran los nombres de usuario. Con sesión iniciada no se toca.' ) },
 	{ id: 'xmlrpc', label: __( 'Bloquear XML-RPC' ), description: __( 'Vía clásica de fuerza bruta y pingbacks masivos.' ) },
 	{ id: 'rest_users', label: __( 'Cerrar /wp-json/wp/v2/users a anónimos' ), description: __( 'La lista de usuarios por la REST API solo con sesión o credenciales.' ) },
 	{ id: 'heartbeat', label: __( 'Controlar Heartbeat' ), description: __( 'Fuera del frontend para visitantes; en el admin y el editor, cada N segundos.' ) },
+	{ id: 'prefetch', label: __( 'Rechazar precargas con efectos' ), description: __( 'Una precarga especulativa (de cualquier script o de Cloudflare) de agregar al carrito, cerrar sesión, enlaces con nonce, carrito, pago o cuenta responde 503 sin ejecutar nada.' ) },
 ];
 
 function ShieldCard( { status }: { status: ShieldStatus } ) {

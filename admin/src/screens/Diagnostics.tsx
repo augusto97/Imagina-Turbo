@@ -12,7 +12,7 @@ import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
 import { useRouter } from '@/lib/router';
-import type { AuditReport, Period, PhaseCost, PluginCost, ProfilerSummary, RouteCost, Sampling } from '@/lib/types';
+import type { AuditReport, Period, PerVisitReport, PhaseCost, PluginCost, ProfilerSummary, RouteCost, Sampling } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -127,6 +127,7 @@ export function Diagnostics() {
 								<TypesCard byType={ summary.data.summary.by_type } total={ summary.data.summary.samples } />
 							</div>
 							<RoutesCard items={ routes.data?.items } source={ routes.data?.source } loading={ routes.isLoading } />
+							<PerVisitCard />
 						</>
 					) }
 					<div className="itb:grid itb:gap-4 itb:xl:grid-cols-2">
@@ -459,6 +460,74 @@ function RoutesCard( { items, source, loading }: { items?: RouteCost[]; source?:
 			</CardContent>
 		</Card>
 	);
+}
+
+function PerVisitCard() {
+	const report = useQuery( { queryKey: [ 'profiler', 'per-visit' ], queryFn: () => api<PerVisitReport>( 'profiler/per-visit' ) } );
+	const data = report.data;
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Peticiones de los visitantes después de cargar la página' ) }</CardTitle>
+				<CardDescription>
+					{ __( 'AJAX, REST y Store API que piden los visitantes sin sesión. La página puede estar en caché, pero estas peticiones ejecutan PHP con todos los plugins cada vez. Frecuencia y costo estimados con el muestreo de las últimas 48 h.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3">
+				{ report.isLoading && <Skeleton className="itb:h-24" /> }
+				{ report.error && <Notice level="error">{ report.error.message }</Notice> }
+				{ data && data.views_per_day === null && (
+					<Notice level="info">{ __( 'Sin datos suficientes del RUM para estimar las páginas vistas: se muestra el costo por día, no la proporción por visita.' ) }</Notice>
+				) }
+				{ data && data.items.length === 0 && <Notice level="info">{ __( 'Sin peticiones de visitantes con suficientes muestras. Con poco tráfico, sube el muestreo o espera más horas.' ) }</Notice> }
+				{ data && data.items.length > 0 && (
+					<div className="itb:overflow-x-auto">
+						<table className="itb:w-full itb:min-w-[640px] itb:border-collapse itb:text-[13px]">
+							<thead>
+								<tr className="itb:border-b itb:border-zinc-200 itb:text-left itb:text-xs itb:text-zinc-500">
+									<th className="itb:py-2 itb:pr-3 itb:font-medium">{ __( 'Petición' ) }</th>
+									<th className="itb:py-2 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Por día' ) }</th>
+									<th className="itb:py-2 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Por visita' ) }</th>
+									<th className="itb:py-2 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Media' ) }</th>
+									<th className="itb:py-2 itb:text-right itb:font-medium">{ __( 'CPU por día' ) }</th>
+								</tr>
+							</thead>
+							<tbody>
+								{ data.items.map( ( row ) => (
+									<tr key={ row.request_type + row.route_key } className="itb:border-b itb:border-zinc-100 itb:align-top itb:last:border-b-0">
+										<td className="itb:py-2 itb:pr-3">
+											<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+												<Badge>{ TYPES[ row.request_type ] ?? row.request_type }</Badge>
+												<span className="itb:font-mono itb:text-xs">{ row.route_key || '—' }</span>
+												{ row.per_visit && <Badge tone="amber">{ __( 'en cada visita' ) }</Badge> }
+												{ row.rule === 'active' && <Badge tone="green">{ __( 'con regla de carga condicional' ) }</Badge> }
+											</div>
+											<p className="itb:mt-1 itb:max-w-xl itb:text-xs itb:text-zinc-500">{ row.hint }</p>
+										</td>
+										<td className="itb:py-2 itb:pr-3 itb:text-right itb:tabular-nums">~{ number.format( row.per_day ) }</td>
+										<td className="itb:py-2 itb:pr-3 itb:text-right itb:tabular-nums">{ row.per_view === null ? '—' : number.format( row.per_view ) }</td>
+										<td className="itb:py-2 itb:pr-3 itb:text-right itb:tabular-nums">{ ms( row.ms_avg ) }</td>
+										<td className="itb:py-2 itb:text-right itb:tabular-nums">{ duration( row.cpu_s_day ) }</td>
+									</tr>
+								) ) }
+							</tbody>
+						</table>
+					</div>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+/** Segundos de CPU por día, legibles. */
+function duration( seconds: number ): string {
+	if ( seconds >= 3600 ) {
+		return `${ number.format( seconds / 3600 ) } h`;
+	}
+	if ( seconds >= 60 ) {
+		return `${ number.format( seconds / 60 ) } min`;
+	}
+	return `${ seconds } s`;
 }
 
 function AuditCard() {

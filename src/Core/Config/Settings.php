@@ -58,6 +58,7 @@ final class Settings {
 			'shield_xmlrpc'            => true,
 			'shield_rest_users'        => true,
 			'shield_heartbeat'         => true,
+			'shield_prefetch'          => true,
 			'shield_heartbeat_admin'   => 60,
 			'shield_heartbeat_editor'  => 15,
 			'shield_filter_limit'      => 3,
@@ -74,9 +75,11 @@ final class Settings {
 			'view_transitions'         => false,
 			'hints_lcp'                => true,
 			'hints_facades'            => true,
+			'lazy_render'              => [],
 			'db_keep_revisions'        => 5,
 			'db_schedule'              => [],
 			'db_schedule_days'         => 7,
+			'db_as_retention'          => 0,
 			'fleet_remote'             => false,
 		];
 	}
@@ -257,6 +260,7 @@ final class Settings {
 			'tweak_autosave'          => [ 30, DAY_IN_SECONDS ],
 			'db_keep_revisions'       => [ 1, 100 ],
 			'db_schedule_days'        => [ 1, 90 ],
+			'db_as_retention'         => [ 0, 30 ],
 		] as $key => [ $min, $max ] ) {
 			if ( isset( $input[ $key ] ) && is_numeric( $input[ $key ] ) ) {
 				$out[ $key ] = (int) max( $min, min( $max, (int) $input[ $key ] ) );
@@ -273,10 +277,14 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades', 'fleet_remote' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades', 'fleet_remote' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
+		}
+
+		if ( isset( $input['lazy_render'] ) && is_array( $input['lazy_render'] ) ) {
+			$out['lazy_render'] = self::lazyRender( $input['lazy_render'] );
 		}
 
 		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).
@@ -309,6 +317,39 @@ final class Settings {
 			}
 		}
 		return array_slice( array_keys( $out ), 0, 20 );
+	}
+
+	/**
+	 * Reglas de renderizado diferido (content-visibility): un selector, las plantillas donde aplica
+	 * (vacío = todas) y la altura estimada mientras no se pinta.
+	 *
+	 * @param array<mixed> $list Reglas.
+	 * @return list<array{selector: string, templates: list<string>, height: int}>
+	 */
+	public static function lazyRender( array $list ): array {
+		$out = [];
+		foreach ( $list as $rule ) {
+			if ( ! is_array( $rule ) || ! is_string( $rule['selector'] ?? null ) ) {
+				continue;
+			}
+			$selector = self::selectors( [ $rule['selector'] ] )[0] ?? '';
+			if ( '' === $selector ) {
+				continue;
+			}
+			$templates = [];
+			foreach ( is_array( $rule['templates'] ?? null ) ? $rule['templates'] : [] as $template ) {
+				if ( is_string( $template ) && 1 === preg_match( '/^[a-z0-9:_\-]{1,40}$/', $template ) ) {
+					$templates[ $template ] = true;
+				}
+			}
+			$height           = is_int( $rule['height'] ?? null ) ? $rule['height'] : 600;
+			$out[ $selector ] = [
+				'selector'  => $selector,
+				'templates' => array_slice( array_keys( $templates ), 0, 20 ),
+				'height'    => max( 50, min( 3000, $height ) ),
+			];
+		}
+		return array_slice( array_values( $out ), 0, 10 );
 	}
 
 	public static function sanitizeHubUrl( string $url ): string {

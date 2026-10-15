@@ -478,4 +478,48 @@ final class ProfilerTest extends TestCase {
 		$this->assertCount( 1, $search['notes'] );
 		$this->assertSame( 'warning', CacheabilityAudit::analyze( 200, [ 'cache-control' => 'no-store' ] )['verdict'], 'sin la marca del plugin de caché sigue siendo un problema' );
 	}
+
+	public function test_per_visit_requests(): void {
+		$row  = static fn( string $type, string $route, int $ms, int $anon = 1, int $source = Collector::SOURCE_RANDOM ): array => [
+			'request_type' => $type,
+			'route_key'    => $route,
+			'ms'           => $ms,
+			'anon'         => $anon,
+			'source'       => $source,
+		];
+		$rows = [];
+		// 48 h al 1 %: 20 muestras del menú de WoodMart = ~1.000 al día.
+		for ( $i = 0; $i < 20; $i++ ) {
+			$rows[] = $row( 'AdminAjax', 'woodmart_load_html_dropdowns', 800 );
+		}
+		for ( $i = 0; $i < 4; $i++ ) {
+			$rows[] = $row( 'StoreApi', 'wc/store/v1', 300 );
+		}
+		$rows[] = $row( 'AdminAjax', 'rara', 5000 );
+		$rows[] = $row( 'AdminAjax', 'heartbeat', 400, 0 );
+		$rows[] = $row( 'AdminAjax', 'heartbeat', 400, 0 );
+		$rows[] = $row( 'AdminAjax', 'heartbeat', 400, 0 );
+		$rows[] = $row( 'FrontendHtml', 'portada', 900 );
+		$rows[] = $row( 'FrontendHtml', 'portada', 900 );
+		$rows[] = $row( 'FrontendHtml', 'portada', 900 );
+		$rows[] = $row( 'AdminAjax', 'woodmart_load_html_dropdowns', 800, 1, Collector::SOURCE_INTENSIVE );
+
+		$items = Report::perVisit( $rows, 0.01, 48, 1500.0, [ 'AdminAjax:woodmart_load_html_dropdowns' => 'active' ] );
+		$this->assertSame( [ 'woodmart_load_html_dropdowns', 'wc/store/v1' ], array_column( $items, 'route_key' ), 'solo visitantes sin sesión, muestreo aleatorio y al menos 3 muestras; sin HTML' );
+		$this->assertSame( 1000, $items[0]['per_day'] );
+		$this->assertSame( 800, $items[0]['cpu_s_day'], '1.000 × 0,8 s' );
+		$this->assertSame( 0.67, $items[0]['per_view'] );
+		$this->assertTrue( $items[0]['per_visit'] );
+		$this->assertSame( 'active', $items[0]['rule'] );
+		$this->assertStringContainsString( 'WoodMart', $items[0]['hint'] );
+		$this->assertFalse( $items[1]['per_visit'], '200 al día con 1.500 visitas' );
+
+		$noRum = Report::perVisit( $rows, 0.01, 48, null );
+		$this->assertNull( $noRum[0]['per_view'] );
+		$this->assertFalse( $noRum[0]['per_visit'], 'sin páginas vistas no se afirma "en cada visita"' );
+		$this->assertSame( [], Report::perVisit( $rows, 0.0, 48, null ) );
+
+		$this->assertTrue( SampleWriter::anonymous( [ 'woocommerce_items_in_cart' => '1' ] ) );
+		$this->assertFalse( SampleWriter::anonymous( [ 'wordpress_logged_in_abc' => 'x' ] ) );
+	}
 }

@@ -9,6 +9,10 @@
  * - LiteSpeed Cache con "Caché de la página de acceso": la copia en caché no envía la cookie de prueba
  *   de WordPress y el primer intento de acceso falla con "las cookies están bloqueadas".
  *
+ * - 0.11.0, dos lazy load a la vez (EWWW y LiteSpeed Cache): EWWW no difería las 3 primeras imágenes
+ *   (logo, cabecera) y LiteSpeed las difería igual; el logo era el LCP de una categoría (4,7 s en móvil;
+ *   3,2 s con uno solo). Opciones: ewww_image_optimizer_lazy_load y litespeed.conf.media-lazy.
+ *
  * Opciones verificadas en el código de los plugins (2026-10-14): EWWW Image Optimizer 8.9.0
  * (ewww_image_optimizer_webp, _webp_for_cdn, _picture_webp, _exactdn; bloque "EWWWIO" del .htaccess)
  * y LiteSpeed Cache 7.9.1 (opción litespeed.conf.cache-page_login, Root::name()).
@@ -40,7 +44,7 @@ final class EnvironmentChecks {
 		$ewww = null;
 		if ( defined( 'EWWW_IMAGE_OPTIMIZER_VERSION' ) ) {
 			$ewww = [];
-			foreach ( [ 'webp', 'webp_for_cdn', 'picture_webp', 'exactdn' ] as $key ) {
+			foreach ( [ 'webp', 'webp_for_cdn', 'picture_webp', 'exactdn', 'lazy_load' ] as $key ) {
 				$ewww[ $key ] = (bool) get_option( 'ewww_image_optimizer_' . $key );
 			}
 			$htaccess         = ABSPATH . '.htaccess';
@@ -49,10 +53,17 @@ final class EnvironmentChecks {
 
 		$lscache = null;
 		if ( defined( 'LSCWP_V' ) ) {
-			$lscache = [ 'page_login' => (bool) get_option( 'litespeed.conf.cache-page_login' ) ];
+			$lscache = [
+				'page_login' => (bool) get_option( 'litespeed.conf.cache-page_login' ),
+				'lazy'       => (bool) get_option( 'litespeed.conf.media-lazy' ),
+			];
 		}
 
-		return self::evaluate( $opcache, $ewww, $lscache, $cloudflare );
+		$alerts = self::evaluate( $opcache, $ewww, $lscache, $cloudflare );
+		if ( 'refused' === \ImaginaTurbo\Modules\Speculation\PrefetchProbe::cached() ) {
+			$alerts[] = self::prefetchRefused();
+		}
+		return $alerts;
 	}
 
 	/**
@@ -109,7 +120,28 @@ final class EnvironmentChecks {
 			];
 		}
 
+		if ( true === ( $ewww['lazy_load'] ?? false ) && true === ( $lscache['lazy'] ?? false ) ) {
+			$alerts[] = [
+				'level'   => 'warning',
+				'code'    => 'double_lazy',
+				'message' => __( 'EWWW Image Optimizer y LiteSpeed Cache difieren las imágenes a la vez: LiteSpeed difiere también las que EWWW deja cargar de inmediato (logo, cabecera) y la imagen principal llega tarde. Desactiva LiteSpeed Cache → Optimización de página → Medios → «Carga diferida de imágenes» y deja el de EWWW, que además entrega los WebP.', 'imagina-turbo' ),
+			];
+		}
+
 		return $alerts;
+	}
+
+	/**
+	 * Cloudflare (Speed Brain) rechaza las precargas de páginas que no están en su caché.
+	 *
+	 * @return array{level: string, code: string, message: string}
+	 */
+	public static function prefetchRefused(): array {
+		return [
+			'level'   => 'warning',
+			'code'    => 'prefetch_refused',
+			'message' => __( 'Cloudflare rechaza las precargas de páginas (Speed Brain activo y el HTML no se guarda en el edge): la navegación instantánea de Imagina Turbo no tiene efecto. Desactiva Speed Brain en Cloudflare → Velocidad → Optimización → Contenido, o activa la caché de HTML en Cloudflare, o usa el modo prerender en Navegación.', 'imagina-turbo' ),
+		];
 	}
 
 	/**

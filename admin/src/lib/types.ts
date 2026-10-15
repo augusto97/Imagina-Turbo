@@ -180,6 +180,27 @@ export interface RouteCost {
 	queries_avg: number;
 }
 
+export interface PerVisitItem {
+	request_type: string;
+	route_key: string;
+	samples: number;
+	per_day: number;
+	ms_avg: number;
+	cpu_s_day: number;
+	per_view: number | null;
+	per_visit: boolean;
+	rule: string;
+	hint: string;
+}
+
+export interface PerVisitReport {
+	hours: number;
+	rate: number;
+	views_per_day: number | null;
+	rum_beacons: number;
+	items: PerVisitItem[];
+}
+
 export interface AuditResult {
 	label: string;
 	url: string;
@@ -344,7 +365,7 @@ export interface WooInspect {
 
 export interface ShieldStatus {
 	enabled: boolean;
-	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
+	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
 	required: { xmlrpc: boolean; rest_users: boolean };
 	cron: { disabled: boolean; command: string; wp_cli: string };
 }
@@ -517,12 +538,22 @@ export interface NavigationSettings {
 	view_transitions: boolean;
 	hints_lcp: boolean;
 	hints_facades: boolean;
+	lazy_render: LazyRenderRule[];
+}
+
+export interface LazyRenderRule {
+	selector: string;
+	templates: string[];
+	height: number;
 }
 
 export interface NavigationStatus {
 	modules: Record<'speculation' | 'rum' | 'frontend_hints', { enabled: boolean; forced_off: string }>;
 	settings: NavigationSettings;
 	core_api: boolean;
+	lazy_presets: LazyRenderRule[];
+	theme: string;
+	prefetch_probe: '' | 'refused' | 'ok' | 'direct';
 	permalink: boolean;
 	hub_rum: boolean;
 	report: RumReportData;
@@ -607,9 +638,9 @@ export interface DbAudit {
 	action_scheduler: { available: boolean; old: number; complete: number; failed: number; canceled: number; pending: number; total: number; logs: number };
 	revisions: { total: number; excess: number; posts: number; keep: number; wp_limit: number };
 	orphan_postmeta: number;
-	hpos: { woo: boolean; enabled: boolean; sync: boolean; posts_orders: number; recommendation: string };
+	hpos: { woo: boolean; enabled: boolean; sync: boolean; posts_orders: number; recommendation: string; incompatible?: string[] };
 	postmeta_index: { rows: number; indexes: string[]; recommendation: string };
-	tables: { name: string; rows: number; bytes: number }[];
+	tables: { name: string; rows: number; bytes: number; owner?: 'core' | 'active' | 'inactive' | 'removed' | 'unknown'; plugin?: string }[];
 }
 
 export interface DbStatus {
@@ -617,7 +648,7 @@ export interface DbStatus {
 	audit: DbAudit | null;
 	batches: { batch: string; created_at: string; action: string; rows: number; restored: boolean }[];
 	keep: number;
-	settings: { db_keep_revisions: number; db_schedule: string[]; db_schedule_days: number };
+	settings: { db_keep_revisions: number; db_schedule: string[]; db_schedule_days: number; db_as_retention: number };
 	last_run: number;
 	result?: { action: string; batch: string; affected: number; backed_up: number; more: boolean };
 	restored?: { batch: string; restored: number; skipped: number };

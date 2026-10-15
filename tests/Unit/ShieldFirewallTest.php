@@ -18,8 +18,10 @@ use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Firewall\HtaccessWriter;
 use ImaginaTurbo\Support\CloudflareAccess;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
+use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
 use ImaginaTurbo\Modules\Shield\EarlyGuard;
 use ImaginaTurbo\Modules\Shield\ShieldModule;
+use ImaginaTurbo\Modules\Speculation\PrefetchProbe;
 use ImaginaTurbo\Modules\Tweaks\PerfmattersMigration;
 use ImaginaTurbo\Modules\Tweaks\TweakCatalog;
 
@@ -276,5 +278,41 @@ final class ShieldFirewallTest extends TestCase {
 		$this->assertTrue( $good->status()['active'] );
 		$this->assertTrue( $good->remove()['ok'] );
 		$this->assertSame( $original, file_get_contents( $file ) );
+	}
+
+	public function test_prefetch_with_side_effects_is_declined(): void {
+		$shield   = [
+			'prefetch'       => true,
+			'prefetch_paths' => [ '/carrito', '/pagar', '/cuenta' ],
+		] + self::ALL;
+		$prefetch = [ 'HTTP_SEC_PURPOSE' => 'prefetch' ];
+		$decide   = static fn( string $path, array $get = [], array $server = [ 'HTTP_SEC_PURPOSE' => 'prefetch' ], array $s = [] ): ?string => EarlyGuard::decide( RequestType::FrontendHtml, $path, 'wp-json', $s ?: $shield, $get, [], $server )['reason'] ?? null;
+
+		$this->assertSame( 'prefetch', $decide( '/', [ 'add-to-cart' => '15' ] ) );
+		$this->assertSame( 'prefetch', $decide( '/cuenta/customer-logout', [ '_wpnonce' => 'x' ] ) );
+		$this->assertSame( 'prefetch', $decide( '/carrito' ) );
+		$this->assertSame( 'prefetch', $decide( '/pagar/order-received/12' ) );
+		$this->assertSame( 'prefetch', $decide( '/wp-login.php', [ 'action' => 'logout' ] ) );
+		$this->assertSame( 'prefetch', $decide( '/carrito', [], [ 'HTTP_SEC_PURPOSE' => 'prefetch;prerender' ] ), 'el prerender también es precarga' );
+		$this->assertNull( $decide( '/producto/x/' ), 'una página normal se precarga' );
+		$this->assertNull( $decide( '/carritos-de-pintura/' ), 'prefijo de ruta completo, no de texto' );
+		$this->assertNull( $decide( '/', [ 'add-to-cart' => '15' ], [] ), 'un clic real agrega al carrito' );
+		$this->assertNull( $decide( '/', [ 'add-to-cart' => '15' ], $prefetch, [ 'prefetch' => false ] + self::ALL ), 'apagado' );
+		$this->assertSame( 503, EarlyGuard::decide( RequestType::FrontendHtml, '/carrito', 'wp-json', $shield, [], [], $prefetch )['status'] ?? 0 );
+
+		$this->assertSame( 'refused', PrefetchProbe::classify( 503, 'prefetch refused: not eligible', true ) );
+		$this->assertSame( 'ok', PrefetchProbe::classify( 200, '', true ) );
+		$this->assertSame( 'direct', PrefetchProbe::classify( 200, '', false ), 'sin Cloudflare de por medio no se puede saber' );
+
+		$notes = CacheabilityAudit::analyze(
+			200,
+			[
+				'cache-control'     => 'max-age=0',
+				'speculation-rules' => '"/cdn-cgi/speculation"',
+				'cf-cache-status'   => 'DYNAMIC',
+			]
+		)['notes'];
+		$this->assertStringContainsString( 'Speed Brain', implode( ' ', $notes ) );
+		$this->assertStringContainsString( '503', implode( ' ', $notes ) );
 	}
 }

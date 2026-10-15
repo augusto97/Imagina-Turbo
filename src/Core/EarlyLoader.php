@@ -186,7 +186,8 @@ final class EarlyLoader {
 		$candidate = RequestType::StaticMiss === $type
 			|| RequestType::XmlRpc === $type
 			|| ( RequestType::FrontendHtml === $type && isset( $_GET['author'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
-			|| ( RequestType::Rest === $type && ( str_contains( $request->path, '/users' ) || isset( $_GET['rest_route'] ) ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+			|| ( RequestType::Rest === $type && ( str_contains( $request->path, '/users' ) || isset( $_GET['rest_route'] ) ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+			|| isset( $_SERVER['HTTP_SEC_PURPOSE'] ) || isset( $_SERVER['HTTP_PURPOSE'] );
 		if ( ! $candidate ) {
 			return;
 		}

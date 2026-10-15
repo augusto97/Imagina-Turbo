@@ -87,6 +87,17 @@ final class EnvironmentChecksTest extends TestCase {
 		$this->assertSame( [ 'webp_htaccess_cloudflare' ], array_column( EnvironmentChecks::evaluate( null, $htaccess, null, true ), 'code' ) );
 	}
 
+	public function test_two_lazy_loaders(): void {
+		$ewww = [
+			'webp'         => true,
+			'webp_for_cdn' => true,
+			'lazy_load'    => true,
+		];
+		$this->assertSame( [ 'double_lazy' ], array_column( EnvironmentChecks::evaluate( null, $ewww, [ 'lazy' => true ], false ), 'code' ) );
+		$this->assertSame( [], EnvironmentChecks::evaluate( null, $ewww, [ 'lazy' => false ], false ) );
+		$this->assertSame( [], EnvironmentChecks::evaluate( null, [ 'lazy_load' => false ] + $ewww, [ 'lazy' => true ], false ) );
+	}
+
 	public function test_login_page_cached_by_litespeed(): void {
 		$this->assertSame( [ 'login_cached' ], array_column( EnvironmentChecks::evaluate( null, null, [ 'page_login' => true ], false ), 'code' ) );
 		$this->assertSame( [], EnvironmentChecks::evaluate( null, null, [ 'page_login' => false ], false ) );

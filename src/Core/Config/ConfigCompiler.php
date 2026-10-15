@@ -260,10 +260,13 @@ final class ConfigCompiler {
 			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
 			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( $compat['delay_js'] ?? [] ) : [],
 			'rum'                         => $this->rumConfig(),
+			// Retención de Action Scheduler: solo con el módulo Base de datos activo (0 = la de Action Scheduler).
+			'database'                    => [ 'as_retention' => true === ( $modules['database'] ?? false ) ? (int) $this->settings->get( 'db_as_retention', 0 ) : 0 ],
 			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
 			'hints'                       => [
 				'lcp'     => (bool) $this->settings->get( 'hints_lcp', true ),
 				'facades' => (bool) $this->settings->get( 'hints_facades', true ),
+				'lazy'    => true === ( $modules['frontend_hints'] ?? true ) ? Settings::lazyRender( (array) $this->settings->get( 'lazy_render', [] ) ) : [],
 				'images'  => array_map(
 					static fn( array $i ): array => [
 						'kind' => $i['kind'],
@@ -391,11 +394,39 @@ final class ConfigCompiler {
 			'heartbeat_admin'  => (int) $this->settings->get( 'shield_heartbeat_admin', 60 ),
 			'heartbeat_editor' => (int) $this->settings->get( 'shield_heartbeat_editor', 15 ),
 			'filter_limit'     => (int) $this->settings->get( 'shield_filter_limit', 3 ),
+			'prefetch'         => $on( 'shield_prefetch' ),
+			'prefetch_paths'   => $this->prefetchPaths(),
 			'required'         => [
 				'xmlrpc'     => $xmlrpcRequired,
 				'rest_users' => $usersRequired,
 			],
 		];
+	}
+
+	/**
+	 * Rutas que nunca se precargan: carrito, pago y cuenta de WooCommerce (sin comodines).
+	 *
+	 * @return list<string>
+	 */
+	private function prefetchPaths(): array {
+		if ( ! function_exists( 'wc_get_page_id' ) ) {
+			return [];
+		}
+		$out = [];
+		foreach ( [ 'cart', 'checkout', 'myaccount' ] as $page ) {
+			$id   = (int) wc_get_page_id( $page );
+			$link = $id > 0 ? get_permalink( $id ) : false;
+			$path = is_string( $link ) ? (string) wp_parse_url( $link, PHP_URL_PATH ) : '';
+			$home = (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH );
+			if ( '' !== $home && '/' !== $home && str_starts_with( $path, rtrim( $home, '/' ) ) ) {
+				$path = substr( $path, strlen( rtrim( $home, '/' ) ) );
+			}
+			$path = rtrim( $path, '/' );
+			if ( '' !== $path ) {
+				$out[] = $path;
+			}
+		}
+		return array_values( array_unique( $out ) );
 	}
 
 	/**

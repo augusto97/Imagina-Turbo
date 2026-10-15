@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Rest;
 
+use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
@@ -88,6 +89,11 @@ final class DatabaseController extends Controller {
 					'minimum' => 1,
 					'maximum' => 90,
 				],
+				'db_as_retention'   => [
+					'type'    => 'integer',
+					'minimum' => 0,
+					'maximum' => 30,
+				],
 			]
 		);
 	}
@@ -117,6 +123,7 @@ final class DatabaseController extends Controller {
 				'db_keep_revisions' => (int) $settings->get( 'db_keep_revisions', 5 ),
 				'db_schedule'       => array_values( (array) $settings->get( 'db_schedule', [] ) ),
 				'db_schedule_days'  => (int) $settings->get( 'db_schedule_days', 7 ),
+				'db_as_retention'   => (int) $settings->get( 'db_as_retention', 0 ),
 			],
 			'last_run' => is_array( $state ) ? (int) ( $state['last'] ?? 0 ) : 0,
 		];
@@ -157,12 +164,16 @@ final class DatabaseController extends Controller {
 
 	public function settings( \WP_REST_Request $request ): \WP_REST_Response {
 		$changes = [];
-		foreach ( [ 'db_keep_revisions', 'db_schedule', 'db_schedule_days' ] as $key ) {
+		foreach ( [ 'db_keep_revisions', 'db_schedule', 'db_schedule_days', 'db_as_retention' ] as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ $key ] = $request->get_param( $key );
 			}
 		}
 		$this->container->get( Settings::class )->update( $changes );
+		if ( isset( $changes['db_as_retention'] ) ) {
+			// La retención viaja en la configuración compilada (la lee Action Scheduler en cron y AJAX).
+			$this->container->get( ConfigCompiler::class )->compile();
+		}
 		$this->container->get( EventLog::class )->info(
 			'database',
 			'settings',

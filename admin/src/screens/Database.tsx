@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Input } from '@/components/ui/input';
+import { Input, Select } from '@/components/ui/input';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
@@ -237,13 +237,25 @@ function AuditCards( { status, audit }: { status: DbStatus; audit: DbAudit } ) {
 					</KeyValue>
 				) }
 				{ audit.hpos.recommendation && <Notice level="info">{ audit.hpos.recommendation }</Notice> }
+				{ ! audit.hpos.enabled && ( audit.hpos.incompatible ?? [] ).length > 0 && (
+					<Notice level="warning">{ `${ __( 'Estos plugins activos declaran no ser compatibles con HPOS; WooCommerce no deja activarlo mientras sigan activos:' ) } ${ ( audit.hpos.incompatible ?? [] ).join( ', ' ) }` }</Notice>
+				) }
+				{ audit.hpos.woo && ! audit.hpos.enabled && audit.hpos.incompatible !== undefined && audit.hpos.incompatible.length === 0 && (
+					<div className="itb:text-zinc-500">{ __( 'Ningún plugin activo declara incompatibilidad con HPOS. Actívalo con la sincronización encendida, revisa pedidos nuevos unos días y después apaga la sincronización.' ) }</div>
+				) }
 				<KeyValue label={ __( 'Índices de postmeta' ) }>{ `${ number.format( audit.postmeta_index.rows ) } ${ __( 'filas' ) } · ${ audit.postmeta_index.indexes.join( ' · ' ) }` }</KeyValue>
 				{ audit.postmeta_index.recommendation && <Notice level="info">{ audit.postmeta_index.recommendation }</Notice> }
+				{ audit.tables.some( ( t ) => t.owner === 'inactive' || t.owner === 'removed' ) && (
+					<Notice level="info">
+						{ __( 'Hay tablas de plugins inactivos o desinstalados. No frenan el sitio (nadie las consulta), pero ocupan espacio y alargan las copias de seguridad. Bórralas desde el propio plugin (opción de borrar datos al desinstalar) o con un respaldo previo desde phpMyAdmin. Imagina Turbo no borra tablas.' ) }
+					</Notice>
+				) }
 				<div className="itb:overflow-x-auto">
 					<table className="itb:w-full itb:border-collapse itb:text-left">
 						<thead className="itb:text-zinc-500">
 							<tr>
 								<th className="itb:py-1 itb:pr-3 itb:font-normal">{ __( 'Tabla' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:font-normal">{ __( 'De' ) }</th>
 								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-normal">{ __( 'Filas (aprox.)' ) }</th>
 								<th className="itb:py-1 itb:text-right itb:font-normal">{ __( 'Tamaño' ) }</th>
 							</tr>
@@ -253,6 +265,12 @@ function AuditCards( { status, audit }: { status: DbStatus; audit: DbAudit } ) {
 								<tr key={ t.name } className="itb:border-t itb:border-zinc-100">
 									<td className="itb:py-1 itb:pr-3">
 										<code className="itb:break-all">{ t.name }</code>
+									</td>
+									<td className="itb:py-1 itb:pr-3">
+										{ t.owner === 'core' && <span className="itb:text-zinc-500">WordPress</span> }
+										{ t.owner === 'active' && <span className="itb:text-zinc-500">{ t.plugin }</span> }
+										{ t.owner === 'inactive' && <Badge tone="amber">{ `${ t.plugin } · ${ __( 'inactivo' ) }` }</Badge> }
+										{ t.owner === 'removed' && <Badge tone="amber">{ `${ t.plugin } · ${ __( 'desinstalado' ) }` }</Badge> }
 									</td>
 									<td className="itb:py-1 itb:pr-3 itb:text-right itb:tabular-nums">{ number.format( t.rows ) }</td>
 									<td className="itb:py-1 itb:text-right itb:tabular-nums">{ formatBytes( t.bytes, config.locale ) }</td>
@@ -319,10 +337,20 @@ function ScheduleCard( { status }: { status: DbStatus } ) {
 					</label>
 				) ) }
 			</div>
-			<div className="itb:grid itb:gap-3 itb:md:grid-cols-2">
+			<div className="itb:grid itb:gap-3 itb:md:grid-cols-3">
 				<label className="itb:flex itb:flex-col itb:gap-1">
 					<span className="itb:font-medium">{ __( 'Cada cuántos días' ) }</span>
 					<Input type="number" min={ 1 } max={ 90 } value={ values.db_schedule_days } onChange={ ( e ) => setValues( { ...values, db_schedule_days: Number( e.target.value ) } ) } />
+				</label>
+				<label className="itb:flex itb:flex-col itb:gap-1">
+					<span className="itb:font-medium">{ __( 'Historial de Action Scheduler' ) }</span>
+					<Select value={ String( values.db_as_retention ) } onChange={ ( e ) => setValues( { ...values, db_as_retention: Number( e.target.value ) } ) }>
+						<option value="0">{ __( 'El de Action Scheduler (31 días)' ) }</option>
+						<option value="14">{ __( '14 días' ) }</option>
+						<option value="7">{ __( '7 días' ) }</option>
+						<option value="3">{ __( '3 días' ) }</option>
+					</Select>
+					<span className="itb:text-zinc-500">{ __( 'Cuánto guarda el propio limpiador de Action Scheduler de las tareas terminadas y sus registros. Las pendientes no se tocan. Requiere el módulo activo.' ) }</span>
 				</label>
 				<label className="itb:flex itb:flex-col itb:gap-1">
 					<span className="itb:font-medium">{ __( 'Revisiones a conservar por contenido' ) }</span>

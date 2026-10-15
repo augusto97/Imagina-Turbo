@@ -87,6 +87,7 @@ final class SampleWriter {
 			'cacheable'     => self::looksCacheable( $request, $status, $response ) ? 1 : 0,
 			'via_cf'        => OriginLock::classify( $_SERVER ),
 			'source'        => $collector->source,
+			'anon'          => self::anonymous( $_COOKIE ) ? 1 : 0,
 			'overhead_us'   => $collector->overheadUs(),
 			'set_cookies'   => [] === $response['cookies'] ? null : substr( implode( ',', $response['cookies'] ), 0, 255 ),
 			'cache_control' => '' === $response['cache_control'] ? null : substr( $response['cache_control'], 0, 100 ),
@@ -144,6 +145,20 @@ final class SampleWriter {
 			return false;
 		}
 		return 1 !== preg_match( '/\b(private|no-store|no-cache)\b/', $response['cache_control'] );
+	}
+
+	/**
+	 * Visitante sin sesión de WordPress (para separar lo que piden los visitantes de lo del admin).
+	 *
+	 * @param array<mixed> $cookies $_COOKIE.
+	 */
+	public static function anonymous( array $cookies ): bool {
+		foreach ( array_keys( $cookies ) as $cookie ) {
+			if ( is_string( $cookie ) && str_starts_with( $cookie, 'wordpress_logged_in_' ) ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private function status(): int {

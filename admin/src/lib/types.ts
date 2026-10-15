@@ -166,6 +166,14 @@ export interface ProfilerSummary {
 		overhead_us: number;
 		phases: Record<string, number> | null;
 		plugins: PluginCost[];
+		db_queries: null | {
+			at: number;
+			count: number;
+			ms: number;
+			slow: { sql: string; ms: number; component: string }[];
+			repeated: { sql: string; count: number; ms: number; component: string }[];
+			components: { component: string; count: number; ms: number }[];
+		};
 	};
 	rollup: { last_hour: string | null };
 }
@@ -210,6 +218,7 @@ export interface PlatformCheck {
 
 export interface PlatformReport {
 	elementor: PlatformCheck[] | null;
+	woodmart: PlatformCheck[] | null;
 	woocommerce: PlatformCheck[] | null;
 	server: PlatformCheck[];
 }

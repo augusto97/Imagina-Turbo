@@ -367,11 +367,29 @@ final class ConfigCompiler {
 			'server'          => $server,
 			// Con WP Rocket fuera de Apache, sus aciertos no llevan cabeceras: el HTML no se deja en el edge.
 			'edge_html'       => 'wp-rocket' !== $adapter || 'apache' === $server,
+			// El plugin de caché guarda una copia para móviles: el edge también debe separar por dispositivo.
+			'mobile_split'    => self::mobileSplit( $adapter ),
 			'purge_all_hooks' => $compat['purge_all_hooks'] ?? [],
 			'sitemaps'        => $compat['sitemaps'] ?? [],
 			'preload_exclude' => $compat['preload_exclude'] ?? [],
 			'bypass_paths'    => array_values( array_unique( $bypassPaths ) ),
 		];
+	}
+
+	/**
+	 * ¿El plugin de caché sirve HTML distinto a los móviles? LiteSpeed Cache: «Caché para móviles»
+	 * (litespeed.conf.cache-mobile). WP Rocket: «Caché para móviles» + «Caché separada para móviles»
+	 * (cache_mobile y do_caching_mobile_files en wp_rocket_settings, verificado en 3.23.5.1).
+	 */
+	public static function mobileSplit( string $adapter ): bool {
+		if ( 'litespeed' === $adapter ) {
+			return (bool) get_option( 'litespeed.conf.cache-mobile' );
+		}
+		if ( 'wp-rocket' === $adapter ) {
+			$rocket = get_option( 'wp_rocket_settings', [] );
+			return is_array( $rocket ) && ! empty( $rocket['cache_mobile'] ) && ! empty( $rocket['do_caching_mobile_files'] );
+		}
+		return false;
 	}
 
 	/**

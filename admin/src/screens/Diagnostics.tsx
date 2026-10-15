@@ -410,6 +410,38 @@ function TypesCard( { byType, total }: { byType: Record<string, number>; total: 
 	);
 }
 
+function QueriesSection( { q }: { q: NonNullable<NonNullable<ProfilerSummary[ 'latest_diag' ]>[ 'db_queries' ]> } ) {
+	const sqlRow = ( sql: string, right: string, component: string, key: string ) => (
+		<li key={ key } className="itb:flex itb:flex-col itb:gap-0.5 itb:border-t itb:border-zinc-100 itb:pt-1">
+			<code className="itb:break-all itb:text-[11px]">{ sql }</code>
+			<span className="itb:text-xs itb:text-zinc-500">{ `${ componentLabel( component ).name } · ${ right }` }</span>
+		</li>
+	);
+	return (
+		<div className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px] itb:lg:col-span-2">
+			<div className="itb:font-medium">{ `${ __( 'Consultas a la base de datos' ) }: ${ q.count } · ${ ms( q.ms ) } · ${ formatDate( q.at, config.locale ) }` }</div>
+			<div className="itb:text-xs itb:text-zinc-500">{ __( 'Solo de tus requests con la cookie de diagnóstico. Los valores se reemplazan por «?»: no se guarda ningún dato.' ) }</div>
+			<ul className="itb:m-0 itb:flex itb:list-none itb:flex-wrap itb:gap-x-4 itb:gap-y-1 itb:p-0">
+				{ q.components.slice( 0, 8 ).map( ( c ) => (
+					<li key={ c.component }>{ `${ componentLabel( c.component ).name }: ${ c.count } · ${ ms( c.ms ) }` }</li>
+				) ) }
+			</ul>
+			{ q.slow.length > 0 && (
+				<div>
+					<div className="itb:mb-1 itb:font-medium">{ __( 'Lentas (50 ms o más)' ) }</div>
+					<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-1 itb:p-0">{ q.slow.map( ( s, i ) => sqlRow( s.sql, ms( s.ms ), s.component, `s${ i }` ) ) }</ul>
+				</div>
+			) }
+			{ q.repeated.length > 0 && (
+				<div>
+					<div className="itb:mb-1 itb:font-medium">{ __( 'Repetidas (la misma consulta con distintos valores: suele ser un bucle que pregunta una por una)' ) }</div>
+					<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-1 itb:p-0">{ q.repeated.map( ( r, i ) => sqlRow( r.sql, `${ r.count } × · ${ ms( r.ms ) }`, r.component, `r${ i }` ) ) }</ul>
+				</div>
+			) }
+		</div>
+	);
+}
+
 function RoutesCard( { items, source, loading }: { items?: RouteCost[]; source?: string; loading: boolean } ) {
 	return (
 		<Card>
@@ -578,6 +610,7 @@ function PlatformCard() {
 	const report = useQuery( { queryKey: [ 'platform' ], queryFn: () => api<PlatformReport>( 'diagnostics/platform' ) } );
 	const groups: [ string, PlatformCheck[] | null | undefined ][] = [
 		[ 'Elementor', report.data?.elementor ],
+		[ 'WoodMart', report.data?.woodmart ],
 		[ 'WooCommerce', report.data?.woocommerce ],
 		[ __( 'Servidor y base de datos' ), report.data?.server ],
 	];
@@ -585,7 +618,7 @@ function PlatformCard() {
 		<Card>
 			<CardHeader>
 				<CardTitle>{ __( 'Ajustes de la plataforma' ) }</CardTitle>
-				<CardDescription>{ __( 'Ajustes de Elementor, WooCommerce y el servidor que cambian la velocidad. Solo recomendaciones: Imagina Turbo no los cambia.' ) }</CardDescription>
+				<CardDescription>{ __( 'Ajustes de Elementor, WoodMart, WooCommerce y el servidor que cambian la velocidad. Solo recomendaciones: Imagina Turbo no los cambia.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent className="itb:flex itb:flex-col itb:gap-4 itb:text-[13px]">
 				{ report.isLoading && <Skeleton className="itb:h-24" /> }
@@ -765,6 +798,7 @@ function LatestDiagCard( { diag }: { diag: NonNullable<ProfilerSummary[ 'latest_
 						</li>
 					) ) }
 				</ul>
+				{ diag.db_queries && <QueriesSection q={ diag.db_queries } /> }
 			</CardContent>
 		</Card>
 	);

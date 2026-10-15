@@ -205,7 +205,7 @@ final class CloudflareService {
 
 		$settings = [];
 		$alerts   = [];
-		foreach ( Templates::settings() as $def ) {
+		foreach ( Templates::settings( $this->site->edgeHeaders ) as $def ) {
 			$current    = $zone['settings'][ $def['id'] ];
 			$settings[] = [
 				'id'          => $def['id'],
@@ -299,7 +299,7 @@ final class CloudflareService {
 			}
 		}
 		// Las fases del firewall siempre se revisan: si el módulo se apaga, sus reglas se proponen para eliminar.
-		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::WAF, Phases::RATELIMIT ], Templates::settings(), $this->site->refPrefix, $limits, $this->state );
+		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::WAF, Phases::RATELIMIT ], Templates::settings( $this->site->edgeHeaders ), $this->site->refPrefix, $limits, $this->state );
 		if ( ! $this->site->edgeHeaders ) {
 			$notes[] = __( 'La caché del HTML en el edge necesita el coordinador de caché en modo «Emitir cabeceras para el edge» (pantalla Caché).', 'imagina-turbo' );
 		}

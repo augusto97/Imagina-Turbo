@@ -13,6 +13,9 @@
  * - WooCommerce 11.2: woocommerce_custom_orders_table_enabled, woocommerce_hpos_datastore_caching_enabled
  *   (función "HPOS Data Caching", solo con HPOS, recomendada con caché de objetos),
  *   woocommerce_attribute_lookup_enabled y su regeneración (_regeneration_in_progress, _aborted).
+ * - WoodMart 8.5.4: opción xts-woodmart-options, claves leídas de su pantalla de ajustes en un sitio
+ *   real: local_google_fonts, google_font_display, font_icon_woff2_preload, lazy_loading,
+ *   preload_lcp_image, remove_jquery_migrate.
  *
  * @package ImaginaTurbo
  */
@@ -32,7 +35,7 @@ final class PlatformAudit {
 	public const INDEX_ROWS = 100000;
 
 	/**
-	 * @return array{elementor: list<Check>|null, woocommerce: list<Check>|null, server: list<Check>}
+	 * @return array{elementor: list<Check>|null, woodmart: list<Check>|null, woocommerce: list<Check>|null, server: list<Check>}
 	 */
 	public static function current(): array {
 		global $wpdb;
@@ -52,6 +55,23 @@ final class PlatformAudit {
 					'lazy_bg'          => '1' === (string) get_option( 'elementor_lazy_load_background_images', '1' ),
 					'fa4_shim'         => 'yes' === get_option( 'elementor_load_fa4_shim' ),
 				]
+			);
+		}
+		$woodmart = null;
+		$options  = get_option( 'xts-woodmart-options' );
+		if ( 'woodmart' === get_template() && is_array( $options ) ) {
+			$flag     = static fn( string $key ): bool => in_array( $options[ $key ] ?? '0', [ '1', 1, true, 'yes', 'on' ], true );
+			$hints    = Runtime::$config?->get( 'hints', [] );
+			$woodmart = self::woodmart(
+				[
+					'local_fonts'  => $flag( 'local_google_fonts' ),
+					'font_display' => is_string( $options['google_font_display'] ?? null ) ? $options['google_font_display'] : 'disable',
+					'icon_preload' => $flag( 'font_icon_woff2_preload' ),
+					'lazy'         => $flag( 'lazy_loading' ),
+					'lcp_preload'  => $flag( 'preload_lcp_image' ),
+				],
+				defined( 'EWWW_IMAGE_OPTIMIZER_VERSION' ) && (bool) get_option( 'ewww_image_optimizer_lazy_load' ),
+				! is_array( $hints ) || false !== ( $hints['lcp'] ?? true )
 			);
 		}
 		$persistent = (bool) wp_using_ext_object_cache();
@@ -75,6 +95,7 @@ final class PlatformAudit {
 		}
 		return [
 			'elementor'   => $elementor,
+			'woodmart'    => $woodmart,
 			'woocommerce' => $woo,
 			'server'      => self::server( $persistent, extension_loaded( 'redis' ) || extension_loaded( 'relay' ) || class_exists( 'Redis' ), $rows, is_plugin_active( 'index-wp-mysql-for-speed/index-wp-mysql-for-speed.php' ) ),
 		];
@@ -101,6 +122,29 @@ final class PlatformAudit {
 				'label'  => __( 'Markup optimizado', 'imagina-turbo' ),
 				'status' => 'info',
 				'advice' => __( '«Optimized Markup» quita envoltorios del HTML. Pruébalo con capturas antes y después: cambia el HTML y en algunos temas descuadra secciones (en un sitio con WoodMart quitaba muy poco y movía una categoría).', 'imagina-turbo' ),
+			];
+		}
+		return $out;
+	}
+
+	/**
+	 * @param array{local_fonts: bool, font_display: string, icon_preload: bool, lazy: bool, lcp_preload: bool} $v Ajustes de WoodMart.
+	 * @return list<Check>
+	 */
+	public static function woodmart( array $v, bool $ewwwLazy, bool $turboLcp ): array {
+		$out   = [];
+		$out[] = self::check( 'wd_local_fonts', __( 'Google Fonts en el propio servidor', 'imagina-turbo' ), $v['local_fonts'], __( 'El tema pide las fuentes a Google (dos conexiones más antes de mostrar el texto). Activa «Load Google Fonts locally» (Opciones del tema → Tipografía → Fuentes).', 'imagina-turbo' ) );
+		$out[] = self::check( 'wd_font_display', __( 'font-display de las fuentes de texto', 'imagina-turbo' ), in_array( $v['font_display'], [ 'swap', 'fallback', 'optional' ], true ), __( 'Pon «"font-display" for text fonts» en «swap» (Opciones del tema → Tipografía → Fuentes): el texto se ve de inmediato con una fuente del sistema en lugar de quedar invisible.', 'imagina-turbo' ) );
+		$out[] = self::check( 'wd_icon_preload', __( 'Precarga de la fuente de íconos', 'imagina-turbo' ), $v['icon_preload'], __( 'Activa «Preload key request for "woodmart-font.woff2"» (Opciones del tema → Tipografía → Fuentes): los íconos del encabezado (carrito, búsqueda, menú) aparecen antes.', 'imagina-turbo' ) );
+		if ( $v['lazy'] && $ewwwLazy ) {
+			$out[] = self::check( 'wd_lazy', __( 'Un solo lazy load', 'imagina-turbo' ), false, __( 'El lazy load del tema y el de EWWW están activos a la vez. Desactiva «Lazy loading for images» del tema (Opciones del tema → Rendimiento → Lazy loading) y deja el de EWWW, que además entrega los WebP.', 'imagina-turbo' ) );
+		}
+		if ( $v['lcp_preload'] && $turboLcp ) {
+			$out[] = [
+				'id'     => 'wd_lcp',
+				'label'  => __( 'Precarga de la imagen LCP', 'imagina-turbo' ),
+				'status' => 'info',
+				'advice' => __( 'El tema y Imagina Turbo precargan la imagen principal. Si los dos eligen archivos distintos, el navegador baja dos: deja solo uno (desactiva «Preload LCP Image» del tema o «Prioridad de la imagen LCP» en Navegación).', 'imagina-turbo' ),
 			];
 		}
 		return $out;

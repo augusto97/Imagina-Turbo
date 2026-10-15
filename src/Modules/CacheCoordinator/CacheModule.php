@@ -73,7 +73,7 @@ final class CacheModule implements ModuleInterface {
 	/**
 	 * Ajustes compilados con valores por defecto.
 	 *
-	 * @return array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, warm: bool, adapter: string, server: string, edge_html: bool, purge_all_hooks: list<string>, sitemaps: list<string>, preload_exclude: list<string>, bypass_paths: list<string>}
+	 * @return array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, warm: bool, adapter: string, server: string, edge_html: bool, mobile_split: bool, purge_all_hooks: list<string>, sitemaps: list<string>, preload_exclude: list<string>, bypass_paths: list<string>}
 	 */
 	public static function settings(): array {
 		$cache = Runtime::$config?->get( 'cache', [] );
@@ -89,6 +89,7 @@ final class CacheModule implements ModuleInterface {
 			'adapter'         => is_string( $cache['adapter'] ?? null ) ? $cache['adapter'] : 'none',
 			'server'          => is_string( $cache['server'] ?? null ) ? $cache['server'] : 'unknown',
 			'edge_html'       => false !== ( $cache['edge_html'] ?? true ),
+			'mobile_split'    => true === ( $cache['mobile_split'] ?? false ),
 			'purge_all_hooks' => $list( $cache['purge_all_hooks'] ?? [] ),
 			'sitemaps'        => $list( $cache['sitemaps'] ?? [] ),
 			'preload_exclude' => $list( $cache['preload_exclude'] ?? [] ),

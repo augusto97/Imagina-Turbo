@@ -17,6 +17,7 @@ use ImaginaTurbo\Core\PlatformAudit;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
+use ImaginaTurbo\Modules\Profiler\QueryReport;
 use ImaginaTurbo\Modules\Profiler\Report;
 use ImaginaTurbo\Modules\Profiler\Rollup;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
@@ -118,6 +119,7 @@ final class ProfilerController extends Controller {
 					'overhead_us'  => (int) $latest['overhead_us'],
 					'phases'       => json_decode( (string) $latest['phases'], true ),
 					'plugins'      => Report::plugins( [ $latest ] ),
+					'db_queries'   => get_option( QueryReport::OPTION, null ),
 				],
 				'rollup'       => [
 					'last_hour' => self::lastRollup(),

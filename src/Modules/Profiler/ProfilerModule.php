@@ -37,6 +37,9 @@ final class ProfilerModule implements ModuleInterface {
 
 		if ( Collector::SOURCE_DIAG === $collector->source ) {
 			( new ServerTiming( $collector ) )->register();
+			if ( defined( 'SAVEQUERIES' ) && SAVEQUERIES ) {
+				QueryReport::register( $collector );
+			}
 		}
 	}
 }

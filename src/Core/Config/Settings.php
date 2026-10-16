@@ -85,6 +85,7 @@ final class Settings {
 			'script_defer_exclude'     => [],
 			'script_delay'             => [],
 			'script_delay_timeout'     => 0,
+			'delay_js_scope'           => 'compat',
 		];
 	}
 
@@ -303,6 +304,11 @@ final class Settings {
 		}
 		if ( isset( $input['script_delay_timeout'] ) && is_numeric( $input['script_delay_timeout'] ) ) {
 			$out['script_delay_timeout'] = (int) max( 0, min( 30, (int) $input['script_delay_timeout'] ) );
+		}
+
+		// Exclusiones del retraso de JS (0.14.3): todas las de la matriz o solo las esenciales.
+		if ( isset( $input['delay_js_scope'] ) && in_array( $input['delay_js_scope'], [ 'compat', 'essential' ], true ) ) {
+			$out['delay_js_scope'] = $input['delay_js_scope'];
 		}
 
 		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).

@@ -682,6 +682,7 @@ export interface ScriptLoadingStatus {
 	defer_exclude: string[];
 	delay: string[];
 	delay_timeout: number;
+	delay_scope: 'compat' | 'essential';
 	cache_defers: boolean;
 	cache_delays: boolean;
 }

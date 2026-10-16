@@ -508,3 +508,10 @@ Lo que salió del análisis de cómo cargan rápido Shopify, Tiendanube y VTEX. 
     - bloquea esa cookie en `woocommerce_set_cookie_enabled`;
     - genera la página sin la lista, salvo en la búsqueda, que no se cachea;
     - agrega antes del script de Searchanise uno en línea que actualiza la cookie en el navegador con la misma lógica (el producto primero, sin repetir, máximo 20, 180 días) y completa la configuración con la lista anterior a esa vista, como hacía el servidor.
+
+## Versión 0.14.3
+
+- **Retraso de JS que retrasa de verdad.** Con «Delayed» de LiteSpeed Cache en un sitio con WoodMart, Elementor y Site Kit, casi todo el JavaScript seguía cargando al abrir la página. Medido en móvil: el TBT seguía en 0,8–1,7 s y la portada no mejoraba. Dos causas:
+  - **La matriz**: sus listas por tema y plugin vienen de las «exclusiones en un clic» de WP Rocket, que allí son opcionales y Turbo aplicaba siempre. El nuevo ajuste `delay_js_scope` = `essential` usa solo las globales, las de pagos y las de servicios (captcha, mapas, chats, lazy load), más las que se escriban a mano en el plugin de caché. El valor por defecto sigue siendo `compat`.
+  - **`async`**: los scripts con `async` nativo contaban como excluidos, pero LSCache les quita el atributo y los retrasa. Marcarlos dejaba sin retrasar gtag de Site Kit y sus dependencias. Ahora solo cuenta `defer`.
+

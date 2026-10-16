@@ -468,6 +468,7 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 	const [ exclude, setExclude ] = useState( scripts.defer_exclude.join( '\n' ) );
 	const [ delay, setDelay ] = useState( scripts.delay.join( '\n' ) );
 	const [ timeout, setTimeoutValue ] = useState( String( scripts.delay_timeout ) );
+	const [ scope, setScope ] = useState( scripts.delay_scope );
 	const [ open, setOpen ] = useState( false );
 	const enable = useAction( () => api( 'modules/script_loading', 'PUT', { enabled: true, confirm: true } ) );
 	const save = useAction( () =>
@@ -476,6 +477,7 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 			script_defer_exclude: lines( exclude ),
 			script_delay: lines( delay ),
 			script_delay_timeout: Number( timeout ),
+			delay_js_scope: scope,
 		} )
 	);
 	const add = ( pattern: string ) => {
@@ -559,6 +561,17 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 						</Select>
 					</label>
 					<p className="itb:m-0 itb:text-xs itb:text-zinc-500">{ __( 'Con analítica o píxeles conviene un plazo (5–10 s): sin él, una visita que se va sin tocar nada no se registra.' ) }</p>
+				</div>
+
+				<div className="itb:flex itb:flex-col itb:gap-2">
+					<span className="itb:block itb:font-medium">{ __( 'Exclusiones del retraso de JS' ) }</span>
+					<span className="itb:block itb:text-xs itb:text-zinc-500">
+						{ __( 'Qué scripts no retrasan LiteSpeed Cache, WP Rocket ni este módulo. "Compatibilidad máxima" suma las listas por plugin y tema de WP Rocket, que allí son opcionales: con WoodMart, Elementor o Site Kit casi nada se retrasa. "Solo esenciales" deja fuera solo pagos, captchas, chats, lazy load y lo que excluyas a mano. Aplica aunque el módulo esté apagado.' ) }
+					</span>
+					<Select value={ scope } onChange={ ( e ) => setScope( e.target.value as ScriptLoadingStatus[ 'delay_scope' ] ) } className="itb:w-auto" aria-label={ __( 'Exclusiones del retraso de JS' ) }>
+						<option value="compat">{ __( 'Compatibilidad máxima (todas las de la matriz)' ) }</option>
+						<option value="essential">{ __( 'Solo esenciales (más rápido; verifica el sitio)' ) }</option>
+					</Select>
 				</div>
 
 				<div className="itb:flex itb:items-center itb:gap-3">

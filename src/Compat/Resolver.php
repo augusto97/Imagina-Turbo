@@ -31,7 +31,8 @@ final class Resolver {
 	 *     purge_all_hooks: list<string>,
 	 *     sitemaps: list<string>,
 	 *     preload_exclude: list<string>,
-	 *     delay_js: list<string>
+	 *     delay_js: list<string>,
+	 *     delay_js_essential: list<string>
 	 * }
 	 */
 	public function resolve( Matrix $matrix, array $activePlugins, string $stylesheet, string $template ): array {
@@ -59,6 +60,8 @@ final class Resolver {
 			'sitemaps'                    => [],
 			'preload_exclude'             => $matrix->coreList( 'preload_exclude_patterns' ),
 			'delay_js'                    => $matrix->delayJsGlobal(),
+			// Sin las listas por integración (0.14.3): ver ConfigCompiler, ajuste delay_js_scope.
+			'delay_js_essential'          => $matrix->delayJsGlobal(),
 		];
 
 		foreach ( $matrix->integrations() as $integration ) {
@@ -111,7 +114,7 @@ final class Resolver {
 			}
 		}
 
-		foreach ( [ 'integrations', 'bypass_cookies', 'bypass_paths', 'dynamic_paths', 'vary_cookies', 'require_cookie_before_cache', 'cart_cookies', 'static_passthrough', 'purge_all_hooks', 'sitemaps', 'preload_exclude', 'delay_js' ] as $key ) {
+		foreach ( [ 'integrations', 'bypass_cookies', 'bypass_paths', 'dynamic_paths', 'vary_cookies', 'require_cookie_before_cache', 'cart_cookies', 'static_passthrough', 'purge_all_hooks', 'sitemaps', 'preload_exclude', 'delay_js', 'delay_js_essential' ] as $key ) {
 			$result[ $key ] = self::unique( $result[ $key ] );
 		}
 		$result['requires']['webhook_paths'] = self::unique( $result['requires']['webhook_paths'] );

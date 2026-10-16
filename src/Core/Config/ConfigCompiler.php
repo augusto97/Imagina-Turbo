@@ -258,7 +258,8 @@ final class ConfigCompiler {
 			// Exclusiones de delay JS para WP Rocket o LSCache (solo si alguno está activo).
 			// Gestor de assets: solo con el módulo activo (las reglas "testing" solo las aplica la previsualización).
 			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
-			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( $compat['delay_js'] ?? [] ) : [],
+			// "essential" (0.14.3): solo las globales y las de pagos y servicios, sin las de cada integración.
+			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( 'essential' === $this->settings->get( 'delay_js_scope', 'compat' ) ? ( $compat['delay_js_essential'] ?? [] ) : ( $compat['delay_js'] ?? [] ) ) : [],
 			'rum'                         => $this->rumConfig(),
 			// Carga de scripts: solo con el módulo activo.
 			'scripts'                     => true === ( $modules['script_loading'] ?? false ) ? [

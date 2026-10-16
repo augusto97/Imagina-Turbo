@@ -65,6 +65,13 @@ final class AssetsDatabaseTest extends TestCase {
 		$this->assertNotContains( '/elementor/', $site['delay_js_essential'] );
 	}
 
+	public function test_litespeed_list_reads_json(): void {
+		$this->assertSame( [ 'jquery.js', 'swatchesVariations' ], DelayJsExclusions::litespeedList( '["jquery.js","swatchesVariations"]' ), 'el admin de LSCache guarda JSON' );
+		$this->assertSame( [ 'a.js', 'b.js' ], DelayJsExclusions::litespeedList( "a.js\nb.js" ) );
+		$this->assertSame( [ 'a.js' ], DelayJsExclusions::litespeedList( [ 'a.js', 3 ] ) );
+		$this->assertSame( [], DelayJsExclusions::litespeedList( false ) );
+	}
+
 	public function test_delay_js_scope_setting(): void {
 		$this->assertSame( 'essential', Settings::sanitize( [ 'delay_js_scope' => 'essential' ] )['delay_js_scope'] );
 		$this->assertSame( 'compat', Settings::sanitize( [ 'delay_js_scope' => 'todo' ] )['delay_js_scope'], 'un valor desconocido se ignora' );

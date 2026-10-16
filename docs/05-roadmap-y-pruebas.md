@@ -535,3 +535,9 @@ Compatibilidad con «Load JS Delayed» de LiteSpeed Cache, ahora en `assets/js/i
   - Pasa sin esperar si el control ya tiene un manejador de jQuery. Antes, «Añadir al presupuesto» de YITH (excluido del retraso) se retenía 5–8 s hasta que LSCache terminaba.
   - Un enlace sin destino pasa normal y solo se guarda para repetirlo si nadie llamó a `preventDefault`. El menú móvil de WoodMart, enlazado sin jQuery, abre en ~130 ms en vez de ~4,5 s.
 - **En el sitio de prueba se excluyeron a mano** en LSCache Searchanise (`smart-search-for-woocommerce`, `searchanise`) y `mobileNavigation`. El autocompletado de Searchanise no pintaba resultados con su JS retrasado, tampoco con «Compatibilidad máxima».
+
+## Versión 0.14.6
+
+- **`itb-lsdelay.js` empezaba a retener demasiado pronto.** Chrome envía `mouseover` cuando la página se pinta bajo el cursor, todavía cargando. En ese momento el cargador de LSCache (en el pie) aún no escuchaba y no arrancaba, pero Turbo ya retenía los `DOMContentLoaded`. El de `itb-cart.js` quedaba esperando a una carga que no llegaba, y el contador del carrito se quedaba en 0 en las páginas guardadas.
+- Arreglo: solo se retiene cuando existe el cargador de LSCache (`litespeed_load_delayed_js_force`). Si la página todavía se está leyendo, desde `DOMContentLoaded`, igual que hace LSCache.
+- Detectado al verificar la 0.14.5 en el sitio: «contador correcto en otra página» fallaba siempre en la batería.

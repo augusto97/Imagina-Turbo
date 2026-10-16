@@ -20,6 +20,7 @@
 ( function ( d, w ) {
 	var events = [ 'mouseover', 'click', 'keydown', 'wheel', 'touchmove', 'touchstart', 'pointerup', 'pointerdown' ];
 	var opts = { passive: true, capture: true };
+	var started = false;
 	var held = false;
 	var ready = null;
 	var readyQueue = [];
@@ -46,12 +47,25 @@
 		};
 	}
 
+	// Solo cuando LSCache arranca de verdad: su cargador (en el pie) ya está y, si la página aún se está
+	// leyendo, desde DOMContentLoaded, como hace él. Chrome envía mouseover al pintar bajo el cursor
+	// mientras la página carga: retener ahí dejaba sin ejecutar los DOMContentLoaded de los scripts que
+	// no se retrasan (el contador del carrito) hasta una interacción que LSCache no había visto.
 	function hold() {
-		var $ = w.jQuery;
-		var list;
-		if ( held || ! pending() ) {
+		if ( started || ! pending() || typeof w.litespeed_load_delayed_js_force !== 'function' ) {
 			return;
 		}
+		started = true;
+		if ( d.readyState === 'loading' ) {
+			addD.call( d, 'DOMContentLoaded', activate );
+		} else {
+			activate();
+		}
+	}
+
+	function activate() {
+		var $ = w.jQuery;
+		var list;
 		held = true;
 		w.addEventListener = catcher( addW, w );
 		d.addEventListener = catcher( addD, d );

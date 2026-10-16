@@ -515,3 +515,10 @@ Lo que salió del análisis de cómo cargan rápido Shopify, Tiendanube y VTEX. 
   - **La matriz**: sus listas por tema y plugin vienen de las «exclusiones en un clic» de WP Rocket, que allí son opcionales y Turbo aplicaba siempre. El nuevo ajuste `delay_js_scope` = `essential` usa solo las globales, las de pagos y las de servicios (captcha, mapas, chats, lazy load), más las que se escriban a mano en el plugin de caché. El valor por defecto sigue siendo `compat`.
   - **`async`**: los scripts con `async` nativo contaban como excluidos, pero LSCache les quita el atributo y los retrasa. Marcarlos dejaba sin retrasar gtag de Site Kit y sus dependencias. Ahora solo cuenta `defer`.
 
+
+## Versión 0.14.4
+
+- **Exclusiones escritas a mano en LiteSpeed Cache.** Su admin guarda «JS Deferred/Delayed Excludes» como texto JSON (`Root::_maybe_encode`, 7.9.1), y Turbo lo leía por líneas. El resultado era un único elemento que no coincidía con nada, así que las dependencias de esas exclusiones no se marcaban (fallo presente desde la 0.10.4). `DelayJsExclusions::litespeedList()` acepta JSON, array y texto por líneas.
+- Detectado al verificar la 0.14.3 en un sitio real con «Solo esenciales»:
+  - `swatchesVariations` de WoodMart estaba excluido a mano y corría al cargar, pero `woodmart-theme` (su dependencia) seguía retrasado: «woodmartThemeModule is not defined», y la cotización de YITH no recibía la variación.
+  - Con la 0.14.4 las dependencias de las exclusiones a mano tampoco se retrasan.

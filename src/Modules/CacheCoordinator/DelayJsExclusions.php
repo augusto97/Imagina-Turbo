@@ -177,17 +177,29 @@ final class DelayJsExclusions {
 		if ( ! defined( 'LSCWP_V' ) ) {
 			return [];
 		}
-		$own = get_option( 'litespeed.conf.optm-js_defer_exc' );
-		if ( is_string( $own ) ) {
-			$own = preg_split( '/\R/', $own ) ?: [];
-		}
 		$out = [];
-		foreach ( is_array( $own ) ? $own : [] as $item ) {
+		foreach ( self::litespeedList( get_option( 'litespeed.conf.optm-js_defer_exc' ) ) as $item ) {
 			if ( is_string( $item ) && strlen( trim( $item ) ) >= 4 ) {
 				$out[] = preg_quote( trim( $item ), '#' );
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * Lista de una opción de LSCache. Su admin guarda los arrays como texto JSON (Root::_maybe_encode,
+	 * 7.9.1): leído por líneas quedaba un solo elemento que no coincidía con nada y las dependencias de
+	 * las exclusiones a mano no se marcaban (0.14.4). También acepta array y texto por líneas.
+	 *
+	 * @param mixed $raw Valor de get_option.
+	 * @return list<string>
+	 */
+	public static function litespeedList( mixed $raw ): array {
+		if ( is_string( $raw ) ) {
+			$decoded = json_decode( $raw, true );
+			$raw     = is_array( $decoded ) ? $decoded : ( preg_split( '/\R/', $raw ) ?: [] );
+		}
+		return is_array( $raw ) ? array_values( array_filter( $raw, 'is_string' ) ) : [];
 	}
 
 	/**

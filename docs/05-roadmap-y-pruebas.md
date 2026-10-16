@@ -522,3 +522,16 @@ Lo que salió del análisis de cómo cargan rápido Shopify, Tiendanube y VTEX. 
 - Detectado al verificar la 0.14.3 en un sitio real con «Solo esenciales»:
   - `swatchesVariations` de WoodMart estaba excluido a mano y corría al cargar, pero `woodmart-theme` (su dependencia) seguía retrasado: «woodmartThemeModule is not defined», y la cotización de YITH no recibía la variación.
   - Con la 0.14.4 las dependencias de las exclusiones a mano tampoco se retrasan.
+
+## Versión 0.14.5
+
+Compatibilidad con «Load JS Delayed» de LiteSpeed Cache, ahora en `assets/js/itb-lsdelay.js` (2,4 KB, en línea con `data-no-optimize`). Se detectó al activar «Solo esenciales» en un sitio con WoodMart, YITH Request a Quote y Searchanise.
+
+- **jQuery listo y `load`.** jQuery no se retrasa, así que cuando LSCache carga lo retrasado ya pasaron `DOMContentLoaded`, `load` y el «documento listo» de jQuery. Efectos:
+  - Cada `jQuery(fn)` corría en el acto, antes de los scripts que venían detrás: `productsLoadMore` llamaba a `clickOnScrollButton` antes de que existiera.
+  - Los manejadores de `load` nunca se ejecutaban: el menú móvil de WoodMart se inicia en `load` y no abría.
+  - Arreglo: desde la primera interacción (los mismos eventos que `js_delay.js` de LSCache) se retienen `jQuery(fn)`/`.ready(fn)` y los `load`/`DOMContentLoaded` de window y document. Al llegar `DOMContentLiteSpeedLoaded` se ejecutan en el orden de una carga normal, como hace WP Rocket.
+- **Primer clic.**
+  - Pasa sin esperar si el control ya tiene un manejador de jQuery. Antes, «Añadir al presupuesto» de YITH (excluido del retraso) se retenía 5–8 s hasta que LSCache terminaba.
+  - Un enlace sin destino pasa normal y solo se guarda para repetirlo si nadie llamó a `preventDefault`. El menú móvil de WoodMart, enlazado sin jQuery, abre en ~130 ms en vez de ~4,5 s.
+- **En el sitio de prueba se excluyeron a mano** en LSCache Searchanise (`smart-search-for-woocommerce`, `searchanise`) y `mobileNavigation`. El autocompletado de Searchanise no pintaba resultados con su JS retrasado, tampoco con «Compatibilidad máxima».

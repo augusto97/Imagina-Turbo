@@ -62,28 +62,29 @@ final class DelayJsExclusions {
 	}
 
 	/**
-	 * Con "Delayed", LSCache carga el JS retrasado en la primera interacción pero no repite ese clic
-	 * (assets/js/js_delay.js, 7.9.1): un toque en "Añadir al presupuesto" (href="#") antes de hacer
-	 * scroll no hacía nada. Se guarda el primer clic en un control que depende de JS (botón, campo,
-	 * enlace sin destino) y se repite cuando LSCache avisa que terminó (DOMContentLiteSpeedLoaded).
-	 * Los enlaces normales navegan como siempre.
+	 * Con "Delayed", LSCache carga el JS retrasado en la primera interacción, después de load y del
+	 * «documento listo» de jQuery, y no repite ese clic. assets/js/itb-lsdelay.js retiene los
+	 * jQuery(fn), load y DOMContentLoaded que llegan en esa carga y los ejecuta en orden al terminar
+	 * (DOMContentLiteSpeedLoaded), y guarda el primer clic en un control que todavía no tiene manejador
+	 * para repetirlo al final (0.10.7; load, ready y clics con manejador desde 0.14.5).
 	 */
 	public static function printClickReplay(): void {
 		if ( ! self::litespeedDelays() ) {
 			return;
 		}
-		$js = '(function(d,w){var q=null;function p(){return!!d.querySelector(\'script[type="litespeed/javascript"]\')}'
-			. 'function h(e){if(q||!p())return;var t=e.target&&e.target.closest?e.target.closest(\'button,input,select,label,[role=button],a\'):null;if(!t)return;'
-			. 'if(t.tagName==="A"){var r=t.getAttribute("href");if(r&&r!=="#"&&r.indexOf("javascript:")!==0)return}'
-			. 'e.preventDefault();e.stopImmediatePropagation();q=t}'
-			. 'd.addEventListener("click",h,true);'
-			. 'w.addEventListener("DOMContentLiteSpeedLoaded",function(){d.removeEventListener("click",h,true);if(q){var t=q;q=null;setTimeout(function(){t.click()},0)}})})(document,window);';
+		$file = is_file( Runtime::$pluginDir . '/assets/js/itb-lsdelay.min.js' ) ? 'itb-lsdelay.min.js' : 'itb-lsdelay.js';
+		$path = Runtime::$pluginDir . '/assets/js/' . $file;
+		$code = is_readable( $path ) ? (string) file_get_contents( $path ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- archivo propio, < 3 KB, en línea: tiene que estar antes del primer clic.
+		if ( '' === $code ) {
+			return;
+		}
 		wp_print_inline_script_tag(
-			$js,
+			$code,
 			[
-				'id'            => 'itb-click-replay',
-				'data-no-defer' => '1',
-				'nowprocket'    => true,
+				'id'               => 'itb-click-replay',
+				'data-no-defer'    => '1',
+				'data-no-optimize' => '1',
+				'nowprocket'       => true,
 			]
 		);
 	}

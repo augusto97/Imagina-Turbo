@@ -28,6 +28,11 @@
  * del plugin (carrito, prefetch, RUM) nunca se difieren ni se retrasan: el contador del carrito no
  * puede esperar a que el visitante mueva el ratón.
  *
+ * 0.14.3: las listas por integración de la matriz vienen de las "exclusiones en un clic" de WP Rocket,
+ * que allí son opcionales. Aplicadas todas, en un sitio con WoodMart, Elementor y Site Kit dejaban casi
+ * todo el JS sin retrasar. El ajuste delay_js_scope = "essential" usa solo las globales y las de pagos y
+ * servicios (ConfigCompiler).
+ *
  * @package ImaginaTurbo
  */
 
@@ -229,7 +234,7 @@ final class DelayJsExclusions {
 	 * @param array<string, array{src: string, deps: list<string>, inline: string, strategy?: string}> $graph    Scripts registrados.
 	 * @param array<string>                                                          $queue    Handles encolados.
 	 * @param list<string>                                                           $patterns Exclusiones (regex de WP Rocket).
-	 * @param bool                                                                   $native   Los scripts con defer/async nativo de WordPress también cuentan (LSCache Delayed).
+	 * @param bool                                                                   $native   Los scripts con defer nativo de WordPress también cuentan (LSCache Delayed).
 	 * @return array<string, true>
 	 */
 	public static function pinnedHandles( array $graph, array $queue, array $patterns, bool $native = false ): array {
@@ -259,7 +264,9 @@ final class DelayJsExclusions {
 		$pinned = [];
 		$stack  = [];
 		foreach ( array_keys( $printed ) as $handle ) {
-			if ( self::isRoot( $handle, $graph[ $handle ], $patterns ) || ( $native && in_array( $graph[ $handle ]['strategy'] ?? '', [ 'defer', 'async' ], true ) ) ) {
+			// Solo defer: LSCache quita "async" antes de decidir y sí retrasa esos scripts (_js_defer,
+			// 7.9.1). Contar async marcaba gtag de Site Kit y todas sus dependencias (0.14.3).
+			if ( self::isRoot( $handle, $graph[ $handle ], $patterns ) || ( $native && 'defer' === ( $graph[ $handle ]['strategy'] ?? '' ) ) ) {
 				$stack[] = $handle;
 			}
 		}

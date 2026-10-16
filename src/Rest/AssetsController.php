@@ -165,6 +165,7 @@ final class AssetsController extends Controller {
 			'defer_exclude' => Settings::scriptHandles( (array) $settings->get( 'script_defer_exclude', [] ) ),
 			'delay'         => Settings::delayPatterns( (array) $settings->get( 'script_delay', [] ) ),
 			'delay_timeout' => (int) $settings->get( 'script_delay_timeout', 0 ),
+			'delay_scope'   => 'essential' === $settings->get( 'delay_js_scope', 'compat' ) ? 'essential' : 'compat',
 			'cache_defers'  => ScriptLoadingModule::cacheDefers(),
 			'cache_delays'  => ScriptLoadingModule::cacheDelays(),
 		];
@@ -172,7 +173,7 @@ final class AssetsController extends Controller {
 
 	public function updateScripts( \WP_REST_Request $request ): \WP_REST_Response {
 		$changes = [];
-		foreach ( [ 'script_defer', 'script_defer_exclude', 'script_delay', 'script_delay_timeout' ] as $key ) {
+		foreach ( [ 'script_defer', 'script_defer_exclude', 'script_delay', 'script_delay_timeout', 'delay_js_scope' ] as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ $key ] = $request->get_param( $key );
 			}

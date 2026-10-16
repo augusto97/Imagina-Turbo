@@ -200,6 +200,20 @@ final class EnvironmentChecksTest extends TestCase {
 		sort( $pinned );
 		$this->assertSame( [ 'jquery', 'underscore', 'wc-add-to-cart-variation', 'wp-util' ], $pinned, 'LSCache no retrasa el script con defer: sus dependencias tampoco; el tema sí se retrasa' );
 
+		// 0.14.3: LSCache quita async y retrasa el script; no cuenta como excluido (gtag de Site Kit).
+		$graph['gtag']     = [
+			'src'      => 'https://www.googletagmanager.com/gtag/js?id=GT-X',
+			'deps'     => [],
+			'inline'   => 'gtag("config","GT-X");',
+			'strategy' => 'async',
+		];
+		$graph['site-kit'] = [
+			'src'    => '/google-site-kit/dist/assets/js/events.js',
+			'deps'   => [ 'gtag', 'woodmart-theme' ],
+			'inline' => '',
+		];
+		$this->assertSame( [], DelayJsExclusions::pinnedHandles( $graph, [ 'site-kit' ], [], true ), 'async no marca nada' );
+
 		$own = [
 			'itb-cart' => [
 				'src'    => '/wp-content/plugins/imagina-turbo/assets/js/itb-cart.min.js',

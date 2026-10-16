@@ -13,6 +13,7 @@ use Brain\Monkey\Functions;
 use ImaginaTurbo\Compat\Matrix;
 use ImaginaTurbo\Compat\Resolver;
 use ImaginaTurbo\Core\Config\CompiledConfig;
+use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Modules\AssetManager\AssetManagerModule;
 use ImaginaTurbo\Modules\AssetManager\AssetRules;
@@ -53,6 +54,21 @@ final class AssetsDatabaseTest extends TestCase {
 		$this->assertContains( 'var _iub', $resolved['delay_js'] );
 		$this->assertNotContains( 'var _iub', $none['delay_js'] );
 		$this->assertSame( array_values( array_unique( $resolved['delay_js'] ) ), $resolved['delay_js'] );
+
+		// 0.14.3: la lista esencial no lleva las de cada integración (WoodMart, Elementor, Site Kit).
+		$site = ( new Resolver() )->resolve( $matrix, [ 'elementor/elementor.php', 'google-site-kit/google-site-kit.php', 'woocommerce/woocommerce.php' ], 'woodmart', 'woodmart' );
+		$this->assertContains( '/woodmart/js/scripts/wc/', $site['delay_js'] );
+		$this->assertContains( '/gtag/js', $site['delay_js'] );
+		$this->assertSame( $none['delay_js'], $site['delay_js_essential'], 'solo globales, pagos y servicios' );
+		$this->assertNotContains( '/woodmart/js/scripts/wc/', $site['delay_js_essential'] );
+		$this->assertNotContains( '/gtag/js', $site['delay_js_essential'] );
+		$this->assertNotContains( '/elementor/', $site['delay_js_essential'] );
+	}
+
+	public function test_delay_js_scope_setting(): void {
+		$this->assertSame( 'essential', Settings::sanitize( [ 'delay_js_scope' => 'essential' ] )['delay_js_scope'] );
+		$this->assertSame( 'compat', Settings::sanitize( [ 'delay_js_scope' => 'todo' ] )['delay_js_scope'], 'un valor desconocido se ignora' );
+		$this->assertSame( 'compat', Settings::defaults()['delay_js_scope'] );
 	}
 
 	public function test_asset_rule_normalize(): void {

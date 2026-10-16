@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Imagina Turbo
  * Description:       Rendimiento para WordPress y WooCommerce: complementa a LiteSpeed Cache o WP Rocket, reemplaza a Perfmatters y orquesta Cloudflare.
- * Version:           0.14.2
+ * Version:           0.14.3
  * Requires at least: 6.4
  * Requires PHP:      8.1
  * Author:            Imagina WP
@@ -28,7 +28,7 @@ if ( defined( 'ITB_VERSION' ) ) {
 }
 
 // phpcs:disable WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- prefijo ITB_ fijado en CLAUDE.md.
-define( 'ITB_VERSION', '0.14.2' );
+define( 'ITB_VERSION', '0.14.3' );
 define( 'ITB_FILE', __FILE__ );
 define( 'ITB_MIN_PHP', 80100 );
 // phpcs:enable

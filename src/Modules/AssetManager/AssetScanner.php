@@ -126,6 +126,66 @@ final class AssetScanner {
 			'css'        => $out['css'],
 			'shortcodes' => array_values( array_filter( is_array( $data['shortcodes'] ?? null ) ? $data['shortcodes'] : [], 'is_string' ) ),
 			'blocks'     => array_values( array_filter( is_array( $data['blocks'] ?? null ) ? $data['blocks'] : [], 'is_string' ) ),
+			'late_css'   => LateStyles::fromInventory( is_array( $data['late_css'] ?? null ) ? $data['late_css'] : [], home_url( '/' ) ),
+		];
+	}
+
+	/**
+	 * Hojas tardías por plantilla (0.16.0): inventaría las páginas de muestra y una categoría de
+	 * productos y de entradas, y junta lo que cada plantilla imprime después del head.
+	 *
+	 * @return array{templates: array<string, array{paths: list<string>, sheets: list<array{h: string, src: string, ver: string, media: string, size: int}>}>, errors: list<string>}
+	 */
+	public function lateStyles(): array {
+		$paths = $this->samplePaths();
+		foreach ( [ 'product_cat', 'category' ] as $taxonomy ) {
+			if ( ! taxonomy_exists( $taxonomy ) ) {
+				continue;
+			}
+			$terms = get_terms(
+				[
+					'taxonomy'   => $taxonomy,
+					'hide_empty' => true,
+					'number'     => 1,
+					'orderby'    => 'count',
+					'order'      => 'DESC',
+				]
+			);
+			$link  = is_array( $terms ) && isset( $terms[0] ) && $terms[0] instanceof \WP_Term ? get_term_link( $terms[0] ) : '';
+			$home  = untrailingslashit( home_url() );
+			if ( is_string( $link ) && str_starts_with( $link, $home ) ) {
+				$paths[] = '/' . ltrim( substr( $link, strlen( $home ) ), '/' );
+			}
+		}
+		$out    = [];
+		$errors = [];
+		foreach ( array_values( array_unique( $paths ) ) as $path ) {
+			$page = $this->inspect( $path );
+			if ( is_wp_error( $page ) ) {
+				$errors[] = $path . ': ' . $page->get_error_message();
+				continue;
+			}
+			$template = (string) ( $page['context']['template'] ?? '' );
+			if ( '' === $template ) {
+				continue;
+			}
+			$entry            = $out[ $template ] ?? [
+				'paths'  => [],
+				'sheets' => [],
+			];
+			$entry['paths'][] = $path;
+			$known            = array_column( $entry['sheets'], 'h' );
+			foreach ( LateStyles::fromInventory( is_array( $page['late_css'] ?? null ) ? $page['late_css'] : [], home_url( '/' ) ) as $sheet ) {
+				if ( ! in_array( $sheet['h'], $known, true ) ) {
+					$entry['sheets'][] = $sheet + [ 'size' => self::size( $sheet['src'] ) ];
+				}
+			}
+			$out[ $template ] = $entry;
+		}
+		ksort( $out );
+		return [
+			'templates' => $out,
+			'errors'    => $errors,
 		];
 	}
 

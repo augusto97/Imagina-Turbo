@@ -50,7 +50,11 @@ final class AssetManagerModule implements ModuleInterface {
 	];
 
 	public function register( Container $container, RequestContext $request ): void {
-		if ( RequestType::FrontendHtml !== $request->type || [] === self::rules() ) {
+		if ( RequestType::FrontendHtml !== $request->type ) {
+			return;
+		}
+		LateStyles::register();
+		if ( [] === self::rules() ) {
 			return;
 		}
 		add_action( 'wp_enqueue_scripts', [ self::class, 'apply' ], 9999 );

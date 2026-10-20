@@ -230,6 +230,30 @@ final class NavigationTest extends TestCase {
 		unlink( $dir . '/wp-content/fonts/a b.woff2' );
 	}
 
+	public function test_manual_font_paths(): void {
+		$home = 'https://tienda.test/';
+		$this->assertSame(
+			[ '/wp-content/uploads/f/work.woff2', '/wp-content/themes/w/fonts/icons.woff2?v=8.5.4', '/f/c.ttf' ],
+			Settings::fontPaths(
+				[
+					'https://tienda.test/wp-content/uploads/f/work.woff2',
+					'/wp-content/themes/w/fonts/icons.woff2?v=8.5.4',
+					'/wp-content/uploads/f/work.woff2',
+					'https://otro.test/f.woff2',
+					'/f/../wp-config.php',
+					'/f/a.css',
+					'/f/b.woff2" onload="x',
+					'f/rel.woff2',
+					'/f/c.ttf',
+					'/f/d.otf',
+				],
+				$home
+			),
+			'del propio sitio, sin repetir, hasta 3'
+		);
+		$this->assertSame( 'font/woff2', FrontendHintsModule::fontType( '/a.woff2?v=1' ), 'la query no cambia el tipo' );
+	}
+
 	public function test_font_preload_header(): void {
 		$this->assertSame( 'font/woff2', FrontendHintsModule::fontType( '/a.WOFF2' ) );
 		$this->assertSame( 'font/ttf', FrontendHintsModule::fontType( '/a.ttf' ) );

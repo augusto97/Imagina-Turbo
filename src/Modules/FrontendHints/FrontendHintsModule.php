@@ -81,7 +81,7 @@ final class FrontendHintsModule implements ModuleInterface {
 		if ( $s['lcp'] ) {
 			add_action( 'wp', [ self::class, 'prepare' ] );
 		}
-		if ( [] !== $s['fonts'] ) {
+		if ( [] !== $s['fonts'] || [] !== $s['fonts_all'] ) {
 			add_action( 'wp', [ self::class, 'prepareFonts' ] );
 		}
 		if ( [] !== $s['lazy'] ) {
@@ -94,17 +94,18 @@ final class FrontendHintsModule implements ModuleInterface {
 	}
 
 	/**
-	 * @return array{lcp: bool, facades: bool, images: array<string, array{kind: string, id: int, src: string}>, fonts: array<string, list<string>>, lazy: list<array{selector: string, templates: list<string>, height: int}>}
+	 * @return array{lcp: bool, facades: bool, images: array<string, array{kind: string, id: int, src: string}>, fonts: array<string, list<string>>, fonts_all: list<string>, lazy: list<array{selector: string, templates: list<string>, height: int}>}
 	 */
 	public static function settings(): array {
 		$s = Runtime::$config?->get( 'hints', [] );
 		$s = is_array( $s ) ? $s : [];
 		return [
-			'lcp'     => false !== ( $s['lcp'] ?? true ),
-			'facades' => false !== ( $s['facades'] ?? true ),
-			'images'  => is_array( $s['images'] ?? null ) ? $s['images'] : [],
-			'fonts'   => is_array( $s['fonts'] ?? null ) ? $s['fonts'] : [],
-			'lazy'    => is_array( $s['lazy'] ?? null ) ? array_values( $s['lazy'] ) : [],
+			'lcp'       => false !== ( $s['lcp'] ?? true ),
+			'facades'   => false !== ( $s['facades'] ?? true ),
+			'images'    => is_array( $s['images'] ?? null ) ? $s['images'] : [],
+			'fonts'     => is_array( $s['fonts'] ?? null ) ? $s['fonts'] : [],
+			'fonts_all' => is_array( $s['fonts_all'] ?? null ) ? array_values( array_filter( $s['fonts_all'], 'is_string' ) ) : [],
+			'lazy'      => is_array( $s['lazy'] ?? null ) ? array_values( $s['lazy'] ) : [],
 		];
 	}
 
@@ -238,8 +239,11 @@ final class FrontendHintsModule implements ModuleInterface {
 	 * Performance, changelog 2.2.2).
 	 */
 	public static function prepareFonts(): void {
-		$list        = self::settings()['fonts'][ RouteKey::template() ] ?? [];
-		self::$fonts = array_values( array_filter( is_array( $list ) ? array_slice( $list, 0, 2 ) : [], static fn( mixed $p ): bool => is_string( $p ) && str_starts_with( $p, '/' ) && ! str_starts_with( $p, '//' ) ) );
+		$s    = self::settings();
+		$list = $s['fonts'][ RouteKey::template() ] ?? [];
+		// Primero las elegidas a mano (todo el sitio), luego las del RUM; hasta 3 sin repetir.
+		$list        = array_merge( $s['fonts_all'], is_array( $list ) ? array_slice( $list, 0, 2 ) : [] );
+		self::$fonts = array_slice( array_values( array_unique( array_filter( $list, static fn( mixed $p ): bool => is_string( $p ) && str_starts_with( $p, '/' ) && ! str_starts_with( $p, '//' ) ) ) ), 0, 3 );
 		if ( [] === self::$fonts ) {
 			return;
 		}
@@ -251,7 +255,7 @@ final class FrontendHintsModule implements ModuleInterface {
 	 * Tipo MIME de una fuente por su extensión.
 	 */
 	public static function fontType( string $path ): string {
-		$ext = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
+		$ext = strtolower( pathinfo( (string) strtok( $path, '?#' ), PATHINFO_EXTENSION ) );
 		return match ( $ext ) {
 			'woff2' => 'font/woff2',
 			'woff'  => 'font/woff',

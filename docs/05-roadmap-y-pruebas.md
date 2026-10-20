@@ -557,3 +557,14 @@ Lo que conviene copiar de Warp Performance (análisis de su sitio, funciones y c
   - Alojar gtag en local: con el JS retrasado aporta poco.
   - Cabeceras de seguridad y CORS: no son rendimiento.
   - APO de Cloudflare: se salta la caché en tiendas.
+
+## Versión 0.16.0
+
+El CLS de las categorías de La Tienda del Pintor (0,31–0,44 en móvil lento) tenía dos causas, medidas una por una:
+
+- **Una hoja de estilo de WoodMart impresa después de la cuadrícula** (`wd-shop-off-canvas-sidebar`, apila la cabecera de la tienda en móvil). Al llegar, empujaba la cuadrícula ~90 px. Arreglo general: **hojas de estilo tardías al head** (docs/02, gestor de assets): se detectan por plantilla y se imprimen al final del head. Con la hoja en el head, el CLS medido baja a 0,13.
+- **Las fuentes del texto y de íconos llegan tarde** (~3–4,5 s): el texto cambia de ancho al llegar y la cuadrícula baja otros ~35 px.
+  - En el sitio se activó «Load Google Fonts locally» de WoodMart: ninguna petición a Google, Work Sans, Mulish y Lato en woff2 locales.
+  - En Turbo, precarga manual de hasta 3 fuentes (`fonts_manual`) además de la del RUM.
+  - Con la hoja en el head y las fuentes precargadas: **CLS 0,000** en 4 de 4 mediciones (Chromium con CPU ×4 y red de 1,6 Mbps, HTML modificado solo en el navegador de pruebas).
+

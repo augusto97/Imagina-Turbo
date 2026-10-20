@@ -46,6 +46,9 @@ final class AssetInventory {
 	/** @var array<string, true> */
 	private static array $blocks = [];
 
+	/** Hojas ya impresas al terminar el head; -1 = el head no terminó (0.16.0). */
+	private static int $headCss = -1;
+
 	public static function active(): bool {
 		return self::$active;
 	}
@@ -71,6 +74,39 @@ final class AssetInventory {
 		add_filter( 'do_shortcode_tag', [ self::class, 'shortcode' ], 10, 2 );
 		add_filter( 'render_block', [ self::class, 'block' ], 10, 2 );
 		add_action( 'wp_footer', [ self::class, 'output' ], PHP_INT_MAX );
+		add_action( 'wp_head', [ self::class, 'markHead' ], PHP_INT_MAX );
+	}
+
+	public static function markHead(): void {
+		self::$headCss = count( wp_styles()->done );
+	}
+
+	/**
+	 * Hojas externas impresas después del head (handle, URL, versión, media), en orden de impresión.
+	 *
+	 * @return list<array{h: string, src: string, ver: string, media: string}>
+	 */
+	public static function lateStyles( \WP_Styles $styles, int $headCount ): array {
+		if ( $headCount < 0 ) {
+			return [];
+		}
+		$out = [];
+		foreach ( array_slice( $styles->done, $headCount ) as $handle ) {
+			$item = $styles->registered[ $handle ] ?? null;
+			if ( ! $item instanceof \_WP_Dependency || ! is_string( $item->src ) || '' === $item->src ) {
+				continue;
+			}
+			$out[] = [
+				'h'     => (string) $handle,
+				'src'   => $item->src,
+				'ver'   => is_string( $item->ver ) ? $item->ver : '',
+				'media' => is_string( $item->args ) ? $item->args : 'all',
+			];
+			if ( count( $out ) >= 100 ) {
+				break;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -108,6 +144,7 @@ final class AssetInventory {
 			'css'        => self::assets( wp_styles() ),
 			'shortcodes' => array_keys( self::$shortcodes ),
 			'blocks'     => array_keys( self::$blocks ),
+			'late_css'   => self::lateStyles( wp_styles(), self::$headCss ),
 		];
 		set_transient( self::TRANSIENT . self::$nonce, $data, self::TTL );
 	}

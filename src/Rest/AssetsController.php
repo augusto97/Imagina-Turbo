@@ -39,6 +39,8 @@ final class AssetsController extends Controller {
 
 	private const SUGGEST_TRANSIENT = 'itb_assets_suggest';
 
+	private const LATE_TRANSIENT = 'itb_assets_late';
+
 	public function registerRoutes(): void {
 		$this->route( '/assets/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );
 		$this->route(
@@ -55,6 +57,18 @@ final class AssetsController extends Controller {
 		);
 		$this->route( '/assets/suggest', \WP_REST_Server::CREATABLE, [ $this, 'suggest' ] );
 		$this->route( '/assets/scripts', \WP_REST_Server::CREATABLE, [ $this, 'updateScripts' ] );
+		$this->route( '/assets/late-styles/scan', \WP_REST_Server::CREATABLE, [ $this, 'scanLateStyles' ] );
+		$this->route(
+			'/assets/late-styles',
+			'PUT',
+			[ $this, 'updateLateStyles' ],
+			[
+				'templates' => [
+					'type'     => 'object',
+					'required' => true,
+				],
+			]
+		);
 		$list = [
 			'type'     => 'array',
 			'maxItems' => 200,
@@ -140,7 +154,63 @@ final class AssetsController extends Controller {
 			'post_types'  => array_values( get_post_types( [ 'public' => true ] ) ),
 			'home'        => home_url( '/' ),
 			'scripts'     => $this->scriptsStatus(),
+			'late_styles' => [
+				'active'   => (array) $this->container->get( Settings::class )->get( 'late_styles', [] ),
+				'detected' => is_array( get_transient( self::LATE_TRANSIENT ) ) ? get_transient( self::LATE_TRANSIENT ) : null,
+			],
 		];
+	}
+
+	/**
+	 * Detecta por plantilla las hojas que se imprimen después del head (0.16.0).
+	 */
+	public function scanLateStyles(): \WP_REST_Response {
+		$result = $this->container->get( AssetScanner::class )->lateStyles() + [ 'generated_at' => time() ];
+		set_transient( self::LATE_TRANSIENT, $result, DAY_IN_SECONDS );
+		return $this->ok( $this->status() );
+	}
+
+	/**
+	 * Guarda qué hojas adelantar en cada plantilla. Solo se aceptan handles de la última detección
+	 * (con su URL y versión de ahí): el cliente no puede mandar URLs. Plantilla con lista vacía = quitar.
+	 */
+	public function updateLateStyles( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$detected = get_transient( self::LATE_TRANSIENT );
+		$found    = is_array( $detected ) && is_array( $detected['templates'] ?? null ) ? $detected['templates'] : [];
+		$settings = $this->container->get( Settings::class );
+		$current  = (array) $settings->get( 'late_styles', [] );
+		foreach ( (array) $request->get_param( 'templates' ) as $template => $handles ) {
+			if ( ! is_string( $template ) || ! is_array( $handles ) ) {
+				continue;
+			}
+			if ( [] === $handles ) {
+				unset( $current[ $template ] );
+				continue;
+			}
+			$sheets = [];
+			foreach ( is_array( $found[ $template ]['sheets'] ?? null ) ? $found[ $template ]['sheets'] : [] as $sheet ) {
+				if ( is_array( $sheet ) && in_array( $sheet['h'] ?? null, $handles, true ) ) {
+					$sheets[] = $sheet;
+				}
+			}
+			if ( [] === $sheets ) {
+				return $this->error( 'itb_late_styles', __( 'Detecta primero las hojas de esa plantilla.', 'imagina-turbo' ), 400 );
+			}
+			$current[ $template ] = $sheets;
+		}
+		$settings->update( [ 'late_styles' => $current ] );
+		$this->container->get( ConfigCompiler::class )->compile();
+		$this->purge();
+		$this->container->get( EventLog::class )->warning(
+			'asset_manager',
+			'late_styles',
+			__( 'Hojas de estilo tardías adelantadas al head. Revisa las páginas de esas plantillas.', 'imagina-turbo' ),
+			[
+				'user'      => get_current_user_id(),
+				'templates' => array_map( static fn( array $l ): array => array_column( $l, 'h' ), array_filter( (array) $settings->get( 'late_styles', [] ), 'is_array' ) ),
+			]
+		);
+		return $this->ok( $this->status() );
 	}
 
 	/**

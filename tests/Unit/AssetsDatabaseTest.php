@@ -76,6 +76,9 @@ final class AssetsDatabaseTest extends TestCase {
 		$this->assertSame( 'essential', Settings::sanitize( [ 'delay_js_scope' => 'essential' ] )['delay_js_scope'] );
 		$this->assertSame( 'compat', Settings::sanitize( [ 'delay_js_scope' => 'todo' ] )['delay_js_scope'], 'un valor desconocido se ignora' );
 		$this->assertSame( 'compat', Settings::defaults()['delay_js_scope'] );
+		$this->assertSame( 8, Settings::sanitize( [ 'lsdelay_timeout' => '8' ] )['lsdelay_timeout'] );
+		$this->assertSame( 30, Settings::sanitize( [ 'lsdelay_timeout' => 99 ] )['lsdelay_timeout'], 'máximo 30 s' );
+		$this->assertSame( 0, Settings::defaults()['lsdelay_timeout'], 'apagado por defecto' );
 	}
 
 	public function test_asset_rule_normalize(): void {

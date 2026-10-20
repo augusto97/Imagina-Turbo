@@ -61,6 +61,7 @@ final class FleetPolicy {
 		'spec_fallback',
 		'view_transitions',
 		'hints_lcp',
+		'hints_fonts',
 		'hints_facades',
 		'db_keep_revisions',
 		'db_schedule',

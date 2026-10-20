@@ -21,7 +21,7 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Flota** | Plantilla del hub (nombre, versión, lo ignorado), desviaciones con su riesgo, aplicar con confirmación, autorización para los lotes del hub con su endpoint, snapshots con revertir. |
 | **Compatibilidad** | Plugins/tema detectados, reglas de la matriz aplicadas, conflictos y solapamientos, versión de la matriz y firma. |
 | **Registro** | Todos los eventos: cambios, aplicaciones, reversiones, modo seguro, errores de API. Filtros y exportación. |
-| **Avanzado** | Kill switch, cookie de bypass para el admin actual, exportar/importar ajustes (sin token), conexión con el hub, licencia (Imagina Updater), modo depuración. |
+| **Avanzado** | Kill switch, cookie de bypass para el admin actual, exportar/importar ajustes (sin token), conexión con el hub, licencia (Imagina Updater), modo depuración, asistentes de IA (habilidades registradas y «Permitir cambios», `ai_write`). |
 
 Reglas de UX:
 - Ningún cambio sensible se aplica sin mostrar antes qué va a cambiar.
@@ -103,7 +103,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades` |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write` |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
@@ -118,7 +118,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |
 | `itb_htaccess_backup` | Copia completa del `.htaccess` antes del último cambio |
-| `itb_rum_insights` | Lo que decidió la tarea diaria del RUM: páginas predichas por plantilla e imagen LCP por plantilla (con su id de adjunto o `featured`) |
+| `itb_rum_insights` | Lo que decidió la tarea diaria del RUM: páginas predichas por plantilla, imagen LCP por plantilla (con su id de adjunto o `featured`) y fuentes del primer render por plantilla (0.15.0) |
 | `itb_filter_rules` | Reglas de carga condicional: clave, plugins, métodos, peticiones de prueba, estado (`testing`, `active`, `failed`, `disabled`), motivo y evidencia |
 | `itb_asset_rules` | Reglas del gestor de assets: handle, tipo, modo (`never`/`only`), plantillas, ids, tipos de contenido, estado (`testing`, `active`, `disabled`), quién y cuándo la verificó |
 | `itb_db_audit` | Última auditoría de la base de datos |

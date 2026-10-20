@@ -122,6 +122,7 @@ function SettingsCard( { status }: { status: NavigationStatus } ) {
 				<Toggle label={ __( 'Respaldo para Safari y Firefox' ) } help={ __( 'Script de 1,4 KB que precarga al tocar o pulsar, solo en navegadores sin Speculation Rules.' ) } checked={ values.spec_fallback } onChange={ ( v ) => set( 'spec_fallback', v ) } />
 				<Toggle label={ __( 'View Transitions' ) } help={ __( 'Transición suave entre páginas del mismo sitio (Chrome y Safari recientes). Cambia cómo se ve la navegación: revísala.' ) } checked={ values.view_transitions } onChange={ ( v ) => set( 'view_transitions', v ) } />
 				<Toggle label={ __( 'Prioridad de la imagen LCP' ) } help={ __( 'La imagen principal (la que mide el RUM, la del producto y los primeros productos de un listado) se descarga desde el HTML, sin esperar al lazy load ni a la reescritura de WebP por JavaScript.' ) } checked={ values.hints_lcp } onChange={ ( v ) => set( 'hints_lcp', v ) } />
+				<Toggle label={ __( 'Precarga de fuentes' ) } help={ __( 'Precarga las fuentes del propio sitio que el RUM ve pedir en el primer render de cada plantilla (hasta 2). Llegan antes y el texto no salta al cambiar de fuente. Las de Google Fonts no: actívalas en local en el tema o el constructor.' ) } checked={ values.hints_fonts } onChange={ ( v ) => set( 'hints_fonts', v ) } />
 				<Toggle label={ __( 'Fachadas de YouTube y Vimeo' ) } help={ __( 'Miniatura y botón; el reproductor se carga al tocar. No se aplica a reproductores controlados por otro script.' ) } checked={ values.hints_facades } onChange={ ( v ) => set( 'hints_facades', v ) } />
 				<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
 					<span>
@@ -358,6 +359,7 @@ function InsightsCard( { insights, report }: { insights: RumInsightsData; report
 	const run = useAction( () => api<RumInsightsData>( 'navigation/insights', 'POST' ) );
 	const predicted = Object.entries( insights.predicted );
 	const lcp = Object.entries( insights.lcp );
+	const fonts = Object.entries( insights.fonts ?? {} );
 	return (
 		<Card>
 			<CardHeader>
@@ -396,6 +398,20 @@ function InsightsCard( { insights, report }: { insights: RumInsightsData; report
 							{ lcp.map( ( [ template, l ] ) => (
 								<li key={ template } className="itb:py-0.5">
 									<code className="itb:text-xs">{ template }</code> → { l.kind === 'featured' ? __( 'imagen destacada' ) : <code className="itb:text-xs">{ l.src }</code> } <span className="itb:text-xs itb:text-zinc-500">{ `(${ Math.round( l.share * 100 ) } %)` }</span>
+								</li>
+							) ) }
+						</ul>
+					) }
+				</div>
+				<div>
+					<p className="itb:m-0 itb:mb-1 itb:font-medium">{ __( 'Fuentes del primer render' ) }</p>
+					{ fonts.length === 0 ? (
+						<p className="itb:m-0 itb:text-xs itb:text-zinc-500">{ __( 'Aún no hay fuentes del propio sitio pedidas antes del LCP con suficientes muestras (30, de 15 visitantes).' ) }</p>
+					) : (
+						<ul className="itb:m-0 itb:list-none itb:p-0">
+							{ fonts.map( ( [ template, paths ] ) => (
+								<li key={ template } className="itb:py-0.5">
+									<code className="itb:text-xs">{ template }</code> → { paths.map( ( p ) => <code key={ p } className="itb:mr-1 itb:break-all itb:text-xs">{ p }</code> ) }
 								</li>
 							) ) }
 						</ul>

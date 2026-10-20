@@ -74,6 +74,8 @@ final class Settings {
 			'spec_fallback'            => true,
 			'view_transitions'         => false,
 			'hints_lcp'                => true,
+			'hints_fonts'              => true,
+			'ai_write'                 => false,
 			'hints_facades'            => true,
 			'lazy_render'              => [],
 			'db_keep_revisions'        => 5,
@@ -86,6 +88,7 @@ final class Settings {
 			'script_delay'             => [],
 			'script_delay_timeout'     => 0,
 			'delay_js_scope'           => 'compat',
+			'lsdelay_timeout'          => 0,
 		];
 	}
 
@@ -282,7 +285,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades', 'fleet_remote' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
@@ -309,6 +312,11 @@ final class Settings {
 		// Exclusiones del retraso de JS (0.14.3): todas las de la matriz o solo las esenciales.
 		if ( isset( $input['delay_js_scope'] ) && in_array( $input['delay_js_scope'], [ 'compat', 'essential' ], true ) ) {
 			$out['delay_js_scope'] = $input['delay_js_scope'];
+		}
+
+		// Plazo para cargar el JS retrasado de LiteSpeed Cache sin interacción (0.14.7; 0 = nunca).
+		if ( isset( $input['lsdelay_timeout'] ) && is_numeric( $input['lsdelay_timeout'] ) ) {
+			$out['lsdelay_timeout'] = (int) max( 0, min( 30, (int) $input['lsdelay_timeout'] ) );
 		}
 
 		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).

@@ -49,6 +49,7 @@ export function Advanced() {
 					<SafeModeCard safety={ data.safety } />
 					<ConfigCard status={ data } />
 					<SettingsCard />
+					<AiCard />
 					<ImportExportCard />
 					<LicenseCard status={ data } />
 					<HubCard />
@@ -293,6 +294,46 @@ function SettingsCard() {
 						<ErrorText error={ action.error } />
 					</form>
 				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+const ABILITIES = [ 'get-status', 'get-vitals', 'get-cache-status', 'get-platform-audit', 'get-events' ];
+
+function AiCard() {
+	const client = useQueryClient();
+	const { data } = useQuery( { queryKey: [ 'settings' ], queryFn: () => api<PublicSettings>( 'settings' ) } );
+	const action = useAction( ( aiWrite: boolean ) => api<PublicSettings>( 'settings', 'PUT', { ai_write: aiWrite } ) );
+	if ( ! data ) {
+		return null;
+	}
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Asistentes de IA (MCP)' ) }</CardTitle>
+				<CardDescription>{ __( 'Imagina Turbo registra habilidades en la Abilities API de WordPress. Con el plugin MCP Adapter, un asistente (Claude, Cursor, ChatGPT…) conectado con una contraseña de aplicación de un administrador puede leer las métricas reales, el estado de la caché y el diagnóstico.' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ ! data.abilities_api && <Notice level="info">{ __( 'Requiere WordPress 6.9 o posterior.' ) }</Notice> }
+				<div className="itb:flex itb:flex-wrap itb:gap-1">
+					{ [ ...ABILITIES, ...( data.ai_write ? [ 'purge-cache', 'set-module' ] : [] ) ].map( ( a ) => (
+						<code key={ a } className="itb:rounded itb:bg-zinc-100 itb:px-1.5 itb:py-0.5 itb:text-xs">{ `imagina-turbo/${ a }` }</code>
+					) ) }
+				</div>
+				<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
+					<span>
+						<span className="itb:font-medium">{ __( 'Permitir cambios' ) }</span>
+						<span className="itb:block itb:text-xs itb:text-zinc-500">{ __( 'Agrega purgar la caché y encender o apagar módulos seguros (los moderados e invasivos solo desde aquí). Cada cambio pasa por las mismas validaciones del admin y queda en el registro de eventos.' ) }</span>
+					</span>
+					<Switch
+						checked={ data.ai_write }
+						disabled={ action.isPending }
+						onCheckedChange={ ( v ) => action.mutate( v, { onSuccess: ( saved ) => client.setQueryData( [ 'settings' ], saved ) } ) }
+						aria-label={ __( 'Permitir cambios' ) }
+					/>
+				</label>
+				<ErrorText error={ action.error } />
 			</CardContent>
 		</Card>
 	);

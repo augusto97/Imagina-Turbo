@@ -192,6 +192,53 @@ final class NavigationTest extends TestCase {
 		$this->assertSame( [ '/carrito', '/wc-api/v' ], SpeculationModule::prefixes( [ '/carrito', '/carrito/*', '/*/embed/*', '/*', '/wc-api/v*' ] ), 'nunca un prefijo vacío' );
 	}
 
+	public function test_font_events_and_insights(): void {
+		$rows  = RumCollector::rows(
+			[
+				't'  => 'tax:product_cat',
+				'fo' => [ '/wp-content/themes/woodmart/fonts/woodmart-font-1-400.woff2', '/wp-content/uploads/x.php', '//evil.com/f.woff2', '/f3.woff' ],
+			],
+			'1',
+			self::NOW
+		);
+		$fonts = array_values( array_filter( $rows['events'], static fn( array $e ): bool => 'font' === $e[1] ) );
+		$this->assertCount( 1, $fonts, 'solo fuentes del sitio y hasta 2 por beacon' );
+		$this->assertSame( '/wp-content/themes/woodmart/fonts/woodmart-font-1-400.woff2', $fonts[0][4] );
+
+		$many   = (string) ( ( 1 << 30 ) - 1 );
+		$few    = '7';
+		$events = [
+			[ 'template' => 'portada', 'device' => '*', 'value' => '/a.woff2', 'n' => 100, 'bits' => $many ],
+			[ 'template' => 'portada', 'device' => '*', 'value' => '/b.woff2', 'n' => 60, 'bits' => $many ],
+			[ 'template' => 'portada', 'device' => '*', 'value' => '/c.woff2', 'n' => 55, 'bits' => $many ],
+			[ 'template' => 'portada', 'device' => '*', 'value' => '/d.woff2', 'n' => 40, 'bits' => $many ],
+			[ 'template' => 'single:post', 'device' => '*', 'value' => '/a.woff2', 'n' => 90, 'bits' => $few ],
+			[ 'template' => 'busqueda', 'device' => '*', 'value' => '/a.woff2', 'n' => 10, 'bits' => $many ],
+			[ 'template' => 'tax:category', 'device' => '*', 'value' => '/borrada.woff2', 'n' => 90, 'bits' => $many ],
+		];
+		$out    = RumInsights::fonts( $events, static fn( string $p ): bool => '/borrada.woff2' !== $p );
+		$this->assertSame( [ 'portada' => [ '/a.woff2', '/b.woff2' ] ], $out, 'hasta 2, con muchos visitantes, muestras suficientes y archivos que existen' );
+
+		$dir = sys_get_temp_dir() . '/itb-fonts-' . getmypid();
+		@mkdir( $dir . '/wp-content/fonts', 0777, true );
+		file_put_contents( $dir . '/wp-content/fonts/a b.woff2', 'x' );
+		$this->assertTrue( RumInsights::isFontFile( '/wp-content/fonts/a%20b.woff2', $dir . '/' ) );
+		$this->assertTrue( RumInsights::isFontFile( '/sub/wp-content/fonts/a%20b.woff2', $dir . '/', '/sub' ), 'WordPress en subcarpeta' );
+		$this->assertFalse( RumInsights::isFontFile( '/wp-content/fonts/../fonts/a%20b.woff2', $dir . '/' ) );
+		$this->assertFalse( RumInsights::isFontFile( '/wp-content/fonts/no.woff2', $dir . '/' ) );
+		$this->assertFalse( RumInsights::isFontFile( '/wp-config.php', $dir . '/' ) );
+		unlink( $dir . '/wp-content/fonts/a b.woff2' );
+	}
+
+	public function test_font_preload_header(): void {
+		$this->assertSame( 'font/woff2', FrontendHintsModule::fontType( '/a.WOFF2' ) );
+		$this->assertSame( 'font/ttf', FrontendHintsModule::fontType( '/a.ttf' ) );
+		$this->assertSame(
+			'</f/a.woff2>; rel=preload; as=font; type=font/woff2; crossorigin, </f/bx.woff>; rel=preload; as=font; type=font/woff; crossorigin',
+			FrontendHintsModule::fontLinkHeader( [ '/f/a.woff2', '/f/b"<x>.woff' ] )
+		);
+	}
+
 	public function test_lcp_image_prioritized(): void {
 		$this->assertSame( '<img fetchpriority="high" data-skip-lazy="1" data-no-lazy="1" data-itb-lcp="1" src="a.jpg" class="wp-image-4">', FrontendHintsModule::prioritize( '<img src="a.jpg" loading="lazy" class="wp-image-4" fetchpriority="low">' ) );
 	}

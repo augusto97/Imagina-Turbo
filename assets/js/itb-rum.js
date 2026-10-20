@@ -3,7 +3,7 @@
  *
  * Mide LCP (y su imagen), INP aproximado, CLS, TTFB (con conexión, espera y edad de la copia), prerender (activationStart), prefetch
  * (deliveryType), recargas y bfcache (con notRestoredReasons cuando existe), y la transición desde la
- * plantilla anterior. Envía un beacon al ocultarse la página. Sin datos personales.
+ * plantilla anterior, y las fuentes del propio sitio del primer render. Envía un beacon al ocultarse la página. Sin datos personales.
  */
 ( function () {
 	var c = window.itbRum;
@@ -119,6 +119,30 @@
 		}
 	}
 
+	// Fuentes del propio sitio pedidas antes del LCP (0.15.0): son las del primer render. El informe
+	// diario precarga las que se repiten en una plantilla.
+	function fonts() {
+		var until = lcp ? lcp.startTime : 3000;
+		var out = [];
+		( performance.getEntriesByType ? performance.getEntriesByType( 'resource' ) : [] ).forEach( function ( e ) {
+			var a;
+			if ( out.length > 1 || e.startTime > until || ! /\.(woff2?|ttf|otf)(\?|$)/i.test( e.name ) ) {
+				return;
+			}
+			try {
+				a = new URL( e.name );
+			} catch ( x ) {
+				return;
+			}
+			if ( a.origin === location.origin && out.indexOf( a.pathname ) < 0 ) {
+				out.push( a.pathname );
+			}
+		} );
+		if ( out.length ) {
+			r.fo = out;
+		}
+	}
+
 	function post( data ) {
 		var body = JSON.stringify( data );
 		if ( navigator.sendBeacon ) {
@@ -134,6 +158,7 @@
 		}
 		sent = 1;
 		image();
+		fonts();
 		if ( inp ) {
 			r.i = Math.round( inp );
 		}

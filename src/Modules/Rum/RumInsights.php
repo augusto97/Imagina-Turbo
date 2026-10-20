@@ -1,7 +1,7 @@
 <?php
 /**
  * Lo que el RUM decide sobre el sitio (tarea diaria): páginas siguientes para el prefetch predictivo
- * (docs/02 módulo 5) e imagen LCP por plantilla (módulo 9).
+ * (docs/02 módulo 5), imagen LCP por plantilla (módulo 9) y fuentes del primer render (0.15.0).
  *
  * Los beacons no se autentican. Por eso, para cambiar el sitio, un valor tiene que:
  * - repetirse muchas veces y venir de muchos visitantes distintos (mapa de bits de IP-hash);
@@ -34,6 +34,10 @@ final class RumInsights {
 	public const LCP_MIN      = 50;
 	public const LCP_DISTINCT = 20;
 	public const LCP_SHARE    = 0.6;
+
+	public const FONT_MIN      = 30;
+	public const FONT_DISTINCT = 15;
+	public const FONT_MAX      = 2;
 
 	/**
 	 * Páginas siguientes más probables por plantilla de origen.
@@ -125,6 +129,60 @@ final class RumInsights {
 		}
 		ksort( $out );
 		return $out;
+	}
+
+	/**
+	 * Fuentes del propio sitio que el primer render pide en cada plantilla (ambos dispositivos), para
+	 * precargarlas. Las que llegan tarde mueven el texto (CLS) y retrasan el primer pintado. Hasta 2 por
+	 * plantilla, con al menos la mitad de muestras que la más pedida, y solo archivos de fuente que
+	 * existen en el servidor (lo resuelve $isFont).
+	 *
+	 * @param list<Event>             $events Eventos "font" agrupados.
+	 * @param \Closure(string): bool  $isFont La ruta es un archivo de fuente del sitio.
+	 * @return array<string, list<string>>
+	 */
+	public static function fonts( array $events, \Closure $isFont ): array {
+		$byTemplate = [];
+		foreach ( $events as $e ) {
+			$prev                                        = $byTemplate[ $e['template'] ][ $e['value'] ] ?? null;
+			$bits                                        = null !== $prev && RumCollector::popcount( $prev['bits'] ) > RumCollector::popcount( $e['bits'] ) ? $prev['bits'] : $e['bits'];
+			$byTemplate[ $e['template'] ][ $e['value'] ] = [
+				'n'    => ( $prev['n'] ?? 0 ) + (int) $e['n'],
+				'bits' => $bits,
+			];
+		}
+		$out = [];
+		foreach ( $byTemplate as $template => $paths ) {
+			uasort( $paths, static fn( array $a, array $b ): int => $b['n'] <=> $a['n'] );
+			$top  = (int) ( reset( $paths )['n'] ?? 0 );
+			$keep = [];
+			foreach ( $paths as $path => $row ) {
+				if ( count( $keep ) >= self::FONT_MAX ) {
+					break;
+				}
+				if ( $row['n'] < self::FONT_MIN || $row['n'] * 2 < $top || RumCollector::distinct( $row['bits'] ) < self::FONT_DISTINCT || ! $isFont( (string) $path ) ) {
+					continue;
+				}
+				$keep[] = (string) $path;
+			}
+			if ( [] !== $keep ) {
+				$out[ (string) $template ] = $keep;
+			}
+		}
+		ksort( $out );
+		return $out;
+	}
+
+	/**
+	 * Archivo de fuente del propio sitio: extensión de fuente, sin "..", y existe bajo la raíz de
+	 * WordPress (la ruta viene de un beacon sin autenticar).
+	 */
+	public static function isFontFile( string $path, string $root, string $homePath = '' ): bool {
+		if ( 1 !== preg_match( '/\.(woff2?|ttf|otf)$/i', $path ) || str_contains( $path, '..' ) ) {
+			return false;
+		}
+		$relative = '' !== $homePath && str_starts_with( $path, $homePath . '/' ) ? substr( $path, strlen( $homePath ) ) : $path;
+		return is_file( rtrim( $root, '/' ) . rawurldecode( $relative ) );
 	}
 
 	/**

@@ -102,6 +102,8 @@ export interface PublicSettings {
 	debug: boolean;
 	staging_domains: string[];
 	modules: Record<string, boolean>;
+	ai_write: boolean;
+	abilities_api: boolean;
 }
 
 export interface CompileResult {
@@ -570,6 +572,7 @@ export interface RumReportData {
 export interface RumInsightsData {
 	predicted: Record<string, string[]>;
 	lcp: Record<string, { kind: 'image' | 'featured'; id: number; src: string; n: number; share: number }>;
+	fonts: Record<string, string[]>;
 	generated: number;
 }
 
@@ -581,6 +584,7 @@ export interface NavigationSettings {
 	spec_fallback: boolean;
 	view_transitions: boolean;
 	hints_lcp: boolean;
+	hints_fonts: boolean;
 	hints_facades: boolean;
 	lazy_render: LazyRenderRule[];
 }
@@ -683,6 +687,7 @@ export interface ScriptLoadingStatus {
 	delay: string[];
 	delay_timeout: number;
 	delay_scope: 'compat' | 'essential';
+	lsdelay_timeout: number;
 	cache_defers: boolean;
 	cache_delays: boolean;
 }

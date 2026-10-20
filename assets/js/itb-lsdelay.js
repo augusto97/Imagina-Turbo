@@ -15,7 +15,8 @@
  * El primer clic en un control que depende de JS (botón, campo, enlace sin destino) también se guarda
  * y se repite al final, salvo que el control ya tenga un manejador de jQuery (con YITH excluido del
  * retraso, «Añadir al presupuesto» esperaba 5–8 s sin necesidad) o sea un enlace sin destino que algún
- * manejador atiende (preventDefault). Vanilla, sin dependencias.
+ * manejador atiende (preventDefault). Al terminar se reenvían resize y scroll, y con itbLsDelay.t > 0 la
+ * carga empieza sola tras ese plazo (0.14.7). Vanilla, sin dependencias.
  */
 ( function ( d, w ) {
 	var events = [ 'mouseover', 'click', 'keydown', 'wheel', 'touchmove', 'touchstart', 'pointerup', 'pointerdown' ];
@@ -214,6 +215,10 @@
 					setTimeout( rethrow( e ) );
 				}
 			}
+			// Los sliders, contadores y animaciones que se iniciaron al cargar miden la ventana y esperan un
+			// scroll o resize que ya pasó (0.14.7).
+			w.dispatchEvent( new Event( 'resize' ) );
+			w.dispatchEvent( new Event( 'scroll' ) );
 			if ( clicked ) {
 				setTimeout( function () {
 					var t = clicked;
@@ -224,10 +229,37 @@
 		} );
 	}
 
+	// Plazo opcional (itbLsDelay.t segundos desde load): carga el JS retrasado aunque nadie interactúe,
+	// para que los carruseles y la galería no esperen. Cuesta nota de laboratorio si cae dentro de la
+	// medición, por eso viene apagado (0.14.7).
+	function deadline() {
+		var t = ( w.itbLsDelay || {} ).t;
+		if ( ! ( t > 0 ) ) {
+			return;
+		}
+		setTimeout( function () {
+			if ( pending() && typeof w.litespeed_load_delayed_js_force === 'function' ) {
+				hold();
+				w.litespeed_load_delayed_js_force();
+			}
+		}, t * 1000 );
+	}
+
+	function armDeadline() {
+		if ( d.prerendering ) {
+			addD.call( d, 'prerenderingchange', armDeadline, { once: true } );
+		} else if ( d.readyState === 'complete' ) {
+			deadline();
+		} else {
+			addW.call( w, 'load', deadline, { once: true } );
+		}
+	}
+
 	events.forEach( function ( e ) {
 		w.addEventListener( e, hold, opts );
 	} );
 	d.addEventListener( 'click', onClick, true );
 	w.addEventListener( 'click', afterClick );
 	w.addEventListener( 'DOMContentLiteSpeedLoaded', done );
+	armDeadline();
 }( document, window ) );

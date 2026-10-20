@@ -270,10 +270,14 @@ final class ConfigCompiler {
 			] : [],
 			// Retención de Action Scheduler: solo con el módulo Base de datos activo (0 = la de Action Scheduler).
 			'database'                    => [ 'as_retention' => true === ( $modules['database'] ?? false ) ? (int) $this->settings->get( 'db_as_retention', 0 ) : 0 ],
+			// Plazo del JS retrasado de LiteSpeed Cache sin interacción (0.14.7; 0 = solo al interactuar).
+			'lsdelay'                     => [ 't' => (int) $this->settings->get( 'lsdelay_timeout', 0 ) ],
 			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
 			'hints'                       => [
 				'lcp'     => (bool) $this->settings->get( 'hints_lcp', true ),
 				'facades' => (bool) $this->settings->get( 'hints_facades', true ),
+				// Fuentes del primer render por plantilla (RUM, 0.15.0).
+				'fonts'   => (bool) $this->settings->get( 'hints_fonts', true ) ? RumService::stored()['fonts'] : [],
 				'lazy'    => true === ( $modules['frontend_hints'] ?? true ) ? Settings::lazyRender( (array) $this->settings->get( 'lazy_render', [] ) ) : [],
 				'images'  => array_map(
 					static fn( array $i ): array => [

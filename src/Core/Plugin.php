@@ -65,6 +65,7 @@ use ImaginaTurbo\Repository\MetricsRepository;
 use ImaginaTurbo\Repository\PurgeQueueRepository;
 use ImaginaTurbo\Repository\SampleRepository;
 use ImaginaTurbo\Repository\SnapshotRepository;
+use ImaginaTurbo\Integrations\Abilities;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
 
@@ -205,6 +206,10 @@ final class Plugin {
 			)
 		);
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
+		// Habilidades para asistentes de IA (Abilities API, 0.15.0): fuera del HTML público, sin costo ahí.
+		if ( RequestType::FrontendHtml !== $type ) {
+			( new Abilities( $this->container->get( EventLog::class ), (bool) $this->container->get( Settings::class )->get( 'ai_write', false ) ) )->register();
+		}
 
 		if ( ! $type->isPotentiallyCacheable() && RequestType::StaticMiss !== $type ) {
 			$this->registerRecompileTriggers();

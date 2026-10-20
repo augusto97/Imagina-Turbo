@@ -24,7 +24,7 @@ use ImaginaTurbo\Repository\SampleRepository;
  */
 final class NavigationController extends Controller {
 
-	private const BOOLS = [ 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_facades' ];
+	private const BOOLS = [ 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades' ];
 
 	public function registerRoutes(): void {
 		$this->route( '/navigation/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );

@@ -541,3 +541,19 @@ Compatibilidad con «Load JS Delayed» de LiteSpeed Cache, ahora en `assets/js/i
 - **`itb-lsdelay.js` empezaba a retener demasiado pronto.** Chrome envía `mouseover` cuando la página se pinta bajo el cursor, todavía cargando. En ese momento el cargador de LSCache (en el pie) aún no escuchaba y no arrancaba, pero Turbo ya retenía los `DOMContentLoaded`. El de `itb-cart.js` quedaba esperando a una carga que no llegaba, y el contador del carrito se quedaba en 0 en las páginas guardadas.
 - Arreglo: solo se retiene cuando existe el cargador de LSCache (`litespeed_load_delayed_js_force`). Si la página todavía se está leyendo, desde `DOMContentLoaded`, igual que hace LSCache.
 - Detectado al verificar la 0.14.5 en el sitio: «contador correcto en otra página» fallaba siempre en la batería.
+
+## Versión 0.15.0
+
+Lo que conviene copiar de Warp Performance (análisis de su sitio, funciones y changelog 2.2.2), adaptado a las reglas del proyecto: nada de CSS crítico, minificado ni caché de página propia, que siguen siendo del plugin de caché.
+
+- **Red de seguridad del JS retrasado de LSCache** (`itb-lsdelay.js`):
+  - Al terminar la carga retrasada reenvía `resize` y `scroll`, para que los sliders, contadores y animaciones que se inician en ese momento arranquen sin esperar otro gesto.
+  - Plazo opcional `lsdelay_timeout` (Assets → Carga de scripts; 0 = nunca, por defecto): carga lo retrasado sin interacción tras N segundos desde `load`, respetando el prerender. Si cae dentro de la medición de PageSpeed sube el TBT; por eso viene apagado.
+- **Precarga de fuentes guiada por RUM** (`hints_fonts`, activo por defecto): el beacon informa las fuentes del propio sitio pedidas antes del LCP, y la tarea diaria precarga hasta 2 por plantilla (`<link rel="preload" as="font">` y cabecera `Link`), antes que la imagen LCP. Ver docs/02 módulo 9.
+  - Medido en La Tienda del Pintor: el CLS de la categoría (0,3–0,45) viene de las fuentes. La de íconos de WoodMart llega a 1,5 s con precarga (antes 3,2 s). Work Sans viene de Google y llega tarde aunque se precargue: para eso está la recomendación de fuentes locales del Diagnóstico.
+- **Asistentes de IA** (Abilities API de WordPress 6.9+, docs/02 módulo 14): cinco habilidades de lectura y, solo con «Permitir cambios», purgar la caché y encender o apagar módulos seguros. Usan las mismas rutas REST del admin y quedan en el registro.
+- **No copiado, con motivo**:
+  - Secciones dinámicas («Dynamic Cache»): hoy el carrito, los nonces y los productos vistos ya se resuelven sin ellas. Cada visitante con la función genera una página entera sin caché. Se retoma cuando haya un caso real (precio por rol, multimoneda).
+  - Alojar gtag en local: con el JS retrasado aporta poco.
+  - Cabeceras de seguridad y CORS: no son rendimiento.
+  - APO de Cloudflare: se salta la caché en tiendas.

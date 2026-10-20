@@ -285,6 +285,7 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
   - Ajuste `delay_js_scope` (0.14.3, pantalla Assets → Carga de scripts):
     - `compat` (por defecto): globales, pagos y servicios, más las listas de cada integración activa.
     - `essential`: solo globales, pagos y servicios.
+  - Compatibilidad con «Delayed» de LSCache: `assets/js/itb-lsdelay.js` (0.14.5–0.15.0). Retiene `jQuery(fn)`, `load` y `DOMContentLoaded` durante la carga retrasada y los ejecuta en orden. Guarda el primer clic sin manejador. Al terminar reenvía `resize` y `scroll`. Con `lsdelay_timeout` > 0, la carga empieza sola tras ese plazo (apagado por defecto: si cae dentro de la medición de PageSpeed, sube el TBT).
   - Las listas por integración vienen de las «exclusiones en un clic» de WP Rocket, que allí son opcionales. Con WoodMart, Elementor y Site Kit dejan sin retrasar el tema, el constructor y Google.
   - Con «Delayed» de LSCache solo cuenta como excluido el script con `defer` nativo. LSCache quita `async` antes de decidir y sí retrasa esos scripts (`_js_defer`, 7.9.1).
 - Probado en el sitio con Contact Form 7 6.2.2: sugerencia "solo en /contacto/", previsualización solo para el admin, y tras activar la portada en caché sin CF7 y el contacto con su formulario.
@@ -336,6 +337,12 @@ Módulo aparte del gestor de assets, riesgo moderado, apagado por defecto. Se aj
   - Con una imagen fija, además `<link rel="preload" as="image" media="(max-width: 767px)">` con la URL que midió el RUM. Solo en móvil: en escritorio el navegador elegiría otro tamaño y la precarga se desperdiciaría.
 - **Fachadas** (`embed_oembed_html`): YouTube con miniatura de `i.ytimg.com` y Vimeo sin miniatura (no hay forma oficial de obtenerla sin pedirla a su API). El iframe se crea al tocar, con `autoplay=1`. No se tocan los iframes con `enablejsapi`. El CSS y el JS (unos cientos de bytes en línea) solo se imprimen en páginas con alguna fachada. Probado en el sitio: sin iframes al cargar y el reproductor aparece al tocar.
 - **Preconnect**: no implementado. Las imágenes LCP que se aceptan son del mismo origen, y para terceros haría falta medir sus recursos en el RUM. Queda para cuando haya datos reales.
+- **Fuentes del primer render** (0.15.0, `hints_fonts`, activo por defecto):
+  - El beacon informa hasta 2 fuentes del propio sitio (`woff2`, `woff`, `ttf`, `otf`) pedidas antes del LCP. Son las del primer render: el navegador solo descarga una fuente cuando hay texto que la usa.
+  - La tarea diaria elige hasta 2 por plantilla (ambos dispositivos). Requisitos: 30 muestras, 15 visitantes distintos, al menos la mitad de muestras que la más pedida, y que la ruta sea un archivo de fuente que existe bajo la raíz de WordPress (sin `..`).
+  - En la página van como `<link rel="preload" as="font" crossorigin>` en `wp_head` prioridad 1 (antes que la imagen LCP) y en la cabecera `Link` (Early Hints con Cloudflare).
+  - Sin ellas, la fuente llega tarde y el texto salta al cambiar de la fuente del sistema (CLS).
+  - Las de Google Fonts no se precargan: llegan tarde aunque se precarguen (otro origen) y sus URLs cambian. El Diagnóstico recomienda servirlas en local desde el tema o el constructor.
 
 ---
 
@@ -415,3 +422,18 @@ Verificado en `augusto97/imagina-search` (Woo Smart Search 6.0.2):
 - **Por lotes desde el hub**: solo si el administrador lo autorizó (`fleet_remote`, con confirmación). La petición va firmada con la clave del sitio, caduca en 5 minutos, no se acepta dos veces y está limitada a 60 por hora. El sitio no acepta configuración en la petición: descarga la plantilla del hub y la aplica solo si la versión coincide con la pedida.
 - **Nunca por plantilla**: lo invasivo (carga condicional, quitar jQuery Migrate), reglas de Cloudflare que alguien cambió a mano en el panel, Cloudflare con el módulo apagado, DNS, SSL y certificados (regla 8).
 - Detalle del protocolo en `docs/04-admin-y-api.md`.
+
+---
+
+## 14. Asistentes de IA (`Integrations/Abilities`, 0.15.0)
+
+- **Qué es**: habilidades registradas en la Abilities API de WordPress (6.9+). Un cliente MCP (con el plugin MCP Adapter) o la REST `wp-abilities/v1` las usa con las credenciales de un administrador. Idea tomada de Warp Performance.
+- **Lectura** (siempre, con el permiso del admin): `imagina-turbo/get-status`, `get-vitals` (RUM de 7 o 30 días), `get-cache-status`, `get-platform-audit` y `get-events`.
+- **Escritura** (solo con `ai_write`, apagado por defecto; si está apagado ni se registran): `imagina-turbo/purge-cache` (todo, una URL o un tag) y `imagina-turbo/set-module`.
+- **Seguridad**:
+  - Cada habilidad llama a la ruta REST del admin que ya existe (`rest_do_request`), con sus mismas validaciones.
+  - `set-module` no envía `confirm`: un asistente solo puede encender módulos de riesgo seguro (regla 3). Apagar cualquiera sí puede.
+  - Toda escritura queda en el registro de eventos con el usuario y la entrada. Activar `ai_write` también queda registrado, como advertencia.
+- **Costo**: no se registra nada en el HTML público. En las demás peticiones son dos `add_action`; el registro real solo ocurre si algo pide la lista de habilidades.
+- **Metadatos**: `meta.public` y `meta.mcp.public`. Anotaciones `readonly`/`idempotent` en las de lectura y `destructive: false` en todas.
+- **Verificado en el código de WordPress 7.1.3** (`wp-includes/abilities-api.php`). Probado en local: las cinco de lectura, purgar una URL, el rechazo de un módulo moderado, de un módulo desconocido y de un tipo inválido, y el permiso sin sesión.

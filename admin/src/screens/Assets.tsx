@@ -469,6 +469,7 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 	const [ delay, setDelay ] = useState( scripts.delay.join( '\n' ) );
 	const [ timeout, setTimeoutValue ] = useState( String( scripts.delay_timeout ) );
 	const [ scope, setScope ] = useState( scripts.delay_scope );
+	const [ lsTimeout, setLsTimeout ] = useState( String( scripts.lsdelay_timeout ) );
 	const [ open, setOpen ] = useState( false );
 	const enable = useAction( () => api( 'modules/script_loading', 'PUT', { enabled: true, confirm: true } ) );
 	const save = useAction( () =>
@@ -478,6 +479,7 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 			script_delay: lines( delay ),
 			script_delay_timeout: Number( timeout ),
 			delay_js_scope: scope,
+			lsdelay_timeout: Number( lsTimeout ),
 		} )
 	);
 	const add = ( pattern: string ) => {
@@ -572,6 +574,19 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 						<option value="compat">{ __( 'Compatibilidad máxima (todas las de la matriz)' ) }</option>
 						<option value="essential">{ __( 'Solo esenciales (más rápido; verifica el sitio)' ) }</option>
 					</Select>
+					{ scripts.cache_delays && (
+						<label className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+							<span className="itb:text-xs itb:text-zinc-500">{ __( 'Cargar el JS retrasado de LiteSpeed sin interacción después de' ) }</span>
+							<Select value={ lsTimeout } onChange={ ( e ) => setLsTimeout( e.target.value ) } className="itb:w-auto" aria-label={ __( 'Plazo del JS retrasado' ) }>
+								<option value="0">{ __( 'nunca (solo al interactuar)' ) }</option>
+								<option value="5">5 s</option>
+								<option value="8">8 s</option>
+								<option value="10">10 s</option>
+								<option value="15">15 s</option>
+							</Select>
+							<span className="itb:block itb:w-full itb:text-xs itb:text-zinc-500">{ __( 'Con un plazo, los carruseles y la galería se activan aunque el visitante no toque nada; si cae dentro de la medición de PageSpeed, la nota baja.' ) }</span>
+						</label>
+					) }
 				</div>
 
 				<div className="itb:flex itb:items-center itb:gap-3">

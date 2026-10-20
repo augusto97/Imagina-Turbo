@@ -78,6 +78,11 @@ final class DelayJsExclusions {
 		if ( '' === $code ) {
 			return;
 		}
+		$timeout = Runtime::$config?->get( 'lsdelay', [] );
+		$timeout = is_array( $timeout ) ? (int) ( $timeout['t'] ?? 0 ) : 0;
+		if ( $timeout > 0 ) {
+			$code = 'window.itbLsDelay=' . wp_json_encode( [ 't' => $timeout ] ) . ';' . $code;
+		}
 		wp_print_inline_script_tag(
 			$code,
 			[

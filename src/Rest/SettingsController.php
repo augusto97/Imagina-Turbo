@@ -43,6 +43,7 @@ final class SettingsController extends Controller {
 			[ $this, 'updateSettings' ],
 			[
 				'debug'           => [ 'type' => 'boolean' ],
+				'ai_write'        => [ 'type' => 'boolean' ],
 				'staging_domains' => [
 					'type'     => 'array',
 					'items'    => [
@@ -116,7 +117,7 @@ final class SettingsController extends Controller {
 
 	public function updateSettings( \WP_REST_Request $request ): \WP_REST_Response {
 		$changes = [];
-		foreach ( [ 'debug', 'staging_domains' ] as $key ) {
+		foreach ( [ 'debug', 'staging_domains', 'ai_write' ] as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ $key ] = $request->get_param( $key );
 			}
@@ -124,6 +125,9 @@ final class SettingsController extends Controller {
 		$this->container->get( Settings::class )->update( $changes );
 		$this->container->get( ConfigCompiler::class )->compile();
 		$this->container->get( EventLog::class )->info( 'core', 'settings', __( 'Ajustes actualizados.', 'imagina-turbo' ), [ 'keys' => array_keys( $changes ) ] );
+		if ( true === ( $changes['ai_write'] ?? null ) ) {
+			$this->container->get( EventLog::class )->warning( 'ai', 'write', __( 'Los asistentes de IA pueden purgar la caché y encender o apagar módulos seguros.', 'imagina-turbo' ), [ 'user' => get_current_user_id() ] );
+		}
 		return $this->ok( $this->publicSettings() );
 	}
 
@@ -169,6 +173,8 @@ final class SettingsController extends Controller {
 			'debug'           => $settings['debug'],
 			'staging_domains' => $settings['staging_domains'],
 			'modules'         => $settings['modules'],
+			'ai_write'        => (bool) $settings['ai_write'],
+			'abilities_api'   => function_exists( 'wp_register_ability' ),
 		];
 	}
 }

@@ -81,6 +81,9 @@ final class FrontendHintsModule implements ModuleInterface {
 		if ( $s['lcp'] ) {
 			add_action( 'wp', [ self::class, 'prepare' ] );
 		}
+		if ( [] !== $s['fonts'] ) {
+			add_action( 'wp', [ self::class, 'prepareFonts' ] );
+		}
 		if ( [] !== $s['lazy'] ) {
 			add_action( 'wp_head', [ self::class, 'printLazyRender' ], 8 );
 		}
@@ -91,7 +94,7 @@ final class FrontendHintsModule implements ModuleInterface {
 	}
 
 	/**
-	 * @return array{lcp: bool, facades: bool, images: array<string, array{kind: string, id: int, src: string}>, lazy: list<array{selector: string, templates: list<string>, height: int}>}
+	 * @return array{lcp: bool, facades: bool, images: array<string, array{kind: string, id: int, src: string}>, fonts: array<string, list<string>>, lazy: list<array{selector: string, templates: list<string>, height: int}>}
 	 */
 	public static function settings(): array {
 		$s = Runtime::$config?->get( 'hints', [] );
@@ -100,6 +103,7 @@ final class FrontendHintsModule implements ModuleInterface {
 			'lcp'     => false !== ( $s['lcp'] ?? true ),
 			'facades' => false !== ( $s['facades'] ?? true ),
 			'images'  => is_array( $s['images'] ?? null ) ? $s['images'] : [],
+			'fonts'   => is_array( $s['fonts'] ?? null ) ? $s['fonts'] : [],
 			'lazy'    => is_array( $s['lazy'] ?? null ) ? array_values( $s['lazy'] ) : [],
 		];
 	}
@@ -222,6 +226,63 @@ final class FrontendHintsModule implements ModuleInterface {
 		}
 		if ( '' !== self::$lcpSrc ) {
 			add_action( 'wp_head', [ self::class, 'printPreload' ], 2 );
+		}
+	}
+
+	/** @var list<string> Rutas de las fuentes que se precargan en esta página. */
+	private static array $fonts = [];
+
+	/**
+	 * Fuentes del primer render de esta plantilla, según el RUM (0.15.0). Van antes que la imagen LCP:
+	 * con la imagen primero, Chrome puede retener el primer pintado esperando la fuente (lo vio Warp
+	 * Performance, changelog 2.2.2).
+	 */
+	public static function prepareFonts(): void {
+		$list        = self::settings()['fonts'][ RouteKey::template() ] ?? [];
+		self::$fonts = array_values( array_filter( is_array( $list ) ? array_slice( $list, 0, 2 ) : [], static fn( mixed $p ): bool => is_string( $p ) && str_starts_with( $p, '/' ) && ! str_starts_with( $p, '//' ) ) );
+		if ( [] === self::$fonts ) {
+			return;
+		}
+		add_action( 'template_redirect', [ self::class, 'sendFontHeader' ], 98 );
+		add_action( 'wp_head', [ self::class, 'printFonts' ], 1 );
+	}
+
+	/**
+	 * Tipo MIME de una fuente por su extensión.
+	 */
+	public static function fontType( string $path ): string {
+		$ext = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
+		return match ( $ext ) {
+			'woff2' => 'font/woff2',
+			'woff'  => 'font/woff',
+			'otf'   => 'font/otf',
+			default => 'font/ttf',
+		};
+	}
+
+	/**
+	 * La cabecera Link de las fuentes (Early Hints con Cloudflare). Las rutas ya son del propio sitio.
+	 *
+	 * @param list<string> $paths Rutas.
+	 */
+	public static function fontLinkHeader( array $paths ): string {
+		$parts = [];
+		foreach ( $paths as $path ) {
+			$parts[] = '<' . self::headerSafe( $path ) . '>; rel=preload; as=font; type=' . self::fontType( $path ) . '; crossorigin';
+		}
+		return implode( ', ', $parts );
+	}
+
+	public static function sendFontHeader(): void {
+		if ( [] === self::$fonts || headers_sent() ) {
+			return;
+		}
+		header( 'Link: ' . self::fontLinkHeader( self::$fonts ), false );
+	}
+
+	public static function printFonts(): void {
+		foreach ( self::$fonts as $path ) {
+			printf( "<link rel=\"preload\" as=\"font\" type=\"%s\" href=\"%s\" crossorigin>\n", esc_attr( self::fontType( $path ) ), esc_url( $path ) );
 		}
 	}
 
@@ -378,6 +439,7 @@ final class FrontendHintsModule implements ModuleInterface {
 	 * Vacía el estado (pruebas).
 	 */
 	public static function reset(): void {
+		self::$fonts        = [];
 		self::$lcpId        = 0;
 		self::$lcpSrc       = '';
 		self::$featuredOnly = false;

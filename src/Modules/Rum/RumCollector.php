@@ -147,6 +147,13 @@ final class RumCollector {
 				$out['events'][] = [ $day, 'lcp', $template, $device, $lcp, $ipBit ];
 			}
 		}
+		// Fuentes del propio sitio pedidas antes del LCP (0.15.0), hasta 2 por beacon.
+		foreach ( array_slice( is_array( $b['fo'] ?? null ) ? $b['fo'] : [], 0, 2 ) as $font ) {
+			$font = self::path( $font );
+			if ( '' !== $font && 1 === preg_match( '/\.(woff2?|ttf|otf)$/i', $font ) ) {
+				$out['events'][] = [ $day, 'font', $template, $device, $font, $ipBit ];
+			}
+		}
 		$from = self::template( $b['pf'] ?? null );
 		$to   = self::path( $b['pu'] ?? null );
 		if ( '' !== $from && '' !== $to ) {

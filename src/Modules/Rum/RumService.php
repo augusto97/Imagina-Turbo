@@ -35,15 +35,16 @@ final class RumService {
 	}
 
 	/**
-	 * @return array{predicted: array<string, list<string>>, lcp: array<string, Lcp>, generated: int}
+	 * @return array{predicted: array<string, list<string>>, lcp: array<string, Lcp>, fonts: array<string, list<string>>, generated: int}
 	 */
 	public static function stored(): array {
 		$data = get_option( RumInsights::OPTION, [] );
 		$data = is_array( $data ) ? $data : [];
-		/** @var array{predicted: array<string, list<string>>, lcp: array<string, Lcp>, generated: int} */
+		/** @var array{predicted: array<string, list<string>>, lcp: array<string, Lcp>, fonts: array<string, list<string>>, generated: int} */
 		return [
 			'predicted' => is_array( $data['predicted'] ?? null ) ? $data['predicted'] : [],
 			'lcp'       => is_array( $data['lcp'] ?? null ) ? $data['lcp'] : [],
+			'fonts'     => is_array( $data['fonts'] ?? null ) ? $data['fonts'] : [],
 			'generated' => is_int( $data['generated'] ?? null ) ? $data['generated'] : 0,
 		];
 	}
@@ -51,7 +52,7 @@ final class RumService {
 	/**
 	 * Recalcula y, si cambió algo, recompila.
 	 *
-	 * @return array{predicted: array<string, list<string>>, lcp: array<string, Lcp>, generated: int}
+	 * @return array{predicted: array<string, list<string>>, lcp: array<string, Lcp>, fonts: array<string, list<string>>, generated: int}
 	 */
 	public function daily(): array {
 		$this->repository->deleteOlderThan( RumRepository::RETENTION_DAYS );
@@ -64,22 +65,29 @@ final class RumService {
 			$this->repository->events( 'lcp', self::WINDOW_DAYS ),
 			static fn( string $path ): int => attachment_url_to_postid( home_url( RumInsights::originalPath( $path ) ) )
 		);
+		$homePath  = rtrim( (string) wp_parse_url( home_url( '/' ), PHP_URL_PATH ), '/' );
+		$fonts     = RumInsights::fonts(
+			$this->repository->events( 'font', self::WINDOW_DAYS, 500, false ),
+			static fn( string $path ): bool => RumInsights::isFontFile( $path, ABSPATH, $homePath )
+		);
 		$previous  = self::stored();
 		$data      = [
 			'predicted' => $predicted,
 			'lcp'       => $lcp,
+			'fonts'     => $fonts,
 			'generated' => time(),
 		];
 		update_option( RumInsights::OPTION, $data, false );
-		if ( $previous['predicted'] !== $predicted || $previous['lcp'] !== $lcp ) {
+		if ( $previous['predicted'] !== $predicted || $previous['lcp'] !== $lcp || $previous['fonts'] !== $fonts ) {
 			( $this->recompile )();
 			$this->events->info(
 				'rum',
 				'insights',
-				__( 'El RUM actualizó las páginas que se precargan y las imágenes LCP.', 'imagina-turbo' ),
+				__( 'El RUM actualizó las páginas que se precargan, las imágenes LCP y las fuentes.', 'imagina-turbo' ),
 				[
 					'predicted' => array_map( 'count', $predicted ),
 					'lcp'       => array_keys( $lcp ),
+					'fonts'     => $fonts,
 				]
 			);
 		}

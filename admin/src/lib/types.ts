@@ -585,6 +585,7 @@ export interface NavigationSettings {
 	view_transitions: boolean;
 	hints_lcp: boolean;
 	hints_fonts: boolean;
+	fonts_manual: string[];
 	hints_facades: boolean;
 	lazy_render: LazyRenderRule[];
 }
@@ -661,6 +662,13 @@ export interface AssetSuggestion {
 	note: string;
 }
 
+export interface LateSheet {
+	h: string;
+	src: string;
+	ver: string;
+	media: string;
+}
+
 export interface AssetsStatus {
 	enabled: boolean;
 	forced_off: string;
@@ -676,6 +684,14 @@ export interface AssetsStatus {
 	templates: string[];
 	post_types: string[];
 	home: string;
+	late_styles: {
+		active: Record<string, LateSheet[]>;
+		detected: {
+			templates: Record<string, { paths: string[]; sheets: ( LateSheet & { size: number } )[] }>;
+			errors: string[];
+			generated_at: number;
+		} | null;
+	};
 	scripts: ScriptLoadingStatus;
 }
 

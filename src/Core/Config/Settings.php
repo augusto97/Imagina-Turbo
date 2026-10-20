@@ -76,6 +76,8 @@ final class Settings {
 			'hints_lcp'                => true,
 			'hints_fonts'              => true,
 			'ai_write'                 => false,
+			'late_styles'              => [],
+			'fonts_manual'             => [],
 			'hints_facades'            => true,
 			'lazy_render'              => [],
 			'db_keep_revisions'        => 5,
@@ -319,6 +321,16 @@ final class Settings {
 			$out['lsdelay_timeout'] = (int) max( 0, min( 30, (int) $input['lsdelay_timeout'] ) );
 		}
 
+		// Hojas de estilo tardías al head (0.16.0): plantilla → hojas del propio sitio.
+		if ( isset( $input['late_styles'] ) && is_array( $input['late_styles'] ) ) {
+			$out['late_styles'] = \ImaginaTurbo\Modules\AssetManager\LateStyles::normalize( $input['late_styles'], function_exists( 'home_url' ) ? (string) home_url( '/' ) : '' );
+		}
+
+		// Fuentes a precargar en todo el sitio, además de las del RUM (0.16.0).
+		if ( isset( $input['fonts_manual'] ) && is_array( $input['fonts_manual'] ) ) {
+			$out['fonts_manual'] = self::fontPaths( $input['fonts_manual'], function_exists( 'home_url' ) ? (string) home_url( '/' ) : '' );
+		}
+
 		// Limpiezas programadas: solo las que no necesitan elegir filas (el autoload siempre es manual).
 		if ( isset( $input['db_schedule'] ) && is_array( $input['db_schedule'] ) ) {
 			$out['db_schedule'] = array_values( array_intersect( [ 'transients', 'action_scheduler', 'revisions' ], $input['db_schedule'] ) );
@@ -385,6 +397,40 @@ final class Settings {
 			}
 		}
 		return array_slice( array_values( array_unique( $out ) ), 0, 30 );
+	}
+
+	/**
+	 * Rutas de fuentes del propio sitio (hasta 3): absolutas del host de la portada o relativas, con
+	 * extensión de fuente, sin "..", comillas ni espacios. Se guardan como ruta (con la query si la hay).
+	 *
+	 * @param array<mixed> $list Entradas.
+	 * @return list<string>
+	 */
+	public static function fontPaths( array $list, string $home ): array {
+		$own = strtolower( (string) parse_url( $home, PHP_URL_HOST ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- sin WordPress en las pruebas.
+		$out = [];
+		foreach ( $list as $item ) {
+			if ( ! is_string( $item ) ) {
+				continue;
+			}
+			$item = trim( $item );
+			if ( 1 === preg_match( '#^(https?:)?//#i', $item ) ) {
+				$host = strtolower( (string) parse_url( str_starts_with( $item, '//' ) ? 'https:' . $item : $item, PHP_URL_HOST ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- idem.
+				if ( '' === $own || $host !== $own ) {
+					continue;
+				}
+				$item = (string) preg_replace( '#^(https?:)?//[^/]+#i', '', $item );
+			}
+			$path = (string) strtok( $item, '?#' );
+			if ( ! str_starts_with( $item, '/' ) || str_starts_with( $item, '//' ) || str_contains( $item, '..' ) || 1 === preg_match( '/["\'<>\s\\\\]/', $item ) || 1 !== preg_match( '/\.(woff2?|ttf|otf)$/i', $path ) ) {
+				continue;
+			}
+			$out[ $item ] = true;
+			if ( count( $out ) >= 3 ) {
+				break;
+			}
+		}
+		return array_keys( $out );
 	}
 
 	/**

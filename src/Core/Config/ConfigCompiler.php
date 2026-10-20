@@ -258,6 +258,8 @@ final class ConfigCompiler {
 			// Exclusiones de delay JS para WP Rocket o LSCache (solo si alguno está activo).
 			// Gestor de assets: solo con el módulo activo (las reglas "testing" solo las aplica la previsualización).
 			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
+			// Hojas tardías que se adelantan al head (0.16.0), con el gestor de assets activo.
+			'late_styles'                 => true === ( $modules['asset_manager'] ?? false ) ? (array) $this->settings->get( 'late_styles', [] ) : [],
 			// "essential" (0.14.3): solo las globales y las de pagos y servicios, sin las de cada integración.
 			'delay_js'                    => in_array( $env['cache_plugin'] ?? null, [ 'wp-rocket', 'litespeed-cache' ], true ) ? ( 'essential' === $this->settings->get( 'delay_js_scope', 'compat' ) ? ( $compat['delay_js_essential'] ?? [] ) : ( $compat['delay_js'] ?? [] ) ) : [],
 			'rum'                         => $this->rumConfig(),
@@ -274,12 +276,14 @@ final class ConfigCompiler {
 			'lsdelay'                     => [ 't' => (int) $this->settings->get( 'lsdelay_timeout', 0 ) ],
 			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
 			'hints'                       => [
-				'lcp'     => (bool) $this->settings->get( 'hints_lcp', true ),
-				'facades' => (bool) $this->settings->get( 'hints_facades', true ),
+				'lcp'       => (bool) $this->settings->get( 'hints_lcp', true ),
+				'facades'   => (bool) $this->settings->get( 'hints_facades', true ),
 				// Fuentes del primer render por plantilla (RUM, 0.15.0).
-				'fonts'   => (bool) $this->settings->get( 'hints_fonts', true ) ? RumService::stored()['fonts'] : [],
-				'lazy'    => true === ( $modules['frontend_hints'] ?? true ) ? Settings::lazyRender( (array) $this->settings->get( 'lazy_render', [] ) ) : [],
-				'images'  => array_map(
+				'fonts'     => (bool) $this->settings->get( 'hints_fonts', true ) ? RumService::stored()['fonts'] : [],
+				// Fuentes elegidas a mano para todo el sitio (0.16.0).
+				'fonts_all' => Settings::fontPaths( (array) $this->settings->get( 'fonts_manual', [] ), home_url( '/' ) ),
+				'lazy'      => true === ( $modules['frontend_hints'] ?? true ) ? Settings::lazyRender( (array) $this->settings->get( 'lazy_render', [] ) ) : [],
+				'images'    => array_map(
 					static fn( array $i ): array => [
 						'kind' => $i['kind'],
 						'id'   => $i['id'],

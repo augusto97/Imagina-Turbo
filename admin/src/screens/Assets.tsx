@@ -13,7 +13,7 @@ import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { AssetInventory, AssetRule, AssetsStatus, AssetSuggestion, InventoryAsset, ScriptLoadingStatus } from '@/lib/types';
+import type { AssetInventory, AssetRule, AssetsStatus, AssetSuggestion, InventoryAsset, LateSheet, ScriptLoadingStatus } from '@/lib/types';
 import { formatBytes, formatDate } from '@/lib/utils';
 
 const KEY = [ 'assets' ];
@@ -59,6 +59,7 @@ export function Assets() {
 					{ draft && <DraftCard status={ data } draft={ draft } onChange={ setDraft } onClose={ () => setDraft( null ) } /> }
 					<InspectCard status={ data } onRule={ setDraft } />
 					<SuggestionsCard status={ data } onRule={ setDraft } />
+					<LateStylesCard status={ data } />
 					<ScriptsCard scripts={ data.scripts } />
 				</div>
 			) }
@@ -604,3 +605,83 @@ function ScriptsCard( { scripts }: { scripts: ScriptLoadingStatus } ) {
 		</Card>
 	);
 }
+
+function LateStylesCard( { status }: { status: AssetsStatus } ) {
+	const client = useQueryClient();
+	const scan = useAction( () => api<AssetsStatus>( 'assets/late-styles/scan', 'POST' ) );
+	const save = useAction( ( templates: Record<string, string[]> ) => api<AssetsStatus>( 'assets/late-styles', 'PUT', { templates } ) );
+	const detected = status.late_styles.detected;
+	const active = status.late_styles.active;
+	const [ picked, setPicked ] = useState<Record<string, string[]>>( {} );
+	const chosen = ( template: string, sheets: LateSheet[] ) => picked[ template ] ?? ( active[ template ] ?? sheets ).map( ( s ) => s.h );
+	const toggle = ( template: string, sheets: LateSheet[], handle: string ) => {
+		const list = chosen( template, sheets );
+		setPicked( { ...picked, [ template ]: list.includes( handle ) ? list.filter( ( h ) => h !== handle ) : [ ...list, handle ] } );
+	};
+	const done = ( d: AssetsStatus ) => {
+		client.setQueryData( KEY, d );
+		setPicked( {} );
+	};
+	const templates = Array.from( new Set( [ ...Object.keys( detected?.templates ?? {} ), ...Object.keys( active ) ] ) ).sort();
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:flex-wrap itb:items-start itb:justify-between itb:gap-3">
+					<div>
+						<CardTitle>{ __( 'Hojas de estilo tardías' ) }</CardTitle>
+						<CardDescription>{ __( 'Algunos temas (WoodMart, Elementor) imprimen hojas de estilo dentro de la página, a veces después del contenido al que dan forma: ese contenido se pinta primero de otra manera y luego salta (CLS). Adelantarlas al final del head lo evita. Solo hojas del propio sitio; se aplica con el gestor de assets activo y se purga la caché al guardar.' ) }</CardDescription>
+					</div>
+					<Button size="sm" variant="outline" disabled={ scan.isPending } onClick={ () => scan.mutate( undefined, { onSuccess: done } ) }>
+						<Search aria-hidden />
+						{ scan.isPending ? __( 'Detectando…' ) : __( 'Detectar' ) }
+					</Button>
+				</div>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ ! status.enabled && <Notice level="info">{ __( 'El gestor de assets está apagado: puedes detectar y guardar, pero no se aplica hasta activarlo.' ) }</Notice> }
+				{ templates.length === 0 && <p className="itb:m-0 itb:text-zinc-500">{ detected ? __( 'Ninguna plantilla imprime hojas del sitio después del head.' ) : __( 'Pulsa Detectar: se inventaría la portada, una página de cada tipo, la tienda y una categoría.' ) }</p> }
+				{ templates.map( ( template ) => {
+					const found = detected?.templates[ template ];
+					const sheets: ( LateSheet & { size?: number } )[] = found?.sheets ?? active[ template ] ?? [];
+					const on = active[ template ] ?? [];
+					const list = chosen( template, sheets );
+					return (
+						<div key={ template } className="itb:flex itb:flex-col itb:gap-2 itb:rounded-md itb:border itb:border-zinc-200 itb:p-3">
+							<div className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-2">
+								<span className="itb:flex itb:items-center itb:gap-2">
+									<code>{ template }</code>
+									{ on.length > 0 ? <Badge tone="green">{ `${ on.length } ${ __( 'en el head' ) }` }</Badge> : <Badge tone="neutral">{ __( 'sin cambios' ) }</Badge> }
+								</span>
+								<span className="itb:flex itb:gap-1">
+									{ found && (
+										<Button size="sm" disabled={ save.isPending || list.length === 0 } onClick={ () => save.mutate( { [ template ]: list }, { onSuccess: done } ) }>
+											{ __( 'Adelantar al head' ) }
+										</Button>
+									) }
+									{ on.length > 0 && (
+										<Button size="sm" variant="outline" disabled={ save.isPending } onClick={ () => save.mutate( { [ template ]: [] }, { onSuccess: done } ) }>
+											{ __( 'Quitar' ) }
+										</Button>
+									) }
+								</span>
+							</div>
+							{ found && found.paths.length > 0 && <span className="itb:text-xs itb:text-zinc-500">{ `${ __( 'Visto en' ) } ${ found.paths.join( ', ' ) }` }</span> }
+							<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-1 itb:p-0">
+								{ sheets.map( ( s ) => (
+									<li key={ s.h } className="itb:flex itb:items-center itb:gap-2">
+										<input type="checkbox" checked={ list.includes( s.h ) } disabled={ ! found } onChange={ () => toggle( template, sheets, s.h ) } aria-label={ s.h } />
+										<code className="itb:break-all itb:text-xs">{ s.h }</code>
+										{ typeof s.size === 'number' && s.size > 0 && <span className="itb:text-xs itb:text-zinc-500">{ formatBytes( s.size, config.locale ) }</span> }
+									</li>
+								) ) }
+							</ul>
+						</div>
+					);
+				} ) }
+				{ detected && detected.errors.length > 0 && <Notice level="warning">{ detected.errors.join( ' · ' ) }</Notice> }
+				{ ( scan.error || save.error ) && <Notice level="error">{ ( scan.error ?? save.error )?.message }</Notice> }
+			</CardContent>
+		</Card>
+	);
+}
+

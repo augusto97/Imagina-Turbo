@@ -292,6 +292,22 @@ Hooks verificados en WordPress 7.1 y WooCommerce 11.2.1:
 
 ---
 
+### Hojas de estilo tardías al head (`LateStyles`, 0.16.0)
+
+- **Problema**: WoodMart (y otros temas y constructores que cargan CSS por módulo) imprime hojas de estilo dentro de la página, a veces después del contenido al que dan forma. Hasta que llegan, ese contenido se pinta con otra disposición y luego salta.
+  - Medido en La Tienda del Pintor (71 hojas en el `<body>`): `wd-shop-off-canvas-sidebar` apila en móvil la cabecera de la tienda. Llegaba a ~3 s en móvil lento y empujaba la cuadrícula ~90 px.
+  - CLS 0,31–0,44 en todas las categorías; 0,13 al adelantarla, y 0,000 al adelantarla y precargar las fuentes.
+- **Detección** (Assets → Hojas de estilo tardías → Detectar):
+  - Dónde mira: el inventario (petición del sitio a sí mismo con la cookie firmada) inventaría la portada, una página de cada tipo, la tienda y la categoría de productos y de entradas con más contenido.
+  - Qué anota: las hojas impresas después del `<head>` (`AssetInventory::lateStyles`, comparando `wp_styles()->done` al terminar el head), externas y del propio sitio, con su URL, versión y media.
+- **Aplicar** por plantilla, eligiendo hojas:
+  - Solo se aceptan handles de la última detección: el cliente no manda URLs.
+  - En esas plantillas, en `wp_head` prioridad 9999, se registran (si el tema aún no lo hizo) con la URL y la versión del inventario y se imprimen con `wp_print_styles`.
+  - WordPress las marca como impresas y no las repite cuando el tema las pide después.
+  - Van al final del head, detrás de todo el CSS que ya estaba arriba, así que el orden de la cascada respecto al head no cambia.
+  - Las hojas en línea no se tocan: se imprimen justo antes de su contenido.
+- **Riesgo**: moderado, con el gestor de assets. Guardar purga la caché y queda en el registro. Probado en local: la hoja pasa al head sin duplicarse, solo en las plantillas elegidas; un handle no detectado se rechaza.
+
 ### Carga de scripts (`ScriptLoading`, 0.14.0)
 
 Módulo aparte del gestor de assets, riesgo moderado, apagado por defecto. Se ajusta en la pantalla Assets. Sin output buffering: todo va por los filtros de scripts del núcleo.
@@ -343,6 +359,7 @@ Módulo aparte del gestor de assets, riesgo moderado, apagado por defecto. Se aj
   - En la página van como `<link rel="preload" as="font" crossorigin>` en `wp_head` prioridad 1 (antes que la imagen LCP) y en la cabecera `Link` (Early Hints con Cloudflare).
   - Sin ellas, la fuente llega tarde y el texto salta al cambiar de la fuente del sistema (CLS).
   - Las de Google Fonts no se precargan: llegan tarde aunque se precarguen (otro origen) y sus URLs cambian. El Diagnóstico recomienda servirlas en local desde el tema o el constructor.
+  - **A mano** (0.16.0, `fonts_manual`, Navegación): hasta 3 fuentes del propio sitio para todas las páginas, sin esperar al RUM. Van antes que las del RUM, con un total de hasta 3 por página. Se aceptan URLs del propio host o rutas, con extensión de fuente, sin `..` ni comillas.
 
 ---
 

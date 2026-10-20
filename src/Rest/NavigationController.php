@@ -42,6 +42,14 @@ final class NavigationController extends Controller {
 				'minimum' => 0,
 				'maximum' => 1,
 			],
+			'fonts_manual'   => [
+				'type'     => 'array',
+				'items'    => [
+					'type'      => 'string',
+					'maxLength' => 300,
+				],
+				'maxItems' => 10,
+			],
 			'lazy_render'    => [
 				'type'  => 'array',
 				'items' => [ 'type' => 'object' ],
@@ -85,6 +93,7 @@ final class NavigationController extends Controller {
 		}
 		$values = [
 			'lazy_render'    => Settings::lazyRender( (array) $settings->get( 'lazy_render', [] ) ),
+			'fonts_manual'   => Settings::fontPaths( (array) $settings->get( 'fonts_manual', [] ), home_url( '/' ) ),
 			'spec_mode'      => (string) $settings->get( 'spec_mode', 'prefetch' ),
 			'spec_eagerness' => (string) $settings->get( 'spec_eagerness', 'moderate' ),
 			'rum_rate'       => (float) $settings->get( 'rum_rate', 0.05 ),
@@ -150,7 +159,7 @@ final class NavigationController extends Controller {
 			return $this->error( 'itb_confirm', __( 'Confirma el prerender: ejecuta el JavaScript de las páginas antes de que se abran.', 'imagina-turbo' ), 428 );
 		}
 		$changes = [];
-		foreach ( array_merge( [ 'spec_mode', 'spec_eagerness', 'rum_rate', 'lazy_render' ], self::BOOLS ) as $key ) {
+		foreach ( array_merge( [ 'spec_mode', 'spec_eagerness', 'rum_rate', 'lazy_render', 'fonts_manual' ], self::BOOLS ) as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ $key ] = $request->get_param( $key );
 			}

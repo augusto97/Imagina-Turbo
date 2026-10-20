@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Input, Select } from '@/components/ui/input';
+import { Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ApiError, api } from '@/lib/api';
 import { config } from '@/lib/config';
@@ -82,6 +82,7 @@ function SettingsCard( { status }: { status: NavigationStatus } ) {
 	useEffect( () => setValues( status.settings ), [ status ] );
 	const save = useAction( ( withConfirm: boolean ) => api<NavigationStatus>( 'navigation/settings', 'PUT', { ...values, confirm: withConfirm } ) );
 	const set = <K extends keyof NavigationSettings>( key: K, value: NavigationSettings[ K ] ) => setValues( { ...values, [ key ]: value } );
+	const [ fontsText, setFontsText ] = useState( ( status.settings.fonts_manual ?? [] ).join( '\n' ) );
 	const submit = ( withConfirm: boolean ) =>
 		save.mutate( withConfirm, {
 			onSuccess: ( s ) => client.setQueryData( [ 'navigation' ], s ),
@@ -123,6 +124,19 @@ function SettingsCard( { status }: { status: NavigationStatus } ) {
 				<Toggle label={ __( 'View Transitions' ) } help={ __( 'Transición suave entre páginas del mismo sitio (Chrome y Safari recientes). Cambia cómo se ve la navegación: revísala.' ) } checked={ values.view_transitions } onChange={ ( v ) => set( 'view_transitions', v ) } />
 				<Toggle label={ __( 'Prioridad de la imagen LCP' ) } help={ __( 'La imagen principal (la que mide el RUM, la del producto y los primeros productos de un listado) se descarga desde el HTML, sin esperar al lazy load ni a la reescritura de WebP por JavaScript.' ) } checked={ values.hints_lcp } onChange={ ( v ) => set( 'hints_lcp', v ) } />
 				<Toggle label={ __( 'Precarga de fuentes' ) } help={ __( 'Precarga las fuentes del propio sitio que el RUM ve pedir en el primer render de cada plantilla (hasta 2). Llegan antes y el texto no salta al cambiar de fuente. Las de Google Fonts no: actívalas en local en el tema o el constructor.' ) } checked={ values.hints_fonts } onChange={ ( v ) => set( 'hints_fonts', v ) } />
+				<label className="itb:flex itb:flex-col itb:gap-1">
+					<span className="itb:font-medium">{ __( 'Fuentes a precargar en todo el sitio' ) }</span>
+					<span className="itb:text-xs itb:text-zinc-500">{ __( 'Hasta 3, una por línea: URL o ruta de un archivo de fuente del propio sitio (woff2, woff, ttf u otf). Úsalo para la fuente del texto principal y la de íconos sin esperar al RUM; van antes que las que decide el RUM.' ) }</span>
+					<Textarea
+						rows={ 3 }
+						value={ fontsText }
+						placeholder="/wp-content/uploads/woodmart/google-fonts/fonts/worksans-….woff2"
+						onChange={ ( e ) => {
+							setFontsText( e.target.value );
+							set( 'fonts_manual', e.target.value.split( /\n/ ).map( ( l ) => l.trim() ).filter( Boolean ) );
+						} }
+					/>
+				</label>
 				<Toggle label={ __( 'Fachadas de YouTube y Vimeo' ) } help={ __( 'Miniatura y botón; el reproductor se carga al tocar. No se aplica a reproductores controlados por otro script.' ) } checked={ values.hints_facades } onChange={ ( v ) => set( 'hints_facades', v ) } />
 				<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
 					<span>

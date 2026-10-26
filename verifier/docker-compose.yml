@@ -1,0 +1,16 @@
+services:
+  verifier:
+    build: .
+    restart: unless-stopped
+    environment:
+      TZ: America/Bogota
+      # Hora local de la corrida nocturna (Lighthouse + batería). Vacío = sin nocturna.
+      NIGHTLY_HOUR: "3"
+    volumes:
+      - ./data:/data
+    # Solo en localhost: delante va Caddy (TLS) o un túnel de Cloudflare.
+    ports:
+      - "127.0.0.1:8787:8787"
+    # Chromium necesita memoria compartida para páginas pesadas.
+    shm_size: 1gb
+    mem_limit: 2g

@@ -1,0 +1,16 @@
+{
+  "sites": {
+    "latiendadelpintor.com": {
+      "key": "PEGA_AQUÍ_LA_CLAVE_QUE_MUESTRA_EL_PLUGIN",
+      "url": "https://latiendadelpintor.com",
+      "nightly": true,
+      "pages": [
+        { "label": "Portada", "url": "/" },
+        { "label": "Producto", "url": "/producto/ejemplo/", "flow": "add_to_cart" },
+        { "label": "Categoría", "url": "/categoria-producto/pinturas/" },
+        { "label": "Carrito", "url": "/carrito/" },
+        { "label": "Página inexistente", "url": "/itb-verificador-404/", "expect": 404 }
+      ]
+    }
+  }
+}

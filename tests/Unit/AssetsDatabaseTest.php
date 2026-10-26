@@ -41,8 +41,8 @@ final class AssetsDatabaseTest extends TestCase {
 				'delay_js' => [ 'var _iub', '/jquery-migrate(.min)?.js' ],
 			]
 		);
-		$this->assertSame( [ 'mine', 'var _iub', '/jquery-migrate(.min)?.js', DelayJsExclusions::OWN ], DelayJsExclusions::rocket( [ 'mine' ] ), 'más los scripts propios (carrito, prefetch, RUM)' );
-		$this->assertSame( [ 'a', 'b', 'var _iub', DelayJsExclusions::OWN ], DelayJsExclusions::litespeed( "a\nb\n\n" ), 'LSCache también la recibe como texto' );
+		$this->assertSame( [ 'mine', 'var _iub', '/jquery-migrate(.min)?.js', DelayJsExclusions::OWN, 'wcUpdateDependencyRegistry' ], DelayJsExclusions::rocket( [ 'mine' ] ), 'más los scripts propios (carrito, prefetch, RUM) y la pareja en línea de WooCommerce' );
+		$this->assertSame( [ 'a', 'b', 'var _iub', DelayJsExclusions::OWN, 'wcUpdateDependencyRegistry' ], DelayJsExclusions::litespeed( "a\nb\n\n" ), 'LSCache también la recibe como texto' );
 		$this->assertSame( 'x', DelayJsExclusions::rocket( 'x' ), 'un valor extraño se devuelve igual' );
 	}
 

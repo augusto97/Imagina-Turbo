@@ -909,3 +909,57 @@ export interface ZarazStatus {
 	result?: { ok: boolean; error: string; published?: boolean };
 }
 
+export interface VerifierRunBrief {
+	id: string;
+	trigger: 'manual' | 'nightly';
+	status: 'queued' | 'running' | 'done' | 'error';
+	created_at: number;
+	finished_at: number | null;
+	pass: boolean | null;
+	alerts: string[];
+	pages: { label: string; pass: boolean; status: number; lcp: number | null; cls: number | null; score: number | null; failures: number; warnings: number }[];
+}
+
+export interface VerifierPageResult {
+	label: string;
+	url: string;
+	status: number;
+	pass: boolean;
+	ttfb: number | null;
+	lcp: number | null;
+	cls: number | null;
+	cache: Record<string, string>;
+	failures: string[];
+	warnings: string[];
+	visual?: number;
+	baseline_created?: boolean;
+	flow?: { pass: boolean; reason?: string; items?: number; cleaned?: boolean };
+	lighthouse?: { score: number | null; metrics: Record<string, number | null>; opportunities: { id: string; title: string; savings_ms: number }[]; error?: string };
+}
+
+export interface VerifierRun {
+	id: string;
+	trigger: 'manual' | 'nightly';
+	status: 'queued' | 'running' | 'done' | 'error';
+	created_at: number;
+	finished_at?: number;
+	options: { lighthouse: boolean; visual: boolean };
+	results: VerifierPageResult[];
+	pass: boolean | null;
+	alerts: string[];
+	error?: string;
+}
+
+export interface VerifierStatus {
+	url: string;
+	site: string;
+	key: { state: string; last4: string; saved: number };
+	configured: boolean;
+	pages: { label: string; url: string; flow?: string; expect?: number }[];
+	site_url: string;
+	runs: VerifierRunBrief[] | null;
+	error: string;
+	sites_json: Record<string, unknown>;
+	new_key?: string;
+}
+

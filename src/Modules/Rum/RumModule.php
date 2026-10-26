@@ -60,10 +60,12 @@ final class RumModule implements ModuleInterface {
 			// RUM sabe si la visita recibió una copia o una página generada para ella (0.14.0).
 			'g' => time(),
 		];
-		$file   = is_file( Runtime::$pluginDir . '/assets/js/itb-rum.min.js' ) ? 'itb-rum.min.js' : 'itb-rum.js';
-		$src    = plugins_url( 'assets/js/' . $file, Runtime::$pluginDir . '/imagina-turbo.php' ) . '?ver=' . ITB_VERSION;
-		$js     = sprintf(
-			'(function(c,r,u){function go(){var p;try{p=sessionStorage.getItem("itb_t");sessionStorage.setItem("itb_t",c.t)}catch(e){}c.pf=p;if(Math.random()<r){window.itbRum=c;var s=document.createElement("script");s.src=u;s.async=true;document.head.appendChild(s)}}document.prerendering?addEventListener("prerenderingchange",go,{once:true}):go()})(%s,%s,%s);',
+		// Las visitas de Lighthouse (también PageSpeed Insights) y del verificador (0.20.0) no son de
+		// visitantes reales: no se miden.
+		$file = is_file( Runtime::$pluginDir . '/assets/js/itb-rum.min.js' ) ? 'itb-rum.min.js' : 'itb-rum.js';
+		$src  = plugins_url( 'assets/js/' . $file, Runtime::$pluginDir . '/imagina-turbo.php' ) . '?ver=' . ITB_VERSION;
+		$js   = sprintf(
+			'(function(c,r,u){function go(){var p;try{p=sessionStorage.getItem("itb_t");sessionStorage.setItem("itb_t",c.t)}catch(e){}c.pf=p;if(Math.random()<r&&!/Lighthouse|ImaginaTurboVerifier/.test(navigator.userAgent)){window.itbRum=c;var s=document.createElement("script");s.src=u;s.async=true;document.head.appendChild(s)}}document.prerendering?addEventListener("prerenderingchange",go,{once:true}):go()})(%s,%s,%s);',
 			wp_json_encode( $config, JSON_UNESCAPED_SLASHES ),
 			wp_json_encode( $s['rate'] ),
 			wp_json_encode( $src, JSON_UNESCAPED_SLASHES )

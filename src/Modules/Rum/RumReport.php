@@ -13,7 +13,7 @@ namespace ImaginaTurbo\Modules\Rum;
  * Percentiles desde histogramas y repartos de navegación.
  *
  * @phpstan-type Row array{template: string, device: string, metric: string, bucket: int|string, n: int|string}
- * @phpstan-type Vitals array{template: string, device: string, n: int, lcp: int|null, inp: int|null, cls: float|null, ttfb: int|null, prerendered: int, prefetched: int, bfcache: int, back_forward: int}
+ * @phpstan-type Vitals array{template: string, device: string, n: int, lcp: int|null, inp: int|null, cls: float|null, ttfb: int|null, req: int|null, js: int|null, css: int|null, kb: int|null, prerendered: int, prefetched: int, bfcache: int, back_forward: int}
  * @phpstan-type Breakdown array{device: string, n: int, ttfb: int|null, conn: int|null, wait_cached: int|null, wait_generated: int|null, cached_pct: float|null, cached_n: int}
  */
 final class RumReport {
@@ -26,6 +26,10 @@ final class RumReport {
 		'cls'  => 10,
 		'conn' => 25,
 		'wait' => 25,
+		'req'  => 5,
+		'js'   => 10,
+		'css'  => 5,
+		'kb'   => 50,
 	];
 
 	/** Muestras mínimas para mostrar un p75. */
@@ -56,13 +60,16 @@ final class RumReport {
 
 	/**
 	 * @param list<Row> $rows Filas agrupadas de itb_rum_hist.
+	 * @param bool      $site Todo el sitio por dispositivo (plantilla "*") en vez de por plantilla.
 	 * @return list<Vitals>
 	 */
-	public static function vitals( array $rows ): array {
+	public static function vitals( array $rows, bool $site = false ): array {
 		$groups = [];
 		foreach ( $rows as $row ) {
-			$key = $row['template'] . '|' . $row['device'];
-			$groups[ $key ][ $row['metric'] ][ (int) $row['bucket'] ] = (int) $row['n'];
+			$key    = ( $site ? '*' : $row['template'] ) . '|' . $row['device'];
+			$bucket = (int) $row['bucket'];
+			// Sumado: con $site, el mismo intervalo llega de varias plantillas.
+			$groups[ $key ][ $row['metric'] ][ $bucket ] = ( $groups[ $key ][ $row['metric'] ][ $bucket ] ?? 0 ) + (int) $row['n'];
 		}
 		$out = [];
 		foreach ( $groups as $key => $metrics ) {
@@ -77,6 +84,10 @@ final class RumReport {
 				'inp'          => self::p75( $metrics['inp'] ?? [], self::STEPS['inp'] ),
 				'cls'          => null === $cls ? null : round( $cls / 1000, 3 ),
 				'ttfb'         => self::p75( $metrics['ttfb'] ?? [], self::STEPS['ttfb'] ),
+				'req'          => self::p75( $metrics['req'] ?? [], self::STEPS['req'] ),
+				'js'           => self::p75( $metrics['js'] ?? [], self::STEPS['js'] ),
+				'css'          => self::p75( $metrics['css'] ?? [], self::STEPS['css'] ),
+				'kb'           => self::p75( $metrics['kb'] ?? [], self::STEPS['kb'] ),
 				'prerendered'  => $nav[ RumCollector::NAV['p'] ] ?? 0,
 				'prefetched'   => $nav[ RumCollector::NAV['f'] ] ?? 0,
 				'bfcache'      => $nav[ RumCollector::NAV['B'] ] ?? 0,

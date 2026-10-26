@@ -53,6 +53,7 @@ final class Settings {
 			'cache_fragments'          => false,
 			'cache_edge_variants'      => false,
 			'zaraz_takeover'           => [],
+			'budgets'                  => [],
 			'woo_count_selectors'      => [],
 			'woo_total_selectors'      => [],
 			'woo_recently_viewed'      => true,
@@ -302,6 +303,10 @@ final class Settings {
 			$out['lazy_render'] = self::lazyRender( $input['lazy_render'] );
 		}
 		// Lo que Zaraz reemplaza en el sitio (0.18.0): lo escribe CloudflareService al configurarlo.
+		// Presupuestos de rendimiento (0.19.0): se guardan completos y acotados.
+		if ( isset( $input['budgets'] ) && is_array( $input['budgets'] ) ) {
+			$out['budgets'] = \ImaginaTurbo\Modules\Rum\Budgets::normalize( $input['budgets'] );
+		}
 		if ( isset( $input['zaraz_takeover'] ) && is_array( $input['zaraz_takeover'] ) ) {
 			$out['zaraz_takeover'] = [
 				'ga4'  => true === ( $input['zaraz_takeover']['ga4'] ?? false ),

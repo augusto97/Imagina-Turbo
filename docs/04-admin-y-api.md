@@ -41,6 +41,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/diagnostics/platform` | Ajustes de Elementor, WoodMart, WooCommerce (caché de pedidos HPOS, tabla de atributos), caché de objetos e índices, con recomendación. Solo lectura |
 | GET | `/profiler/per-visit` | Peticiones AJAX, REST y Store API de visitantes sin sesión (48 h de muestreo aleatorio): por día, CPU por día y, con datos del RUM, por página vista; regla de carga condicional y qué hacer |
 | PUT / POST | `/profiler/settings` · `/profiler/intensive` | Tasa de muestreo · muestreo intensivo de 15 min |
+| GET · POST | `/diagnostics/images` · `/diagnostics/images/scan` | Auditoría de imágenes (0.19.0): último escaneo, estado de EWWW, optimizadores activos y recomendaciones · avanzar el escaneo de la biblioteca (8 s por paso; `restart: true` empieza de cero). Solo lectura sobre los medios y el optimizador |
 | GET / POST | `/diagnostics/audit` | Última auditoría de cacheabilidad · ejecutarla ahora (loopback) |
 | GET / PUT / DELETE | `/hub` | Estado · URL del hub · olvidar el registro |
 | POST | `/hub/register` · `/hub/send` | Registrar el sitio · enviar telemetría ahora |
@@ -79,7 +80,8 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/navigation/status` | Módulos, ajustes (incluye `lazy_render`, `lazy_elements` y `lazy_documents`), si el core trae la API de Speculation Rules, enlaces permanentes, informe del RUM (7 días), insights, páginas propias con no-store (48 h), reglas de renderizado diferido sugeridas para el tema, `prefetch_probe` (`refused` si Cloudflare rechaza las precargas), si Elementor está activo y la última detección de documentos (`lazy_detected`) |
 | PUT | `/navigation/settings` | `spec_mode`, `spec_eagerness`, `spec_predictive`, `spec_fallback`, `view_transitions`, `hints_lcp`, `hints_facades`, `rum_rate`, `lazy_elements`, `lazy_documents` (`[{id, mode: v\|i, height}]`, hasta 30). Pasar a prerender y activar los elementos diferidos exigen `confirm` (428) |
 | POST | `/navigation/lazy-documents/scan` | Inventaría las páginas de muestra y lista los documentos de Elementor impresos con tamaño, etiquetas, imágenes, dónde (menú, cabecera, pie, contenido) y la sugerencia |
-| GET / POST | `/navigation/report?days=7\|30` · `/navigation/insights` | Informe del RUM · recalcular ahora las páginas predichas y la imagen LCP |
+| GET / POST | `/navigation/report?days=7\|30` · `/navigation/insights` | Informe del RUM (desde 0.19.0 con `site`, el p75 del sitio entero por dispositivo, y el peso de la carga en cada fila) · recalcular ahora las páginas predichas y la imagen LCP |
+| PUT · POST | `/navigation/budgets` · `/navigation/budgets/check` | Presupuestos de rendimiento (0.19.0): guardar `{budgets: {lcp, inp, cls, ttfb, req, js, css, kb}}` (claves desconocidas, 400) y comparar · comparar ya. `/navigation/status` trae `budgets: {values, defaults, state}` |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
 | GET | `/assets/status` | Módulo, reglas, si la previsualización está activa, última tanda de sugerencias, plantillas y tipos de contenido del sitio |
 | POST | `/assets/inspect` · `/assets/suggest` | Inventario de una ruta (loopback firmado como visitante anónimo) · inventariar páginas de muestra y calcular sugerencias |
@@ -109,7 +111,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write`. 0.16.0–0.17.0: `late_styles`, `fonts_manual`, `lazy_elements`, `lazy_documents`, `cache_fragments`. 0.18.0: `cache_edge_variants`, `zaraz_takeover` (`{ga4, meta}`, lo escribe solo el flujo de Zaraz) |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write`. 0.16.0–0.17.0: `late_styles`, `fonts_manual`, `lazy_elements`, `lazy_documents`, `cache_fragments`. 0.18.0: `cache_edge_variants`, `zaraz_takeover` (`{ga4, meta}`, lo escribe solo el flujo de Zaraz). 0.19.0: `budgets` (también desde la flota) |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
@@ -122,6 +124,8 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_cf_drift` | Reglas propias detectadas como modificadas a mano (para avisar una sola vez) |
 | `itb_zaraz_state` | Zaraz (0.18.0): IDs que Turbo pasó a Zaraz, herramientas propias escritas, estado previo del e-commerce, si se publicó y cuándo |
 | `itb_zaraz_scan` | Último escaneo de la portada (IDs de GA4, etiqueta de Google, GTM y Meta encontrados en el HTML) |
+| `itb_budgets_state` | Presupuestos (0.19.0): última comparación, presupuestos usados, p75 del sitio por dispositivo y excesos por plantilla |
+| `itb_image_audit` | Auditoría de imágenes (0.19.0): escaneo en curso o terminado (cursor, contadores, listas de las más pesadas y las más grandes) |
 | `itb_cf_firewall` | Últimos eventos del firewall (24 h) |
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |
@@ -252,7 +256,7 @@ El hub es un servicio aparte (puede extender el servidor de Imagina Updater). El
 
 - **Apagado por defecto**: sin URL del hub no hay ninguna petición. `https` obligatorio salvo `localhost`/`127.0.0.1` (pruebas).
 - **Registro** (`POST /v1/sites/register`, sin firma): cuerpo `{site_url, plugin_version, wp_version, php_version}` y cabecera `X-ITB-License`. Respuesta esperada `{site_id, site_key}` (`site_id` de 4–64 caracteres `[A-Za-z0-9_-]`, `site_key` de 32–256). El primer lote lleva las últimas 24 h ya agregadas. Cambiar la URL del hub borra el registro anterior.
-- **Telemetría** (`POST /v1/telemetry`, firmada, cuerpo gzip): `{schema: 1, site_id, plugin_version, generated_at, window: {from, to}, environment, inventory: {plugins: [{slug, version}], theme}, modules: {id: bool}, metrics: [filas de metrics_hourly], events: [{created_at, module, type, severity, message}]}`. Los eventos van **sin contexto** (puede llevar rutas o datos del sitio). Solo horas completas que ya pasaron por el agregado horario (si el agregado lleva más de 2 h parado, no frena el resto del lote).
+- **Telemetría** (`POST /v1/telemetry`, firmada, cuerpo gzip): `{schema: 1, site_id, plugin_version, generated_at, window: {from, to}, environment, inventory: {plugins: [{slug, version}], theme}, modules: {id: bool}, metrics: [filas de metrics_hourly], fleet, budgets: {checked_at, budgets, site, breaches} (0.19.0), events: [{created_at, module, type, severity, message}]}`. Los eventos van **sin contexto** (puede llevar rutas o datos del sitio). Solo horas completas que ya pasaron por el agregado horario (si el agregado lleva más de 2 h parado, no frena el resto del lote).
 - **Fallos**: tiempo de espera de 8 s; reintento a 1, 2, 4 y 6 h (máximo); lo que queda fuera de la ventana de 24 h se descarta. Un fallo nunca afecta al sitio: todo corre en Action Scheduler o desde el admin.
 - **Hub simulado** para pruebas: `tests/e2e/mock-hub.php` (verifica firma, ventana de 5 min y nonces repetidos; guarda cada lote en JSON).
 

@@ -1,7 +1,8 @@
 <?php
 /**
  * Perfilador y auditoría: GET /profiler/summary, /profiler/plugins, /profiler/routes;
- * PUT /profiler/settings; POST /profiler/intensive; GET y POST /diagnostics/audit.
+ * PUT /profiler/settings; POST /profiler/intensive; GET y POST /diagnostics/audit; GET
+ * /diagnostics/platform; GET /diagnostics/images y POST /diagnostics/images/scan (0.19.0).
  *
  * @package ImaginaTurbo
  */
@@ -13,6 +14,8 @@ namespace ImaginaTurbo\Rest;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
+use ImaginaTurbo\Core\Environment\Detector;
+use ImaginaTurbo\Core\ImageAudit;
 use ImaginaTurbo\Core\PlatformAudit;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Request\RequestType;
@@ -27,6 +30,8 @@ use ImaginaTurbo\Repository\SampleRepository;
 
 /**
  * Lecturas del perfilador (todas sobre tablas propias, solo en el admin) y sus controles.
+ *
+ * @phpstan-import-type Scan from ImageAudit
  */
 final class ProfilerController extends Controller {
 
@@ -88,6 +93,40 @@ final class ProfilerController extends Controller {
 		$this->route( '/diagnostics/audit', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->container->get( CacheabilityAudit::class )->last() ) );
 		$this->route( '/diagnostics/audit', \WP_REST_Server::CREATABLE, [ $this, 'runAudit' ] );
 		$this->route( '/diagnostics/platform', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( PlatformAudit::current() ) );
+		$this->route( '/diagnostics/images', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->images( ImageAudit::stored() ) ) );
+		$this->route(
+			'/diagnostics/images/scan',
+			\WP_REST_Server::CREATABLE,
+			fn( \WP_REST_Request $r ): \WP_REST_Response => $this->ok( $this->images( ImageAudit::step( true === $r->get_param( 'restart' ) ) ) ),
+			[
+				'restart' => [
+					'type'    => 'boolean',
+					'default' => false,
+				],
+			]
+		);
+	}
+
+	/**
+	 * Auditoría de imágenes (0.19.0): último escaneo, estado de EWWW y recomendaciones.
+	 *
+	 * @param Scan|null $scan Escaneo.
+	 * @return array<string, mixed>
+	 */
+	private function images( ?array $scan ): array {
+		$ewww       = ImageAudit::ewww();
+		$optimizers = ImageAudit::optimizers( $this->container->get( Detector::class )->activePlugins() );
+		return [
+			'scan'            => $scan,
+			'ewww'            => $ewww,
+			'optimizers'      => $optimizers,
+			'recommendations' => ImageAudit::recommendations( $ewww, $scan, $optimizers ),
+			'links'           => [
+				'ewww_settings' => admin_url( 'options-general.php?page=ewww-image-optimizer-options' ),
+				'ewww_bulk'     => admin_url( 'upload.php?page=ewww-image-optimizer-bulk' ),
+				'media'         => admin_url( 'upload.php' ),
+			],
+		];
 	}
 
 	/**

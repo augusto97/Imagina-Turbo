@@ -12,7 +12,7 @@ import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
 import { useRouter } from '@/lib/router';
-import type { AuditReport, Period, PerVisitReport, PhaseCost, PlatformCheck, PlatformReport, PluginCost, ProfilerSummary, RouteCost, Sampling, WorkersReport } from '@/lib/types';
+import type { AuditReport, ImageAuditReport, ImageItem, Period, PerVisitReport, PhaseCost, PlatformCheck, PlatformReport, PluginCost, ProfilerSummary, RouteCost, Sampling, WorkersReport } from '@/lib/types';
 import { cn, formatDate } from '@/lib/utils';
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -132,6 +132,7 @@ export function Diagnostics() {
 						</>
 					) }
 					<PlatformCard />
+					<ImagesCard />
 					<div className="itb:grid itb:gap-4 itb:xl:grid-cols-2">
 						<AuditCard />
 						<PassiveCard data={ summary.data } />
@@ -639,6 +640,131 @@ function PlatformCard() {
 							) ) }
 						</div>
 					) ) }
+			</CardContent>
+		</Card>
+	);
+}
+
+const bytes = ( n: number ) => ( n >= 1048576 ? `${ ( n / 1048576 ).toFixed( 1 ) } MB` : `${ Math.round( n / 1024 ) } KB` );
+
+const JPG_LEVELS: Record<number, string> = { 0: __( 'Sin compresión' ), 10: 'Pixel Perfect', 20: 'Pixel Perfect Plus', 30: 'Premium', 40: 'Premium Plus' };
+
+function ImagesCard() {
+	const client = useQueryClient();
+	const report = useQuery( { queryKey: [ 'images' ], queryFn: () => api<ImageAuditReport>( 'diagnostics/images' ) } );
+	const [ running, setRunning ] = useState( false );
+	const [ error, setError ] = useState( '' );
+	// Cada paso tiene un presupuesto de tiempo: se repite hasta terminar.
+	const run = async ( restart: boolean ) => {
+		setRunning( true );
+		setError( '' );
+		try {
+			let data = await api<ImageAuditReport>( 'diagnostics/images/scan', 'POST', { restart } );
+			client.setQueryData( [ 'images' ], data );
+			while ( data.scan && ! data.scan.done ) {
+				data = await api<ImageAuditReport>( 'diagnostics/images/scan', 'POST', { restart: false } );
+				client.setQueryData( [ 'images' ], data );
+			}
+		} catch ( e ) {
+			setError( e instanceof Error ? e.message : String( e ) );
+		} finally {
+			setRunning( false );
+		}
+	};
+	const data = report.data;
+	const scan = data?.scan ?? null;
+	const ewww = data?.ewww ?? null;
+	const list = ( title: string, items: ImageItem[] ) =>
+		items.length > 0 && (
+			<div className="itb:overflow-x-auto">
+				<p className="itb:m-0 itb:mb-1 itb:text-xs itb:text-zinc-500">{ title }</p>
+				<table className="itb:w-full itb:border-collapse itb:text-xs">
+					<tbody>
+						{ items.map( ( i ) => (
+							<tr key={ i.id } className="itb:border-t itb:border-zinc-100">
+								<td className="itb:py-1 itb:pr-3">
+									<a href={ `${ config.adminUrl }post.php?post=${ i.id }&action=edit` } target="_blank" rel="noreferrer" className="itb:break-all">
+										{ i.file }
+									</a>
+								</td>
+								<td className="itb:py-1 itb:pr-3 itb:text-right itb:tabular-nums">{ i.width && i.height ? `${ i.width }×${ i.height }` : '—' }</td>
+								<td className="itb:py-1 itb:text-right itb:tabular-nums">{ bytes( i.bytes ) }</td>
+							</tr>
+						) ) }
+					</tbody>
+				</table>
+			</div>
+		);
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:justify-between itb:gap-2">
+					<CardTitle>{ __( 'Imágenes' ) }</CardTitle>
+					<div className="itb:flex itb:gap-2">
+						{ scan && ! scan.done && ! running && (
+							<Button size="sm" variant="outline" onClick={ () => void run( false ) }>
+								<Play aria-hidden />
+								{ __( 'Continuar' ) }
+							</Button>
+						) }
+						<Button size="sm" variant="outline" disabled={ running } onClick={ () => void run( true ) }>
+							<RefreshCw className={ running ? 'itb:animate-spin' : '' } aria-hidden />
+							{ running ? `${ __( 'Revisando…' ) } ${ scan ? scan.total : 0 }` : __( 'Revisar la biblioteca' ) }
+						</Button>
+					</div>
+				</div>
+				<CardDescription>
+					{ __( 'Recorre la biblioteca de medios (tamaños, peso, copias WebP y AVIF) y revisa los ajustes y la cola del optimizador. Solo lee y recomienda: Imagina Turbo no cambia los ajustes de otro plugin.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ report.isLoading && <Skeleton className="itb:h-24" /> }
+				{ report.error && <Notice level="error">{ report.error.message }</Notice> }
+				{ error && <Notice level="error">{ error }</Notice> }
+				{ data && (
+					<>
+						<dl className="itb:m-0">
+							<KeyValue label={ __( 'Optimizador' ) }>{ data.optimizers.length > 0 ? data.optimizers.join( ', ' ) : __( 'Ninguno' ) }</KeyValue>
+							{ scan && (
+								<>
+									<KeyValue label={ __( 'Imágenes' ) }>{ `${ scan.total.toLocaleString( config.locale ) }${ scan.done ? '' : ` (${ __( 'a medias' ) })` }` }</KeyValue>
+									<KeyValue label={ __( 'Peso (original · tamaños)' ) }>{ `${ bytes( scan.bytes_main ) } · ${ bytes( scan.bytes_sizes ) }` }</KeyValue>
+									<KeyValue label={ __( 'Con WebP · AVIF' ) }>
+										{ scan.convertible > 0 ? `${ Math.round( ( 100 * scan.webp ) / scan.convertible ) } % · ${ Math.round( ( 100 * scan.avif ) / scan.convertible ) } % ${ __( 'de' ) } ${ scan.convertible.toLocaleString( config.locale ) } ${ __( 'archivos JPG/PNG' ) }` : '—' }
+									</KeyValue>
+									<KeyValue label={ __( 'Más de 2.560 px · más de 1 MB' ) }>{ `${ scan.large_n } · ${ scan.heavy_n }` }</KeyValue>
+									{ ( scan.missing > 0 || scan.no_meta > 0 ) && <KeyValue label={ __( 'Sin archivo · sin metadatos' ) }>{ `${ scan.missing } · ${ scan.no_meta }` }</KeyValue> }
+									{ scan.done && <KeyValue label={ __( 'Revisada' ) }>{ formatDate( scan.finished_at, config.locale ) }</KeyValue> }
+								</>
+							) }
+							{ ewww && (
+								<>
+									<KeyValue label={ `EWWW ${ ewww.version }` }>
+										{ `JPG: ${ JPG_LEVELS[ ewww.jpg_level ] ?? ewww.jpg_level } · WebP: ${ ewww.webp ? `${ __( 'sí' ) }, ${ __( 'calidad' ) } ${ ewww.webp_effective }${ ewww.sharpen ? ' + sharp YUV' : '' }` : __( 'no' ) }` }
+									</KeyValue>
+									<KeyValue label={ __( 'EWWW: cola · optimizadas · ahorro' ) }>
+										{ `${ Math.max( ewww.queue ?? 0, ewww.pending ?? 0 ) } · ${ ewww.optimized ?? '—' } · ${ ewww.saved_bytes === null ? '—' : bytes( ewww.saved_bytes ) }` }
+									</KeyValue>
+								</>
+							) }
+						</dl>
+						{ ! scan && <Notice level="info">{ __( 'La biblioteca todavía no se ha revisado.' ) }</Notice> }
+						{ data.recommendations.map( ( r ) => (
+							<div key={ r.id } className="itb:flex itb:items-start itb:gap-2">
+								<Badge tone={ r.level === 'warn' ? 'amber' : 'neutral' }>{ r.level === 'warn' ? __( 'Revisar' ) : __( 'Info' ) }</Badge>
+								<span>{ r.text }</span>
+							</div>
+						) ) }
+						{ ewww && (
+							<div className="itb:flex itb:flex-wrap itb:gap-2">
+								<a className="itb:text-xs" href={ data.links.ewww_settings }>{ __( 'Ajustes de EWWW' ) }</a>
+								<a className="itb:text-xs" href={ data.links.ewww_bulk }>{ __( 'Optimización masiva' ) }</a>
+							</div>
+						) }
+						{ scan && list( __( 'Las más pesadas (más de 1 MB)' ), scan.heavy ) }
+						{ scan && list( __( 'Originales de más de 2.560 px' ), scan.large ) }
+					</>
+				) }
 			</CardContent>
 		</Card>
 	);

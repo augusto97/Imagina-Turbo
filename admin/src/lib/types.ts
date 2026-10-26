@@ -225,6 +225,63 @@ export interface PlatformReport {
 	server: PlatformCheck[];
 }
 
+export interface ImageItem {
+	id: number;
+	file: string;
+	width: number;
+	height: number;
+	bytes: number;
+}
+
+export interface ImageScan {
+	started_at: number;
+	finished_at: number;
+	cursor: number;
+	done: boolean;
+	total: number;
+	mime: Record<string, number>;
+	bytes_main: number;
+	bytes_sizes: number;
+	convertible: number;
+	webp: number;
+	avif: number;
+	missing: number;
+	no_meta: number;
+	large_n: number;
+	heavy_n: number;
+	large: ImageItem[];
+	heavy: ImageItem[];
+}
+
+export interface EwwwState {
+	version: string;
+	jpg_level: number;
+	png_level: number;
+	webp: boolean;
+	webp_quality: number;
+	webp_effective: number;
+	sharpen: boolean;
+	naming: 'append' | 'replace';
+	max_width: number;
+	max_height: number;
+	metadata_remove: boolean;
+	backup: boolean;
+	cloud: boolean;
+	queue: number | null;
+	pending: number | null;
+	bulk_resume: string;
+	optimized: number | null;
+	saved_bytes: number | null;
+}
+
+export interface ImageAuditReport {
+	scan: ImageScan | null;
+	ewww: EwwwState | null;
+	optimizers: string[];
+	recommendations: { id: string; level: 'warn' | 'info'; text: string }[];
+	links: { ewww_settings: string; ewww_bulk: string; media: string };
+}
+
 export interface WorkersReport {
 	hours: number;
 	rate: number;
@@ -547,6 +604,10 @@ export interface RumVitals {
 	inp: number | null;
 	cls: number | null;
 	ttfb: number | null;
+	req?: number | null;
+	js?: number | null;
+	css?: number | null;
+	kb?: number | null;
 	prerendered: number;
 	prefetched: number;
 	bfcache: number;
@@ -576,6 +637,7 @@ export interface RumReportData {
 	days: number;
 	navigation: { navigations: number; speculated_pct: number | null; prerendered: number; prefetched: number; bfcache_pct: number | null; bfcache: number; back_forward: number; reloads: number };
 	vitals: RumVitals[];
+	site?: RumVitals[];
 	ttfb: RumTtfb[];
 	bfcache: { reason: string; n: number }[];
 	next: RumEventRow[];
@@ -643,6 +705,25 @@ export interface NavigationStatus {
 	no_store: { route: string; n: number }[];
 	elementor: boolean;
 	lazy_detected: { docs: LazyDocumentDetected[]; errors: string[]; generated_at: number } | null;
+	budgets: { values: Budgets; defaults: Budgets; state: BudgetState };
+}
+
+export type BudgetMetric = 'lcp' | 'inp' | 'cls' | 'ttfb' | 'req' | 'js' | 'css' | 'kb';
+export type Budgets = Record<BudgetMetric, number>;
+
+export interface BudgetBreach {
+	template: string;
+	device: 'm' | 'd';
+	metric: BudgetMetric;
+	value: number;
+	budget: number;
+}
+
+export interface BudgetState {
+	checked_at: number;
+	budgets: Budgets;
+	site: RumVitals[];
+	breaches: BudgetBreach[];
 }
 
 export interface AssetRule {

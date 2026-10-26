@@ -13,7 +13,7 @@ import { ApiError, api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { LazyDocument, LazyRenderRule, NavigationSettings, NavigationStatus, RumInsightsData, RumReportData } from '@/lib/types';
+import type { BudgetMetric, Budgets, LazyDocument, LazyRenderRule, NavigationSettings, NavigationStatus, RumInsightsData, RumReportData, RumVitals } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const ms = ( v: number | null ) => ( v === null ? '—' : v >= 1000 ? `${ ( v / 1000 ).toFixed( 2 ) } s` : `${ v } ms` );
@@ -52,6 +52,7 @@ export function Navigation() {
 					</div>
 					<LazyRenderCard status={ data } />
 					<LazyElementsCard status={ data } />
+					<BudgetsCard status={ data } />
 					<VitalsCard report={ data.report } />
 					<TtfbCard report={ data.report } />
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
@@ -411,12 +412,139 @@ function SummaryCard( { report, status }: { report: RumReportData; status: Navig
 	);
 }
 
+const BUDGET_METRICS: { id: BudgetMetric; label: string; unit: string; step: number }[] = [
+	{ id: 'lcp', label: 'LCP', unit: 'ms', step: 100 },
+	{ id: 'inp', label: 'INP', unit: 'ms', step: 10 },
+	{ id: 'cls', label: 'CLS', unit: '', step: 0.01 },
+	{ id: 'ttfb', label: 'TTFB', unit: 'ms', step: 50 },
+	{ id: 'req', label: __( 'Peticiones' ), unit: '', step: 5 },
+	{ id: 'js', label: 'JS', unit: 'KB', step: 10 },
+	{ id: 'css', label: 'CSS', unit: 'KB', step: 10 },
+	{ id: 'kb', label: __( 'Peso total' ), unit: 'KB', step: 100 },
+];
+
+const budgetValue = ( metric: BudgetMetric, v: number | null | undefined ) => {
+	if ( v === null || v === undefined ) {
+		return '—';
+	}
+	if ( metric === 'lcp' || metric === 'inp' || metric === 'ttfb' ) {
+		return ms( v );
+	}
+	if ( metric === 'cls' ) {
+		return v.toFixed( 3 );
+	}
+	return metric === 'req' ? String( v ) : `${ v } KB`;
+};
+
+function BudgetsCard( { status }: { status: NavigationStatus } ) {
+	const client = useQueryClient();
+	const [ values, setValues ] = useState<Budgets>( status.budgets.values );
+	useEffect( () => setValues( status.budgets.values ), [ status ] );
+	const done = { onSuccess: ( s: NavigationStatus ) => client.setQueryData( [ 'navigation' ], s ) };
+	const save = useAction( ( budgets: Budgets ) => api<NavigationStatus>( 'navigation/budgets', 'PUT', { budgets } ) );
+	const check = useAction( () => api<NavigationStatus>( 'navigation/budgets/check', 'POST' ) );
+	const state = status.budgets.state;
+	const site = ( device: 'm' | 'd' ): RumVitals | undefined => ( state.site.length > 0 ? state.site : status.report.site ?? [] ).find( ( v ) => v.device === device );
+	const dirty = JSON.stringify( values ) !== JSON.stringify( status.budgets.values );
+	const byTemplate = state.breaches.filter( ( b ) => b.template !== '*' );
+	const cell = ( metric: BudgetMetric, device: 'm' | 'd' ) => {
+		const v = site( device )?.[ metric ];
+		const budget = status.budgets.values[ metric ];
+		const t: 'neutral' | 'green' | 'red' = v === null || v === undefined || budget <= 0 ? 'neutral' : v > budget ? 'red' : 'green';
+		return <Badge tone={ t }>{ budgetValue( metric, v ) }</Badge>;
+	};
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Presupuestos de rendimiento' ) }</CardTitle>
+				<CardDescription>
+					{ __( 'Límites para el p75 de visitantes reales (7 días): Core Web Vitals, TTFB y el peso de la carga hasta el evento load (peticiones y KB de JS, CSS y total, sin contar la caché del navegador). Cada día se comparan y el registro avisa de lo que pasa a estar por encima o vuelve a estar dentro; el hub recibe el resultado. 0 = sin vigilar. De otros dominios, los KB solo cuentan si lo permiten (Timing-Allow-Origin).' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				<div className="itb:overflow-x-auto">
+					<table className="itb:w-full itb:border-collapse">
+						<thead>
+							<tr className="itb:text-left itb:text-xs itb:text-zinc-500">
+								<th className="itb:py-1 itb:pr-3 itb:font-medium">{ __( 'Métrica' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:font-medium">{ __( 'Presupuesto' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Móvil (p75)' ) }</th>
+								<th className="itb:py-1 itb:text-right itb:font-medium">{ __( 'Escritorio (p75)' ) }</th>
+							</tr>
+						</thead>
+						<tbody>
+							{ BUDGET_METRICS.map( ( m ) => (
+								<tr key={ m.id } className="itb:border-t itb:border-zinc-100">
+									<td className="itb:py-1.5 itb:pr-3 itb:font-medium">{ m.label }</td>
+									<td className="itb:py-1.5 itb:pr-3">
+										<div className="itb:flex itb:items-center itb:gap-1.5">
+											<Input
+												type="number"
+												min={ 0 }
+												step={ m.step }
+												className="itb:h-8 itb:w-24"
+												value={ values[ m.id ] }
+												aria-label={ `${ __( 'Presupuesto' ) } ${ m.label }` }
+												onChange={ ( e ) => setValues( { ...values, [ m.id ]: Number( e.target.value ) || 0 } ) }
+											/>
+											{ m.unit && <span className="itb:text-xs itb:text-zinc-500">{ m.unit }</span> }
+										</div>
+									</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right">{ cell( m.id, 'm' ) }</td>
+									<td className="itb:py-1.5 itb:text-right">{ cell( m.id, 'd' ) }</td>
+								</tr>
+							) ) }
+						</tbody>
+					</table>
+				</div>
+				<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+					<Button size="sm" disabled={ ! dirty || save.isPending } onClick={ () => save.mutate( values, done ) }>
+						{ save.isPending ? __( 'Guardando…' ) : __( 'Guardar presupuestos' ) }
+					</Button>
+					<Button size="sm" variant="outline" disabled={ dirty } onClick={ () => setValues( status.budgets.defaults ) }>
+						{ __( 'Valores recomendados' ) }
+					</Button>
+					<Button size="sm" variant="outline" disabled={ check.isPending } onClick={ () => check.mutate( undefined, done ) }>
+						<RefreshCw className={ check.isPending ? 'itb:animate-spin' : '' } aria-hidden />
+						{ __( 'Comprobar ahora' ) }
+					</Button>
+					{ state.checked_at > 0 && <span className="itb:text-xs itb:text-zinc-500">{ `${ __( 'Última comprobación:' ) } ${ formatDate( state.checked_at, config.locale ) }` }</span> }
+				</div>
+				{ ( save.error || check.error ) && <Notice level="error">{ ( save.error ?? check.error )?.message }</Notice> }
+				{ state.checked_at > 0 && byTemplate.length === 0 && state.breaches.length === 0 && <Notice level="success">{ __( 'Todo dentro del presupuesto (en las plantillas con al menos 20 visitas medidas).' ) }</Notice> }
+				{ byTemplate.length > 0 && (
+					<div className="itb:overflow-x-auto">
+						<p className="itb:m-0 itb:mb-1 itb:text-xs itb:text-zinc-500">{ __( 'Plantillas por encima del presupuesto' ) }</p>
+						<table className="itb:w-full itb:border-collapse">
+							<tbody>
+								{ byTemplate.slice( 0, 30 ).map( ( b ) => (
+									<tr key={ b.template + b.device + b.metric } className="itb:border-t itb:border-zinc-100">
+										<td className="itb:py-1.5 itb:pr-3">
+											<code className="itb:text-xs">{ b.template }</code>
+										</td>
+										<td className="itb:py-1.5 itb:pr-3">{ b.device === 'm' ? __( 'Móvil' ) : __( 'Escritorio' ) }</td>
+										<td className="itb:py-1.5 itb:pr-3 itb:font-medium">{ BUDGET_METRICS.find( ( m ) => m.id === b.metric )?.label ?? b.metric }</td>
+										<td className="itb:py-1.5 itb:text-right">
+											<Badge tone="red">{ budgetValue( b.metric, b.value ) }</Badge>
+											<span className="itb:ml-1 itb:text-xs itb:text-zinc-500">{ `/ ${ budgetValue( b.metric, b.budget ) }` }</span>
+										</td>
+									</tr>
+								) ) }
+							</tbody>
+						</table>
+					</div>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+
 function VitalsCard( { report }: { report: RumReportData } ) {
 	return (
 		<Card>
 			<CardHeader>
 				<CardTitle>{ __( 'Core Web Vitals por plantilla (p75, 7 días)' ) }</CardTitle>
-				<CardDescription>{ __( 'Se muestra el p75 con al menos 10 muestras. Verde: LCP ≤ 2,5 s, INP ≤ 200 ms, CLS ≤ 0,1.' ) }</CardDescription>
+				<CardDescription>{ __( 'Se muestra el p75 con al menos 10 muestras. Verde: LCP ≤ 2,5 s, INP ≤ 200 ms, CLS ≤ 0,1. Peticiones, JS y peso de la carga desde la 0.19.0.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent className="itb:overflow-x-auto itb:text-[13px]">
 				{ report.vitals.length === 0 ? (
@@ -431,7 +559,10 @@ function VitalsCard( { report }: { report: RumReportData } ) {
 								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">LCP</th>
 								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">INP</th>
 								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">CLS</th>
-								<th className="itb:py-1 itb:text-right itb:font-medium">TTFB</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">TTFB</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">{ __( 'Pet.' ) }</th>
+								<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">JS</th>
+								<th className="itb:py-1 itb:text-right itb:font-medium">{ __( 'Peso' ) }</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -451,7 +582,10 @@ function VitalsCard( { report }: { report: RumReportData } ) {
 									<td className="itb:py-1.5 itb:pr-3 itb:text-right">
 										<Badge tone={ tone( v.cls, 0.1, 0.25 ) }>{ v.cls === null ? '—' : v.cls.toFixed( 3 ) }</Badge>
 									</td>
-									<td className="itb:py-1.5 itb:text-right itb:tabular-nums">{ ms( v.ttfb ) }</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ ms( v.ttfb ) }</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ budgetValue( 'req', v.req ) }</td>
+									<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ budgetValue( 'js', v.js ) }</td>
+									<td className="itb:py-1.5 itb:text-right itb:tabular-nums">{ budgetValue( 'kb', v.kb ) }</td>
 								</tr>
 							) ) }
 						</tbody>

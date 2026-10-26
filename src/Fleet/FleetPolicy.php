@@ -66,6 +66,7 @@ final class FleetPolicy {
 		'db_keep_revisions',
 		'db_schedule',
 		'db_schedule_days',
+		'budgets',
 	];
 
 	/**

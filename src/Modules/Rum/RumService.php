@@ -95,6 +95,51 @@ final class RumService {
 	}
 
 	/**
+	 * Presupuestos (0.19.0): compara el p75 de 7 días, del sitio y de cada plantilla, y avisa en el log
+	 * solo de lo que cambia (lo que pasa a estar por encima y lo que vuelve a estar dentro).
+	 *
+	 * @param array<string, float|int> $budgets Presupuestos normalizados (Budgets::normalize).
+	 * @return array{checked_at: int, budgets: array<string, float|int>, site: list<array<string, mixed>>, breaches: list<array{template: string, device: string, metric: string, value: float|int, budget: float|int}>}
+	 */
+	public function budgets( array $budgets ): array {
+		$hist     = $this->repository->histogram( 7 );
+		$site     = RumReport::vitals( $hist, true );
+		$breaches = Budgets::evaluate( array_merge( $site, RumReport::vitals( $hist ) ), $budgets );
+		$previous = Budgets::stored();
+		$state    = [
+			'checked_at' => time(),
+			'budgets'    => $budgets,
+			'site'       => $site,
+			'breaches'   => $breaches,
+		];
+		update_option( Budgets::OPTION, $state, false );
+		// Con presupuestos cambiados, lo de antes no se compara (avisaría de todo de nuevo o de nada).
+		$diff = $previous['budgets'] === $budgets ? Budgets::diff( $previous['breaches'], $breaches ) : [
+			'new'      => $breaches,
+			'resolved' => [],
+		];
+		if ( [] !== $diff['new'] ) {
+			$this->events->warning(
+				'rum',
+				'budget_over',
+				/* translators: %s: lista de métricas, plantillas y valores. */
+				sprintf( __( 'Presupuesto de rendimiento superado (p75 de 7 días): %s.', 'imagina-turbo' ), Budgets::describe( $diff['new'] ) ),
+				[ 'breaches' => array_slice( $diff['new'], 0, 30 ) ]
+			);
+		}
+		if ( [] !== $diff['resolved'] ) {
+			$this->events->info(
+				'rum',
+				'budget_ok',
+				/* translators: %s: lista de métricas, plantillas y valores. */
+				sprintf( __( 'Vuelven a estar dentro del presupuesto: %s.', 'imagina-turbo' ), Budgets::describe( $diff['resolved'] ) ),
+				[ 'resolved' => array_slice( $diff['resolved'], 0, 30 ) ]
+			);
+		}
+		return $state;
+	}
+
+	/**
 	 * @return array<string, mixed>
 	 */
 	public function report( int $days ): array {
@@ -103,6 +148,7 @@ final class RumService {
 			'days'       => $days,
 			'navigation' => RumReport::navigation( $hist ),
 			'vitals'     => RumReport::vitals( $hist ),
+			'site'       => RumReport::vitals( $hist, true ),
 			'ttfb'       => RumReport::ttfbBreakdown( $hist ),
 			'bfcache'    => array_slice( self::merge( $this->repository->events( 'nrr', $days, 200 ) ), 0, 15 ),
 			'next'       => array_slice( $this->repository->events( 'next', $days, 50 ), 0, 30 ),

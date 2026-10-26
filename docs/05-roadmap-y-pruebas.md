@@ -596,3 +596,18 @@ Menos JavaScript de terceros y más visitas servidas desde el edge, sin costos n
 - [x] La salud devuelve falso con la zona pausada y verdadero al reanudarla.
 - [ ] En un sitio real con token: aplicar Zaraz en una zona de pruebas y comparar en GA4 (DebugView) y en el Administrador de eventos de Meta que llegan la vista de página y las compras, sin duplicados.
 
+## Versión 0.19.0
+
+Saber cuándo un sitio empeora sin mirarlo, y qué pasa con sus imágenes:
+
+- **Presupuestos de rendimiento** (docs/02 módulo 11): límites para el p75 de visitantes reales (Core Web Vitals, TTFB y, nuevo en el RUM, peticiones y KB de JS, CSS y total). Comparación diaria del sitio entero y de cada plantilla; el registro avisa de lo que cambia y el hub recibe el resultado. La flota puede fijar los presupuestos por plantilla.
+- **Auditoría de imágenes** (docs/02 módulo 16): biblioteca de medios (peso, WebP/AVIF, originales enormes, archivos pesados) y ajustes y cola de EWWW, con recomendaciones. Solo lee.
+- **Desinstalación**: borra también las opciones de 0.17–0.19 (`itb_frag_verify`, `itb_zaraz_state`, `itb_zaraz_scan`, `itb_budgets_state`, `itb_image_audit`), que se habían quedado fuera de la lista.
+
+**Criterios de aceptación** (probados en local):
+
+- [x] El RUM manda peticiones y KB por visita (132 visitas de Chromium) y el script sigue por debajo de 3 KB (2,9 KB).
+- [x] La comparación avisa de los excesos del sitio y de cada plantilla, el mensaje cabe en el registro y al subir los presupuestos los excesos desaparecen; una clave desconocida responde 400.
+- [x] La auditoría recorre la biblioteca con EWWW 8.9.0 real y da la calidad WebP efectiva, la cola y la cobertura.
+- [ ] En La Tienda del Pintor (cuando instale 0.19): fijar los presupuestos con los datos de una semana de RUM y revisar la biblioteca (la cola de EWWW quedó a medias, tarea pendiente).
+

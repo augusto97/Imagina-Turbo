@@ -56,6 +56,7 @@ use ImaginaTurbo\Modules\PluginFilter\FilterWatch;
 use ImaginaTurbo\Modules\PluginFilter\LoopbackClient;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Modules\Profiler\CacheabilityAudit;
+use ImaginaTurbo\Modules\Rum\Budgets;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Repository\RumRepository;
 use ImaginaTurbo\Modules\Profiler\Rollup;
@@ -197,7 +198,9 @@ final class Plugin {
 			fn() => $this->whenActive(
 				function (): void {
 					if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'rum' ) ) {
-						$this->container->get( RumService::class )->daily();
+						$rum = $this->container->get( RumService::class );
+						$rum->daily();
+						$rum->budgets( Budgets::normalize( (array) $this->container->get( Settings::class )->get( 'budgets', [] ) ) );
 					}
 				}
 			)

@@ -3,7 +3,8 @@
  *
  * Mide LCP (y su imagen), INP aproximado, CLS, TTFB (con conexión, espera y edad de la copia), prerender (activationStart), prefetch
  * (deliveryType), recargas y bfcache (con notRestoredReasons cuando existe), y la transición desde la
- * plantilla anterior, y las fuentes del propio sitio del primer render. Envía un beacon al ocultarse la página. Sin datos personales.
+ * plantilla anterior, las fuentes del propio sitio del primer render y el peso de la carga (peticiones, KB de JS, CSS y
+ * total). Envía un beacon al ocultarse la página. Sin datos personales.
  */
 ( function () {
 	var c = window.itbRum;
@@ -143,6 +144,38 @@
 		}
 	}
 
+	// Peso de la carga (0.19.0, presupuestos): peticiones y KB de JS, CSS y total hasta el evento load,
+	// sin contar caché (tamaño del cuerpo). De otros dominios, los KB solo si lo permiten
+	// (Timing-Allow-Origin); la petición sí se cuenta.
+	function weight() {
+		var end = nav && nav.loadEventEnd;
+		var q = 1;
+		var j = 0;
+		var s = 0;
+		var t;
+		if ( ! end ) {
+			return;
+		}
+		t = nav.encodedBodySize || 0;
+		performance.getEntriesByType( 'resource' ).forEach( function ( e ) {
+			var b = e.encodedBodySize || e.transferSize || 0;
+			if ( e.startTime > end ) {
+				return;
+			}
+			q++;
+			t += b;
+			if ( e.initiatorType === 'script' || /\.m?js(\?|$)/i.test( e.name ) ) {
+				j += b;
+			} else if ( /\.css(\?|$)/i.test( e.name ) ) {
+				s += b;
+			}
+		} );
+		r.q = q;
+		r.j = Math.round( j / 1024 );
+		r.s = Math.round( s / 1024 );
+		r.kb = Math.round( t / 1024 );
+	}
+
 	function post( data ) {
 		var body = JSON.stringify( data );
 		if ( navigator.sendBeacon ) {
@@ -159,6 +192,7 @@
 		sent = 1;
 		image();
 		fonts();
+		weight();
 		if ( inp ) {
 			r.i = Math.round( inp );
 		}

@@ -427,6 +427,14 @@ Módulo aparte del gestor de assets, riesgo moderado, apagado por defecto. Se aj
 - **Con hub**: si el sitio está registrado, los beacons van a `{hub}/v1/rum?site={id}` (el hub simulado lo acepta).
 - **Probado en Chromium** con la muestra al 100 %: beacons de navegación normal, prefetch, recarga y bfcache, transición portada → tienda, LCP con su imagen, CLS y TTFB.
 
+### Presupuestos de rendimiento (`Budgets`, 0.19.0)
+
+- **Peso de la carga en el RUM**: `itb-rum.js` suma, hasta el evento `load`, las peticiones y los KB de JS, CSS y total (Resource Timing, `encodedBodySize`: el tamaño del cuerpo, sin contar la caché del navegador). De otros dominios los KB solo cuentan si mandan `Timing-Allow-Origin`; la petición sí. El script queda en 2,9 KB minificado. Métricas nuevas del histograma: `req` (intervalos de 5), `js` (10 KB), `css` (5 KB) y `kb` (50 KB).
+- **Presupuestos** (ajuste `budgets`, Navegación → Presupuestos de rendimiento): LCP 2.500 ms, INP 200 ms, CLS 0,1, TTFB 800 ms, 80 peticiones, 400 KB de JS, 150 KB de CSS y 2.500 KB en total por defecto. 0 = sin vigilar. Una plantilla de la flota puede fijarlos (`FleetPolicy::SETTINGS`).
+- **Comparación diaria** (con la tarea del RUM, o «Comprobar ahora»): el p75 de 7 días del sitio entero por dispositivo (`RumReport::vitals( $rows, true )`) y de cada plantilla con al menos 20 visitas. El registro avisa solo de lo que cambia: lo que pasa a estar por encima (advertencia) y lo que vuelve a estar dentro (info). El mensaje lista tres casos (la columna tiene 255 caracteres) y el contexto del evento, todos.
+- **Hub**: la telemetría lleva `budgets` con los presupuestos, el p75 del sitio por dispositivo y los excesos por plantilla (solo agregados del RUM).
+- **Probado en local** con 132 visitas de Chromium (escritorio y móvil): la ficha de producto quedó en 53 peticiones, 515 KB de JS y 478 KB de CSS; avisó del JS y el CSS, y al subir los presupuestos los excesos desaparecieron. Al agregar el sitio entero, una prueba encontró que el mismo intervalo de dos plantillas se sobrescribía en vez de sumarse; quedó corregido antes de publicar.
+
 ---
 
 ## 12. Integración con Imagina Search (`Integrations/ImaginaSearch`)
@@ -491,3 +499,12 @@ Verificado en `augusto97/imagina-search` (Woo Smart Search 6.0.2):
 - **Vigilancia**: la tarea horaria devuelve las etiquetas del sitio si Zaraz pierde las herramientas, se apaga o la zona se pausa.
 - **Probado en local** con el simulador de la API: aplicar y revertir, publicación en vista previa, configuración con secretos, los dos filtros, los datos de ficha, carrito, pago y pedido (y el pedido con clave incorrecta), «Product Added» por formulario y por `added_to_cart`, y la salud con la zona pausada.
 
+## 16. Auditoría de imágenes (`Core\ImageAudit`, 0.19.0)
+
+- **Qué es**: Diagnóstico → Imágenes. Recorre la biblioteca de medios por lotes (8 s por paso; el admin repite hasta terminar) y revisa el optimizador. Solo lee y recomienda: Imagina Turbo no cambia los ajustes de otro plugin (regla 6).
+- **Biblioteca**: imágenes por tipo, peso del archivo que se sirve y de sus tamaños (`filesize` de los metadatos, o del disco), cobertura de WebP y AVIF de los JPG y PNG con todos sus tamaños (en las dos formas de nombrar, `foto.jpg.webp` y `foto.webp`), originales de más de 2.560 px y archivos de más de 1 MB (los 15 más pesados de cada lista, con enlace), adjuntos sin archivo o sin metadatos.
+- **EWWW Image Optimizer** (opciones verificadas en el código de la 8.9.0): nivel JPG (Pixel Perfect es sin pérdida), WebP y su calidad efectiva (vacía = 75; EWWW la limita a 92), «Sharpen Images» (sharp YUV al crear el WebP), redimensionado, quitar metadatos, la cola (`ewwwio_queue`, `ewwwio_images.pending`, `ewww_image_optimizer_bulk_resume`), imágenes optimizadas y ahorro. La versión sale de la cabecera del plugin: la constante es un entero (890).
+- **Dato del código de EWWW**: convierte los JPG a WebP siempre con pérdida (`cwebp -q` o Imagick con esa calidad) y los PNG sin pérdida. La auditoría lo dice cuando WebP está activo, porque hay clientes que no aceptan ninguna pérdida.
+- **Recomendaciones**: sin optimizador o con dos a la vez, WebP apagado, calidad WebP por debajo de 90, Sharpen Images, JPG sin comprimir o con pérdida (Premium), quitar metadatos, redimensionar si hay originales enormes, cola a medias, cobertura WebP por debajo del 90 %, archivos pesados y adjuntos sin archivo.
+- **Otros optimizadores detectados**: ShortPixel, Imagify, Smush, Converter for Media, Optimole y TinyPNG (solo el nombre, para avisar del doble procesado).
+- **Probado en local** con EWWW 8.9.0 real y dos fotos de prueba: la de 3.200 px la redimensionó EWWW al subirla (por eso no figura como enorme), detectó la calidad 75, la cola de las subidas nuevas y la cobertura WebP del 82 %.

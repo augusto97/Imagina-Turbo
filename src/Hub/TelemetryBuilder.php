@@ -16,6 +16,7 @@ use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Environment\Detector;
 use ImaginaTurbo\Core\ModuleCatalog;
 use ImaginaTurbo\Core\ModuleRegistry;
+use ImaginaTurbo\Modules\Rum\Budgets;
 use ImaginaTurbo\Repository\EventRepository;
 use ImaginaTurbo\Repository\MetricsRepository;
 use ImaginaTurbo\Fleet\FleetService;
@@ -83,6 +84,9 @@ final class TelemetryBuilder {
 			'metrics'        => $this->metrics->between( gmdate( 'Y-m-d H:00:00', $from ), gmdate( 'Y-m-d H:00:00', $to ) ),
 			// Flota: plantilla, versión aplicada y qué se desvía (sin valores).
 			'fleet'          => FleetService::storedSummary(),
+			// Presupuestos (0.19.0): p75 de 7 días del sitio por dispositivo y lo que los supera, por
+			// plantilla (portada, single:product…). Solo agregados del RUM.
+			'budgets'        => self::budgets(),
 			'events'         => array_map(
 				static fn( array $e ): array => [
 					'created_at' => $e['created_at'],
@@ -93,6 +97,19 @@ final class TelemetryBuilder {
 				],
 				$events['items']
 			),
+		];
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private static function budgets(): array {
+		$state = Budgets::stored();
+		return [
+			'checked_at' => $state['checked_at'] > 0 ? gmdate( 'c', $state['checked_at'] ) : null,
+			'budgets'    => $state['budgets'],
+			'site'       => $state['site'],
+			'breaches'   => array_slice( $state['breaches'], 0, 50 ),
 		];
 	}
 

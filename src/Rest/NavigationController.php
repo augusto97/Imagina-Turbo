@@ -1,7 +1,8 @@
 <?php
 /**
  * Navegación instantánea, RUM y pistas de frontend: GET /navigation/status, PUT /navigation/settings,
- * GET /navigation/report, POST /navigation/insights, POST /navigation/lazy-documents/scan.
+ * GET /navigation/report, POST /navigation/insights, POST /navigation/lazy-documents/scan,
+ * PUT /navigation/budgets y POST /navigation/budgets/check (0.19.0).
  *
  * @package ImaginaTurbo
  */
@@ -17,6 +18,7 @@ use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Modules\AssetManager\AssetScanner;
 use ImaginaTurbo\Modules\CacheCoordinator\FragmentCache;
 use ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule;
+use ImaginaTurbo\Modules\Rum\Budgets;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Modules\Speculation\PrefetchProbe;
 use ImaginaTurbo\Repository\SampleRepository;
@@ -106,6 +108,54 @@ final class NavigationController extends Controller {
 		);
 		$this->route( '/navigation/insights', \WP_REST_Server::CREATABLE, fn(): \WP_REST_Response => $this->ok( $this->container->get( RumService::class )->daily() ) );
 		$this->route( '/navigation/lazy-documents/scan', \WP_REST_Server::CREATABLE, [ $this, 'scanLazyDocuments' ] );
+		$budget = [];
+		foreach ( Budgets::DEFAULTS as $metric => $default ) {
+			$budget[ $metric ] = [
+				'type'    => 'number',
+				'minimum' => 0,
+			];
+		}
+		$this->route(
+			'/navigation/budgets',
+			'PUT',
+			[ $this, 'updateBudgets' ],
+			[
+				'budgets' => [
+					'type'                 => 'object',
+					'required'             => true,
+					'properties'           => $budget,
+					'additionalProperties' => false,
+				],
+			]
+		);
+		$this->route( '/navigation/budgets/check', \WP_REST_Server::CREATABLE, [ $this, 'checkBudgets' ] );
+	}
+
+	/**
+	 * Guarda los presupuestos (0.19.0) y vuelve a comparar con lo medido.
+	 */
+	public function updateBudgets( \WP_REST_Request $request ): \WP_REST_Response {
+		$budgets = Budgets::normalize( (array) $request->get_param( 'budgets' ) );
+		$this->container->get( Settings::class )->update( [ 'budgets' => $budgets ] );
+		$this->container->get( EventLog::class )->info(
+			'rum',
+			'budgets',
+			__( 'Presupuestos de rendimiento actualizados.', 'imagina-turbo' ),
+			[
+				'user'    => get_current_user_id(),
+				'budgets' => $budgets,
+			]
+		);
+		$this->container->get( RumService::class )->budgets( $budgets );
+		return $this->ok( $this->status() );
+	}
+
+	/**
+	 * Compara ya, sin esperar a la tarea diaria.
+	 */
+	public function checkBudgets(): \WP_REST_Response {
+		$this->container->get( RumService::class )->budgets( Budgets::normalize( (array) $this->container->get( Settings::class )->get( 'budgets', [] ) ) );
+		return $this->ok( $this->status() );
 	}
 
 	/**
@@ -153,6 +203,11 @@ final class NavigationController extends Controller {
 			'hub_rum'        => '' !== (string) $settings->get( 'hub_url', '' ),
 			'report'         => $this->container->get( RumService::class )->report( 7 ),
 			'insights'       => RumService::stored(),
+			'budgets'        => [
+				'values'   => Budgets::normalize( (array) $settings->get( 'budgets', [] ) ),
+				'defaults' => Budgets::DEFAULTS,
+				'state'    => Budgets::stored(),
+			],
 			'no_store'       => $this->noStore(),
 			'elementor'      => defined( 'ELEMENTOR_VERSION' ),
 			'lazy_detected'  => is_array( get_transient( self::LAZY_TRANSIENT ) ) ? get_transient( self::LAZY_TRANSIENT ) : null,

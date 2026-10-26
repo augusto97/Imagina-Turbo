@@ -5,7 +5,7 @@
  * POST /?itb-rum=1 con el beacon de itb-rum.js. Corre desde el loader MU, antes de cargar plugins y
  * tema; usa $wpdb, que WordPress ya cargó. Solo agrega contadores:
  * - itb_rum_hist: histogramas por hora, plantilla, dispositivo y métrica (LCP, INP, CLS, TTFB, tipo de
- *   navegación). El p75 sale de los histogramas.
+ *   navegación, peso de la carga). El p75 sale de los histogramas.
  * - itb_rum_events: por día, el elemento LCP, la página siguiente y las causas de bfcache, con un mapa de
  *   64 bits del hash de la IP para estimar visitantes distintos. La IP no se guarda.
  *
@@ -117,6 +117,17 @@ final class RumCollector {
 			'cls'  => [ $b['c'] ?? null, 10, 100 ],
 		] as $metric => [ $value, $step, $max ] ) {
 			if ( is_int( $value ) && $value >= 0 && $value <= 120000 ) {
+				$out['hist'][] = [ $hour, $template, $device, $metric, min( $max, intdiv( $value, $step ) ) ];
+			}
+		}
+		// Peso de la carga (0.19.0): peticiones y KB de JS, CSS y total hasta el evento load.
+		foreach ( [
+			'req' => [ $b['q'] ?? null, 5, 200 ],
+			'js'  => [ $b['j'] ?? null, 10, 300 ],
+			'css' => [ $b['s'] ?? null, 5, 200 ],
+			'kb'  => [ $b['kb'] ?? null, 50, 400 ],
+		] as $metric => [ $value, $step, $max ] ) {
+			if ( is_int( $value ) && $value >= 0 && $value <= 100000 ) {
 				$out['hist'][] = [ $hour, $template, $device, $metric, min( $max, intdiv( $value, $step ) ) ];
 			}
 		}

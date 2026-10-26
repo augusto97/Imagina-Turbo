@@ -50,6 +50,7 @@ final class Settings {
 			'cache_sie'                => 3 * DAY_IN_SECONDS,
 			'cache_nonce_refresh'      => true,
 			'cache_warm'               => true,
+			'cache_fragments'          => false,
 			'woo_count_selectors'      => [],
 			'woo_total_selectors'      => [],
 			'woo_recently_viewed'      => true,
@@ -80,6 +81,8 @@ final class Settings {
 			'fonts_manual'             => [],
 			'hints_facades'            => true,
 			'lazy_render'              => [],
+			'lazy_elements'            => false,
+			'lazy_documents'           => [],
 			'db_keep_revisions'        => 5,
 			'db_schedule'              => [],
 			'db_schedule_days'         => 7,
@@ -287,7 +290,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
@@ -295,6 +298,10 @@ final class Settings {
 
 		if ( isset( $input['lazy_render'] ) && is_array( $input['lazy_render'] ) ) {
 			$out['lazy_render'] = self::lazyRender( $input['lazy_render'] );
+		}
+		// Documentos de Elementor diferidos (0.17.0).
+		if ( isset( $input['lazy_documents'] ) && is_array( $input['lazy_documents'] ) ) {
+			$out['lazy_documents'] = self::lazyDocuments( $input['lazy_documents'] );
 		}
 
 		// Carga de scripts (0.14.0).
@@ -464,6 +471,30 @@ final class Settings {
 			];
 		}
 		return array_slice( array_values( $out ), 0, 10 );
+	}
+
+	/**
+	 * Documentos de Elementor diferidos: id, modo ("v" al acercarse, "i" en la primera interacción) y
+	 * altura reservada (0 = ninguna).
+	 *
+	 * @param array<mixed> $list Documentos.
+	 * @return list<array{id: int, mode: string, height: int}>
+	 */
+	public static function lazyDocuments( array $list ): array {
+		$out = [];
+		foreach ( $list as $doc ) {
+			$id = is_array( $doc ) && is_int( $doc['id'] ?? null ) ? $doc['id'] : 0;
+			if ( $id <= 0 || isset( $out[ $id ] ) ) {
+				continue;
+			}
+			$height     = is_int( $doc['height'] ?? null ) ? $doc['height'] : 0;
+			$out[ $id ] = [
+				'id'     => $id,
+				'mode'   => 'i' === ( $doc['mode'] ?? '' ) ? 'i' : 'v',
+				'height' => max( 0, min( 3000, $height ) ),
+			];
+		}
+		return array_slice( array_values( $out ), 0, \ImaginaTurbo\Modules\FrontendHints\LazyElements::MAX_DOCUMENTS );
 	}
 
 	public static function sanitizeHubUrl( string $url ): string {

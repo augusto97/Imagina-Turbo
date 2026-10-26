@@ -49,6 +49,9 @@ final class AssetInventory {
 	/** Hojas ya impresas al terminar el head; -1 = el head no terminó (0.16.0). */
 	private static int $headCss = -1;
 
+	/** @var array<int, array{id: int, title: string, type: string, bytes: int, tags: int, imgs: int, where: string}> Documentos de Elementor impresos (0.17.0). */
+	private static array $docs = [];
+
 	public static function active(): bool {
 		return self::$active;
 	}
@@ -75,6 +78,65 @@ final class AssetInventory {
 		add_filter( 'render_block', [ self::class, 'block' ], 10, 2 );
 		add_action( 'wp_footer', [ self::class, 'output' ], PHP_INT_MAX );
 		add_action( 'wp_head', [ self::class, 'markHead' ], PHP_INT_MAX );
+		add_filter( 'elementor/frontend/the_content', [ self::class, 'document' ], 5 );
+	}
+
+	/**
+	 * Documento de Elementor impreso (bloques HTML, plantillas, la propia página): tamaño, etiquetas,
+	 * imágenes y dónde (menú, cabecera, pie o contenido). Para sugerir qué diferir (0.17.0).
+	 *
+	 * @param mixed $content HTML del documento.
+	 * @return mixed
+	 */
+	public static function document( mixed $content ): mixed {
+		if ( ! is_string( $content ) || count( self::$docs ) >= 80 || ! class_exists( '\Elementor\Plugin' ) || ! isset( \Elementor\Plugin::$instance->documents ) ) {
+			return $content;
+		}
+		$document = \Elementor\Plugin::$instance->documents->get_current();
+		$id       = is_object( $document ) && method_exists( $document, 'get_main_id' ) ? (int) $document->get_main_id() : 0;
+		if ( $id <= 0 ) {
+			return $content;
+		}
+		$stats = self::htmlStats( $content );
+		if ( isset( self::$docs[ $id ] ) && self::$docs[ $id ]['bytes'] >= $stats['bytes'] ) {
+			return $content;
+		}
+		self::$docs[ $id ] = [
+			'id'    => $id,
+			'title' => html_entity_decode( (string) get_the_title( $id ), ENT_QUOTES ),
+			'type'  => (string) get_post_type( $id ),
+			'where' => self::where( array_column( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 80 ), 'function' ) ), // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_debug_backtrace -- solo en la petición de inventario del admin.
+		] + $stats;
+		return $content;
+	}
+
+	/**
+	 * Dónde se imprimió, por las funciones de la pila.
+	 *
+	 * @param array<mixed> $functions Nombres de función de debug_backtrace.
+	 */
+	public static function where( array $functions ): string {
+		foreach ( [
+			'wp_nav_menu' => 'menu',
+			'get_footer'  => 'footer',
+			'get_header'  => 'header',
+		] as $function => $where ) {
+			if ( in_array( $function, $functions, true ) ) {
+				return $where;
+			}
+		}
+		return 'content';
+	}
+
+	/**
+	 * @return array{bytes: int, tags: int, imgs: int}
+	 */
+	public static function htmlStats( string $html ): array {
+		return [
+			'bytes' => strlen( $html ),
+			'tags'  => max( 0, substr_count( $html, '<' ) - substr_count( $html, '</' ) - substr_count( $html, '<!' ) ),
+			'imgs'  => substr_count( $html, '<img' ),
+		];
 	}
 
 	public static function markHead(): void {
@@ -145,6 +207,7 @@ final class AssetInventory {
 			'shortcodes' => array_keys( self::$shortcodes ),
 			'blocks'     => array_keys( self::$blocks ),
 			'late_css'   => self::lateStyles( wp_styles(), self::$headCss ),
+			'el_docs'    => array_values( self::$docs ),
 		];
 		set_transient( self::TRANSIENT . self::$nonce, $data, self::TTL );
 	}

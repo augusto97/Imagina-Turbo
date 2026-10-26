@@ -13,7 +13,7 @@ import { api, ApiError } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { CacheSettings, CacheStatus, InspectResult } from '@/lib/types';
+import type { CacheSettings, CacheStatus, FragmentPageResult, InspectResult } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const HOUR = 3600;
@@ -69,6 +69,7 @@ export function Cache() {
 						<QueueCard status={ data } onDone={ onDone } />
 						<PurgeCard status={ data } onDone={ onDone } />
 					</div>
+					<FragmentsCard status={ data } onDone={ onDone } />
 					<InspectCard />
 				</div>
 			) }
@@ -326,6 +327,100 @@ function PurgeCard( { status, onDone }: { status: CacheStatus; onDone: ( s: Cach
 				destructive
 				pending={ purge.isPending }
 				onConfirm={ () => purge.mutate( { type: 'all', value: '', confirm: true }, { onSuccess: onDone, onSettled: () => setConfirmAll( false ) } ) }
+			/>
+		</Card>
+	);
+}
+
+const fragmentResult = ( r: FragmentPageResult[ 'result' ] ): { tone: 'green' | 'amber' | 'red' | 'neutral'; label: string } =>
+	( {
+		ok: { tone: 'green' as const, label: __( 'Igual' ) },
+		no_menus: { tone: 'neutral' as const, label: __( 'Sin menús' ) },
+		partial: { tone: 'amber' as const, label: __( 'Incompleta' ) },
+		different: { tone: 'red' as const, label: __( 'Distinta' ) },
+		no_stats: { tone: 'amber' as const, label: __( 'Sin datos' ) },
+		error: { tone: 'red' as const, label: __( 'Error' ) },
+	} )[ r ];
+
+function FragmentsCard( { status, onDone }: { status: CacheStatus; onDone: ( s: CacheStatus ) => void } ) {
+	const [ confirm, setConfirm ] = useState( false );
+	const save = useAction( ( vars: { fragments: boolean; confirm?: boolean } ) => api<CacheStatus>( 'cache/settings', 'PUT', vars ) );
+	const verify = useAction( () => api<CacheStatus>( 'cache/fragments/verify', 'POST' ) );
+	const last = status.fragments.verify;
+	const toggle = ( on: boolean, withConfirm = false ) =>
+		save.mutate( { fragments: on, confirm: withConfirm }, {
+			onSuccess: onDone,
+			onError: ( e ) => {
+				if ( e instanceof ApiError && e.status === 428 ) {
+					setConfirm( true );
+				}
+			},
+			onSettled: () => withConfirm && setConfirm( false ),
+		} );
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:gap-2">
+					<CardTitle>{ __( 'Caché de fragmentos' ) }</CardTitle>
+					<Badge tone="amber">{ __( 'Moderado' ) }</Badge>
+				</div>
+				<CardDescription>
+					{ __( 'Para las páginas que el plugin de caché no guarda (carrito, cuenta, visitantes con sesión, la primera visita tras una purga): los menús no se vuelven a renderizar en cada página, y lo que su render encolaba (CSS y JS de Elementor y del tema) se vuelve a encolar. Las respuestas AJAX de solo render del tema (megamenús y carruseles de WoodMart) se sirven antes de cargar los plugins. Cualquier cambio de contenido, menús, stock o tema las invalida. Necesita caché de objetos persistente.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ ! status.fragments.available && <Notice level="warning">{ __( 'El sitio no tiene caché de objetos persistente (Redis o Memcached): la caché de fragmentos no haría nada.' ) }</Notice> }
+				{ ! status.enabled && <Notice level="info">{ __( 'Activa primero el coordinador de caché.' ) }</Notice> }
+				<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
+					<span>
+						<span className="itb:font-medium">{ __( 'Activar la caché de fragmentos' ) }</span>
+						<span className="itb:block itb:text-xs itb:text-zinc-500">
+							{ status.fragments.ajax.length > 0 ? `${ __( 'AJAX del tema:' ) } ${ status.fragments.ajax.join( ', ' ) }` : __( 'Sin acciones AJAX conocidas para este tema: solo menús.' ) }
+						</span>
+					</span>
+					<Switch checked={ status.settings.fragments } disabled={ save.isPending || ! status.enabled || ! status.fragments.available } onCheckedChange={ ( v ) => toggle( v ) } aria-label={ __( 'Activar la caché de fragmentos' ) } />
+				</label>
+				<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+					<Button size="sm" variant="outline" disabled={ verify.isPending || ! status.enabled || ! status.fragments.available } onClick={ () => verify.mutate( undefined, { onSuccess: onDone } ) }>
+						<RefreshCw className={ verify.isPending ? 'itb:animate-spin' : '' } aria-hidden />
+						{ verify.isPending ? __( 'Verificando… (unos segundos por página)' ) : __( 'Verificar' ) }
+					</Button>
+					<span className="itb:text-xs itb:text-zinc-500">{ __( 'Pide cada página de muestra renderizada de cero y desde la caché de fragmentos, como visitante anónimo, y las compara.' ) }</span>
+				</div>
+				{ last && (
+					<div className="itb:flex itb:flex-col itb:gap-2">
+						<Notice level={ last.pass ? 'success' : 'warning' }>
+							{ last.pass ? __( 'Verificación aprobada: las páginas son iguales con y sin la caché de fragmentos.' ) : last.error || __( 'La verificación no pasó: revisa las páginas marcadas.' ) }
+							{ ` (${ formatDate( last.at, config.locale ) })` }
+						</Notice>
+						{ last.pages.map( ( p ) => {
+							const r = fragmentResult( p.result );
+							return (
+								<div key={ p.path } className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-2 itb:rounded-md itb:border itb:border-zinc-200 itb:px-3 itb:py-2">
+									<span className="itb:min-w-0">
+										<span className="itb:font-mono itb:text-xs">{ p.path }</span>
+										<span className="itb:block itb:text-xs itb:text-zinc-500">
+											{ `${ p.stores } ${ __( 'menús guardados' ) } · ${ p.hits } ${ __( 'servidos desde la caché' ) }` }
+											{ p.diff ? ` · ${ p.diff }` : '' }
+										</span>
+									</span>
+									<Badge tone={ r.tone }>{ r.label }</Badge>
+								</div>
+							);
+						} ) }
+					</div>
+				) }
+				{ save.error && ! ( save.error instanceof ApiError && save.error.status === 428 ) && <Notice level="error">{ save.error.message }</Notice> }
+				{ verify.error && <Notice level="error">{ verify.error.message }</Notice> }
+			</CardContent>
+			<ConfirmDialog
+				open={ confirm }
+				onOpenChange={ setConfirm }
+				title={ __( '¿Activar sin verificación?' ) }
+				description={ __( 'No hay una verificación aprobada en los últimos 7 días. Revisa los menús, el carrito y la cuenta después de activarla; se apaga desde aquí mismo.' ) }
+				confirmLabel={ __( 'Activar' ) }
+				pending={ save.isPending }
+				onConfirm={ () => toggle( true, true ) }
 			/>
 		</Card>
 	);

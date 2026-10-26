@@ -274,6 +274,16 @@ export interface CacheSettings {
 	sie: number;
 	nonce_refresh: boolean;
 	warm: boolean;
+	fragments: boolean;
+}
+
+export interface FragmentPageResult {
+	path: string;
+	status: number;
+	hits: number;
+	stores: number;
+	result: 'ok' | 'no_menus' | 'partial' | 'different' | 'no_stats' | 'error';
+	diff: string;
 }
 
 export interface CacheStatus {
@@ -286,6 +296,7 @@ export interface CacheStatus {
 	last: { at?: number; tags?: number; urls?: number; all?: boolean; edge?: string; warm?: number };
 	warmer: { last_run: number; warmed: number; errors: number; avg_ms: number; paused_at: number; load: number; seeded_at: number };
 	sitemaps: string[];
+	fragments: { available: boolean; ajax: string[]; verify: { at: number; pass: boolean; pages: FragmentPageResult[]; error: string } | null };
 	result?: Record<string, unknown>;
 }
 
@@ -588,6 +599,26 @@ export interface NavigationSettings {
 	fonts_manual: string[];
 	hints_facades: boolean;
 	lazy_render: LazyRenderRule[];
+	lazy_elements: boolean;
+	lazy_documents: LazyDocument[];
+}
+
+export interface LazyDocument {
+	id: number;
+	mode: 'v' | 'i';
+	height: number;
+}
+
+export interface LazyDocumentDetected {
+	id: number;
+	title: string;
+	type: string;
+	bytes: number;
+	tags: number;
+	imgs: number;
+	where: 'menu' | 'header' | 'footer' | 'content';
+	pages: number;
+	suggest: '' | 'v' | 'i';
 }
 
 export interface LazyRenderRule {
@@ -608,6 +639,8 @@ export interface NavigationStatus {
 	report: RumReportData;
 	insights: RumInsightsData;
 	no_store: { route: string; n: number }[];
+	elementor: boolean;
+	lazy_detected: { docs: LazyDocumentDetected[]; errors: string[]; generated_at: number } | null;
 }
 
 export interface AssetRule {

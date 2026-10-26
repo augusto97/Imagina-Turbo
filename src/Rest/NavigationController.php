@@ -1,7 +1,7 @@
 <?php
 /**
  * Navegación instantánea, RUM y pistas de frontend: GET /navigation/status, PUT /navigation/settings,
- * GET /navigation/report, POST /navigation/insights.
+ * GET /navigation/report, POST /navigation/insights, POST /navigation/lazy-documents/scan.
  *
  * @package ImaginaTurbo
  */
@@ -14,6 +14,8 @@ use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Modules\AssetManager\AssetScanner;
+use ImaginaTurbo\Modules\CacheCoordinator\FragmentCache;
 use ImaginaTurbo\Modules\FrontendHints\FrontendHintsModule;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Modules\Speculation\PrefetchProbe;
@@ -24,7 +26,13 @@ use ImaginaTurbo\Repository\SampleRepository;
  */
 final class NavigationController extends Controller {
 
-	private const BOOLS = [ 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades' ];
+	private const BOOLS = [ 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'lazy_elements' ];
+
+	/** Apagados por defecto. */
+	private const OFF_BY_DEFAULT = [ 'view_transitions', 'lazy_elements' ];
+
+	/** Última detección de documentos de Elementor (0.17.0). */
+	private const LAZY_TRANSIENT = 'itb_lazy_docs';
 
 	public function registerRoutes(): void {
 		$this->route( '/navigation/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );
@@ -54,6 +62,28 @@ final class NavigationController extends Controller {
 				'type'  => 'array',
 				'items' => [ 'type' => 'object' ],
 			],
+			'lazy_documents' => [
+				'type'     => 'array',
+				'items'    => [
+					'type'       => 'object',
+					'properties' => [
+						'id'     => [
+							'type'    => 'integer',
+							'minimum' => 1,
+						],
+						'mode'   => [
+							'type' => 'string',
+							'enum' => [ 'v', 'i' ],
+						],
+						'height' => [
+							'type'    => 'integer',
+							'minimum' => 0,
+							'maximum' => 3000,
+						],
+					],
+				],
+				'maxItems' => 30,
+			],
 			'confirm'        => [
 				'type'    => 'boolean',
 				'default' => false,
@@ -75,6 +105,16 @@ final class NavigationController extends Controller {
 			]
 		);
 		$this->route( '/navigation/insights', \WP_REST_Server::CREATABLE, fn(): \WP_REST_Response => $this->ok( $this->container->get( RumService::class )->daily() ) );
+		$this->route( '/navigation/lazy-documents/scan', \WP_REST_Server::CREATABLE, [ $this, 'scanLazyDocuments' ] );
+	}
+
+	/**
+	 * Detecta los documentos de Elementor de las páginas de muestra (0.17.0).
+	 */
+	public function scanLazyDocuments(): \WP_REST_Response {
+		$result = $this->container->get( AssetScanner::class )->lazyDocuments() + [ 'generated_at' => time() ];
+		set_transient( self::LAZY_TRANSIENT, $result, DAY_IN_SECONDS );
+		return $this->ok( $this->status() );
 	}
 
 	/**
@@ -93,13 +133,14 @@ final class NavigationController extends Controller {
 		}
 		$values = [
 			'lazy_render'    => Settings::lazyRender( (array) $settings->get( 'lazy_render', [] ) ),
+			'lazy_documents' => Settings::lazyDocuments( (array) $settings->get( 'lazy_documents', [] ) ),
 			'fonts_manual'   => Settings::fontPaths( (array) $settings->get( 'fonts_manual', [] ), home_url( '/' ) ),
 			'spec_mode'      => (string) $settings->get( 'spec_mode', 'prefetch' ),
 			'spec_eagerness' => (string) $settings->get( 'spec_eagerness', 'moderate' ),
 			'rum_rate'       => (float) $settings->get( 'rum_rate', 0.05 ),
 		];
 		foreach ( self::BOOLS as $key ) {
-			$values[ $key ] = (bool) $settings->get( $key, 'view_transitions' !== $key );
+			$values[ $key ] = (bool) $settings->get( $key, ! in_array( $key, self::OFF_BY_DEFAULT, true ) );
 		}
 		return [
 			'modules'        => $modules,
@@ -113,6 +154,8 @@ final class NavigationController extends Controller {
 			'report'         => $this->container->get( RumService::class )->report( 7 ),
 			'insights'       => RumService::stored(),
 			'no_store'       => $this->noStore(),
+			'elementor'      => defined( 'ELEMENTOR_VERSION' ),
+			'lazy_detected'  => is_array( get_transient( self::LAZY_TRANSIENT ) ) ? get_transient( self::LAZY_TRANSIENT ) : null,
 		];
 	}
 
@@ -158,14 +201,28 @@ final class NavigationController extends Controller {
 		if ( 'prerender' === $request->get_param( 'spec_mode' ) && 'prerender' !== $settings->get( 'spec_mode', 'prefetch' ) && true !== $request->get_param( 'confirm' ) ) {
 			return $this->error( 'itb_confirm', __( 'Confirma el prerender: ejecuta el JavaScript de las páginas antes de que se abran.', 'imagina-turbo' ), 428 );
 		}
+		// Lo diferido no está en el DOM para scripts, la búsqueda del navegador ni Google: moderado.
+		if ( true === $request->get_param( 'lazy_elements' ) && ! (bool) $settings->get( 'lazy_elements', false ) && true !== $request->get_param( 'confirm' ) ) {
+			return $this->error( 'itb_confirm', __( 'Confirma los elementos diferidos: hasta que se muestran no están en el DOM para otros scripts, la búsqueda del navegador ni Google.', 'imagina-turbo' ), 428 );
+		}
 		$changes = [];
-		foreach ( array_merge( [ 'spec_mode', 'spec_eagerness', 'rum_rate', 'lazy_render', 'fonts_manual' ], self::BOOLS ) as $key ) {
+		foreach ( array_merge( [ 'spec_mode', 'spec_eagerness', 'rum_rate', 'lazy_render', 'fonts_manual', 'lazy_documents' ], self::BOOLS ) as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ $key ] = $request->get_param( $key );
 			}
 		}
+		$wasLazy = (bool) $settings->get( 'lazy_elements', false );
 		$settings->update( $changes );
 		$this->container->get( ConfigCompiler::class )->compile();
+		// La caché de elementos de Elementor guarda el HTML de cada documento: al activar los elementos
+		// diferidos se vacía para que los marcadores aparezcan ya (al apagarlos quedan como comentarios).
+		if ( isset( $changes['lazy_elements'] ) && (bool) $changes['lazy_elements'] !== $wasLazy && defined( 'ELEMENTOR_VERSION' ) ) {
+			delete_post_meta_by_key( '_elementor_element_cache' );
+		}
+		// Los menús guardados en la caché de fragmentos llevan el envoltorio (o no): copias nuevas.
+		if ( isset( $changes['lazy_elements'] ) || isset( $changes['lazy_documents'] ) ) {
+			FragmentCache::flush();
+		}
 		$this->container->get( EventLog::class )->info(
 			'speculation',
 			'settings',

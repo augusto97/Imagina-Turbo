@@ -127,6 +127,7 @@ final class AssetScanner {
 			'shortcodes' => array_values( array_filter( is_array( $data['shortcodes'] ?? null ) ? $data['shortcodes'] : [], 'is_string' ) ),
 			'blocks'     => array_values( array_filter( is_array( $data['blocks'] ?? null ) ? $data['blocks'] : [], 'is_string' ) ),
 			'late_css'   => LateStyles::fromInventory( is_array( $data['late_css'] ?? null ) ? $data['late_css'] : [], home_url( '/' ) ),
+			'el_docs'    => array_values( array_filter( is_array( $data['el_docs'] ?? null ) ? $data['el_docs'] : [], 'is_array' ) ),
 		];
 	}
 
@@ -137,29 +138,9 @@ final class AssetScanner {
 	 * @return array{templates: array<string, array{paths: list<string>, sheets: list<array{h: string, src: string, ver: string, media: string, size: int}>}>, errors: list<string>}
 	 */
 	public function lateStyles(): array {
-		$paths = $this->samplePaths();
-		foreach ( [ 'product_cat', 'category' ] as $taxonomy ) {
-			if ( ! taxonomy_exists( $taxonomy ) ) {
-				continue;
-			}
-			$terms = get_terms(
-				[
-					'taxonomy'   => $taxonomy,
-					'hide_empty' => true,
-					'number'     => 1,
-					'orderby'    => 'count',
-					'order'      => 'DESC',
-				]
-			);
-			$link  = is_array( $terms ) && isset( $terms[0] ) && $terms[0] instanceof \WP_Term ? get_term_link( $terms[0] ) : '';
-			$home  = untrailingslashit( home_url() );
-			if ( is_string( $link ) && str_starts_with( $link, $home ) ) {
-				$paths[] = '/' . ltrim( substr( $link, strlen( $home ) ), '/' );
-			}
-		}
 		$out    = [];
 		$errors = [];
-		foreach ( array_values( array_unique( $paths ) ) as $path ) {
+		foreach ( $this->scanPaths() as $path ) {
 			$page = $this->inspect( $path );
 			if ( is_wp_error( $page ) ) {
 				$errors[] = $path . ': ' . $page->get_error_message();
@@ -187,6 +168,92 @@ final class AssetScanner {
 			'templates' => $out,
 			'errors'    => $errors,
 		];
+	}
+
+	/**
+	 * Documentos de Elementor de las páginas de muestra (0.17.0): tamaño, etiquetas, imágenes, dónde se
+	 * imprimen y en cuántas páginas. Sugerencia: lo de los menús, en la primera interacción; el pie y
+	 * el contenido grande, al acercarse. La cabecera no (está a la vista).
+	 *
+	 * @return array{docs: list<array{id: int, title: string, type: string, bytes: int, tags: int, imgs: int, where: string, pages: int, suggest: string}>, errors: list<string>}
+	 */
+	public function lazyDocuments(): array {
+		$docs   = [];
+		$errors = [];
+		foreach ( $this->scanPaths() as $path ) {
+			$page = $this->inspect( $path );
+			if ( is_wp_error( $page ) ) {
+				$errors[] = $path . ': ' . $page->get_error_message();
+				continue;
+			}
+			foreach ( is_array( $page['el_docs'] ?? null ) ? $page['el_docs'] : [] as $doc ) {
+				if ( ! is_array( $doc ) || ! is_int( $doc['id'] ?? null ) ) {
+					continue;
+				}
+				$id          = $doc['id'];
+				$prev        = $docs[ $id ] ?? null;
+				$docs[ $id ] = [
+					'id'    => $id,
+					'title' => (string) ( $doc['title'] ?? '' ),
+					'type'  => (string) ( $doc['type'] ?? '' ),
+					'bytes' => max( (int) ( $doc['bytes'] ?? 0 ), $prev['bytes'] ?? 0 ),
+					'tags'  => max( (int) ( $doc['tags'] ?? 0 ), $prev['tags'] ?? 0 ),
+					'imgs'  => max( (int) ( $doc['imgs'] ?? 0 ), $prev['imgs'] ?? 0 ),
+					'where' => (string) ( $prev['where'] ?? ( $doc['where'] ?? 'content' ) ),
+					'pages' => ( $prev['pages'] ?? 0 ) + 1,
+				];
+			}
+		}
+		$out = [];
+		foreach ( $docs as $doc ) {
+			$out[] = $doc + [ 'suggest' => self::lazySuggestion( $doc['where'], $doc['tags'] ) ];
+		}
+		usort( $out, static fn( array $a, array $b ): int => $b['tags'] <=> $a['tags'] );
+		return [
+			'docs'   => array_slice( $out, 0, 40 ),
+			'errors' => $errors,
+		];
+	}
+
+	/**
+	 * "i" (primera interacción), "v" (al acercarse) o "" (no conviene).
+	 */
+	public static function lazySuggestion( string $where, int $tags ): string {
+		return match ( true ) {
+			'menu' === $where && $tags >= 50 => 'i',
+			'footer' === $where && $tags >= 100, 'content' === $where && $tags >= 400 => 'v',
+			default => '',
+		};
+	}
+
+	/**
+	 * Páginas de muestra más la categoría con más productos o entradas (las plantillas de listado
+	 * suelen ser las más pesadas).
+	 *
+	 * @return list<string>
+	 */
+	public function scanPaths(): array {
+		$paths = $this->samplePaths();
+		foreach ( [ 'product_cat', 'category' ] as $taxonomy ) {
+			if ( ! taxonomy_exists( $taxonomy ) ) {
+				continue;
+			}
+			$terms = get_terms(
+				[
+					'taxonomy'   => $taxonomy,
+					'hide_empty' => true,
+					'number'     => 1,
+					'orderby'    => 'count',
+					'order'      => 'DESC',
+				]
+			);
+			$link  = is_array( $terms ) && isset( $terms[0] ) && $terms[0] instanceof \WP_Term ? get_term_link( $terms[0] ) : '';
+			$home  = untrailingslashit( home_url() );
+			if ( is_string( $link ) && str_starts_with( $link, $home ) ) {
+				$paths[] = '/' . ltrim( substr( $link, strlen( $home ) ), '/' );
+			}
+		}
+		return array_values( array_unique( $paths ) );
 	}
 
 	/**

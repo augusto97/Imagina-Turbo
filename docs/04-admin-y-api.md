@@ -49,7 +49,8 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/plugin-filter/rules/{id}/step` · `/recheck` | Avanza el experimento (presupuesto de ~12 s; se repite hasta terminar) · revisa una regla activa con 5 pares |
 | POST / DELETE | `/plugin-filter/rules/{id}/disable` · `/plugin-filter/rules/{id}` | Desactivar · eliminar (recompila y registra) |
 | GET | `/cache/status` | Adaptador detectado, ajustes, cola, última sincronización, recalentado |
-| PUT | `/cache/settings` | Modo (`sync` / `headers`), TTL, SWR, SIE, refresco de nonces, recalentado. Pasar a `headers` exige `confirm: true` (428 sin ella) |
+| PUT | `/cache/settings` | Modo (`sync` / `headers`), TTL, SWR, SIE, refresco de nonces, recalentado y caché de fragmentos (`fragments`, 0.17.0). Pasar a `headers` exige `confirm: true` (428 sin ella); activar los fragmentos también, salvo que haya una verificación aprobada en los últimos 7 días |
+| POST | `/cache/fragments/verify` | Compara cada página de muestra (más carrito y cuenta) renderizada de cero con la misma servida con los menús de la caché de fragmentos (loopback con cookie firmada `itb_frag`, `?itb_frag=b\|f\|h`). Guarda el resultado en `itb_frag_verify` y lo devuelve en `/cache/status` (`fragments.verify`) |
 | POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`; `all` exige `confirm: true`) |
 | POST | `/cache/warm` | `seed` (recalentar el sitemap) / `stop` (vaciar la cola de recalentado) |
 | POST | `/cache/inspect` | Pide una URL del sitio como anónimo y devuelve sus cabeceras de caché |
@@ -71,8 +72,9 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET / POST | `/tweaks/perfmatters` · `/tweaks/perfmatters/import` | Equivalencias de `perfmatters_options` (lo que se mapea y lo que no, con dónde vive) · importarlas (`confirm`) |
 | GET / PUT | `/woo/status` · `/woo/settings` | Carrito por Store API: tema y selectores en uso (verificados o no), selectores propios, productos vistos, geolocalización · guardar selectores propios y productos vistos (recompila la config) |
 | POST | `/woo/inspect` | Pide la portada sin carrito y con carrito: cabecera del edge, script del carrito, cart-fragments original y Set-Cookie |
-| GET | `/navigation/status` | Módulos, ajustes (incluye `lazy_render`), si el core trae la API de Speculation Rules, enlaces permanentes, informe del RUM (7 días), insights, páginas propias con no-store (48 h), reglas de renderizado diferido sugeridas para el tema y `prefetch_probe` (`refused` si Cloudflare rechaza las precargas) |
-| PUT | `/navigation/settings` | `spec_mode`, `spec_eagerness`, `spec_predictive`, `spec_fallback`, `view_transitions`, `hints_lcp`, `hints_facades`, `rum_rate`. Pasar a prerender exige `confirm` (428) |
+| GET | `/navigation/status` | Módulos, ajustes (incluye `lazy_render`, `lazy_elements` y `lazy_documents`), si el core trae la API de Speculation Rules, enlaces permanentes, informe del RUM (7 días), insights, páginas propias con no-store (48 h), reglas de renderizado diferido sugeridas para el tema, `prefetch_probe` (`refused` si Cloudflare rechaza las precargas), si Elementor está activo y la última detección de documentos (`lazy_detected`) |
+| PUT | `/navigation/settings` | `spec_mode`, `spec_eagerness`, `spec_predictive`, `spec_fallback`, `view_transitions`, `hints_lcp`, `hints_facades`, `rum_rate`, `lazy_elements`, `lazy_documents` (`[{id, mode: v\|i, height}]`, hasta 30). Pasar a prerender y activar los elementos diferidos exigen `confirm` (428) |
+| POST | `/navigation/lazy-documents/scan` | Inventaría las páginas de muestra y lista los documentos de Elementor impresos con tamaño, etiquetas, imágenes, dónde (menú, cabecera, pie, contenido) y la sugerencia |
 | GET / POST | `/navigation/report?days=7\|30` · `/navigation/insights` | Informe del RUM · recalcular ahora las páginas predichas y la imagen LCP |
 | GET | `/compat/report` | Reglas aplicadas y conflictos |
 | GET | `/assets/status` | Módulo, reglas, si la previsualización está activa, última tanda de sugerencias, plantillas y tipos de contenido del sitio |
@@ -103,7 +105,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write` |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write`. 0.16.0–0.17.0: `late_styles`, `fonts_manual`, `lazy_elements`, `lazy_documents`, `cache_fragments` |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
@@ -122,6 +124,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_filter_rules` | Reglas de carga condicional: clave, plugins, métodos, peticiones de prueba, estado (`testing`, `active`, `failed`, `disabled`), motivo y evidencia |
 | `itb_asset_rules` | Reglas del gestor de assets: handle, tipo, modo (`never`/`only`), plantillas, ids, tipos de contenido, estado (`testing`, `active`, `disabled`), quién y cuándo la verificó |
 | `itb_db_audit` | Última auditoría de la base de datos |
+| `itb_frag_verify` | Última verificación de la caché de fragmentos (hora, si pasó y el resultado por página). Sin autoload. Las copias viven en la caché de objetos, grupo `itb_frag` (`gen`, `m…` menús, `a…` AJAX) |
 | `itb_db_schedule_state` | Última ejecución de la limpieza programada y sus resultados |
 | `itb_fleet` | Plantilla de flota recibida (tal como llegó), desviaciones, error de la última consulta, última aplicación y resumen para la telemetría |
 | `itb_fleet_snapshots` | Los últimos 10 snapshots de lo que la plantilla puede tocar, antes de cada aplicación |

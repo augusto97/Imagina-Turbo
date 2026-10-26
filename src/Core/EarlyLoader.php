@@ -103,6 +103,7 @@ final class EarlyLoader {
 
 		self::maybeRum( $config );
 		self::maybeShield( $config );
+		self::maybeAjaxFragment( $config );
 		self::maybeFilterPlugins( $config, $startNs );
 		self::maybeStartProfiler( $config, $startNs, $startMem, $startWall );
 	}
@@ -117,6 +118,30 @@ final class EarlyLoader {
 		}
 		require_once Runtime::$pluginDir . '/src/Modules/Rum/RumCollector.php';
 		\ImaginaTurbo\Modules\Rum\RumCollector::handle();
+	}
+
+	/**
+	 * Respuestas AJAX de solo render desde la caché de objetos (0.17.0). Cuesta una comparación salvo en
+	 * admin-ajax.php con una acción de la lista.
+	 */
+	private static function maybeAjaxFragment( CompiledConfig $config ): void {
+		$request = Runtime::$request;
+		if ( null === $request || RequestType::AdminAjax !== $request->type || '' === $request->endpoint ) {
+			return;
+		}
+		$fragments = $config->get( 'fragments', [] );
+		$actions   = is_array( $fragments ) && is_array( $fragments['ajax'] ?? null ) ? $fragments['ajax'] : [];
+		if ( ! in_array( $request->endpoint, $actions, true ) ) {
+			return;
+		}
+		$vary = $config->get( 'vary_cookies', [] );
+		require_once Runtime::$pluginDir . '/src/Modules/CacheCoordinator/AjaxFragments.php';
+		\ImaginaTurbo\Modules\CacheCoordinator\AjaxFragments::maybeServe(
+			array_values( array_filter( $actions, 'is_string' ) ),
+			is_array( $vary ) ? array_values( array_filter( $vary, 'is_string' ) ) : [],
+			$_POST + $_GET, // phpcs:ignore WordPress.Security.NonceVerification -- solo forman la llave; un pedido con nonce no se guarda.
+			$_COOKIE
+		);
 	}
 
 	/**

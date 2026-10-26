@@ -60,6 +60,20 @@ final class CacheModule implements ModuleInterface {
 			( new HeaderEmitter( $settings, $cookies, $container->get( TagBuilder::class ), $container->get( CacheAdapter::class ), $request, $onCacheable, $cartCookies ) )->register();
 		}
 
+		// Caché de fragmentos (0.17.0): menús en las páginas que se renderizan; la generación se invalida
+		// donde cambia el contenido (admin, REST, AJAX, cron, checkout).
+		// El verificador del admin la prueba también apagada (cookie firmada + ?itb_frag=).
+		$fragments = Runtime::$config?->get( 'fragments', [] );
+		$fragOn    = is_array( $fragments ) && true === ( $fragments['on'] ?? false );
+		if ( ( $fragOn || isset( $_GET['itb_frag'] ) ) && in_array( $type, [ RequestType::FrontendHtml, RequestType::Cart, RequestType::Checkout, RequestType::Account, RequestType::Login ], true ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- la autorización es la cookie firmada.
+			$vary   = Runtime::$config?->get( 'vary_cookies', [] );
+			$ignore = is_array( $fragments ) && is_array( $fragments['ignore'] ?? null ) ? array_values( array_filter( $fragments['ignore'], 'is_string' ) ) : [];
+			( new FragmentCache( is_array( $vary ) ? array_values( array_filter( $vary, 'is_string' ) ) : [], $fragOn, $ignore ) )->register();
+		}
+		if ( RequestType::FrontendHtml !== $type ) {
+			FragmentCache::registerFlush();
+		}
+
 		// Searchanise escribe los productos vistos con Set-Cookie y los imprime en la página: al navegador.
 		if ( RequestType::FrontendHtml === $type ) {
 			( new SearchaniseRecentlyViewed() )->register();

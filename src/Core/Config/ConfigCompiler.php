@@ -23,6 +23,7 @@ use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Hub\HubClient;
 use ImaginaTurbo\Integrations\ImaginaSearch;
 use ImaginaTurbo\Modules\AssetManager\AssetRules;
+use ImaginaTurbo\Modules\CacheCoordinator\AjaxFragments;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Support\Filesystem;
@@ -189,11 +190,13 @@ final class ConfigCompiler {
 		];
 		$matrixVersion = '';
 		$coreBypass    = [];
+		$ignoreParams  = [];
 		try {
 			$matrix        = Matrix::fromFile( $this->matrixFile );
 			$matrixVersion = $matrix->version();
 			$compat        = ( new Resolver() )->resolve( $matrix, $active, (string) ( $theme['stylesheet'] ?? '' ), (string) ( $theme['template'] ?? '' ) );
 			$coreBypass    = $matrix->coreList( 'bypass_paths' );
+			$ignoreParams  = $matrix->coreList( 'ignore_query_params' );
 			$overlap       = ( new OverlapGuard() )->evaluate( $matrix->overlapping(), $active );
 		} catch ( MatrixException $e ) {
 			$warnings[] = $e->getMessage();
@@ -255,6 +258,8 @@ final class ConfigCompiler {
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
+			// Caché de fragmentos (0.17.0): menús y respuestas AJAX de solo render, con el coordinador activo.
+			'fragments'                   => $this->fragmentsConfig( true === ( $modules['cache_coordinator'] ?? false ), (string) ( $theme['template'] ?? '' ), $ignoreParams ),
 			// Exclusiones de delay JS para WP Rocket o LSCache (solo si alguno está activo).
 			// Gestor de assets: solo con el módulo activo (las reglas "testing" solo las aplica la previsualización).
 			'assets'                      => true === ( $modules['asset_manager'] ?? false ) ? ( new AssetRules() )->compile() : [],
@@ -283,6 +288,8 @@ final class ConfigCompiler {
 				// Fuentes elegidas a mano para todo el sitio (0.16.0).
 				'fonts_all' => Settings::fontPaths( (array) $this->settings->get( 'fonts_manual', [] ), home_url( '/' ) ),
 				'lazy'      => true === ( $modules['frontend_hints'] ?? true ) ? Settings::lazyRender( (array) $this->settings->get( 'lazy_render', [] ) ) : [],
+				// Elementos y documentos de Elementor diferidos con <template> (0.17.0).
+				'lazy_el'   => $this->lazyElementsConfig( true === ( $modules['frontend_hints'] ?? true ) ),
 				'images'    => array_map(
 					static fn( array $i ): array => [
 						'kind' => $i['kind'],
@@ -300,6 +307,43 @@ final class ConfigCompiler {
 
 		$data['hash'] = self::hash( $data );
 		return $data;
+	}
+
+	/**
+	 * Caché de fragmentos: interruptor y acciones AJAX conocidas del tema activo.
+	 *
+	 * @param list<string> $ignore Parámetros de campañas (no cambian el menú).
+	 * @return array{on: bool, ajax: list<string>, ignore: list<string>}
+	 */
+	private function fragmentsConfig( bool $moduleOn, string $template, array $ignore ): array {
+		$on = $moduleOn && (bool) $this->settings->get( 'cache_fragments', false );
+		return [
+			'on'     => $on,
+			'ajax'   => $on ? ( AjaxFragments::KNOWN[ $template ] ?? [] ) : [],
+			'ignore' => $on ? array_values( array_slice( $ignore, 0, 100 ) ) : [],
+		];
+	}
+
+	/**
+	 * Elementos diferidos de Elementor (0.17.0): interruptor y documentos por id.
+	 *
+	 * @return array{on: bool, docs: array<int, array{mode: string, height: int}>}
+	 */
+	private function lazyElementsConfig( bool $moduleOn ): array {
+		$on   = $moduleOn && (bool) $this->settings->get( 'lazy_elements', false );
+		$docs = [];
+		if ( $on ) {
+			foreach ( Settings::lazyDocuments( (array) $this->settings->get( 'lazy_documents', [] ) ) as $doc ) {
+				$docs[ $doc['id'] ] = [
+					'mode'   => $doc['mode'],
+					'height' => $doc['height'],
+				];
+			}
+		}
+		return [
+			'on'   => $on,
+			'docs' => $docs,
+		];
 	}
 
 	/**

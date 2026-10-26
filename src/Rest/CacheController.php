@@ -13,10 +13,14 @@ use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Modules\AssetManager\AssetScanner;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\CacheAdapter;
+use ImaginaTurbo\Modules\CacheCoordinator\AjaxFragments;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\WpRocketAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\CacheModule;
 use ImaginaTurbo\Modules\CacheCoordinator\Edge\EdgePurger;
+use ImaginaTurbo\Modules\CacheCoordinator\FragmentCache;
+use ImaginaTurbo\Modules\CacheCoordinator\FragmentVerifier;
 use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
@@ -59,6 +63,7 @@ final class CacheController extends Controller {
 				],
 				'nonce_refresh' => [ 'type' => 'boolean' ],
 				'warm'          => [ 'type' => 'boolean' ],
+				'fragments'     => [ 'type' => 'boolean' ],
 				'confirm'       => [
 					'type'    => 'boolean',
 					'default' => false,
@@ -98,6 +103,7 @@ final class CacheController extends Controller {
 				],
 			]
 		);
+		$this->route( '/cache/fragments/verify', \WP_REST_Server::CREATABLE, [ $this, 'verifyFragments' ] );
 		$this->route(
 			'/cache/inspect',
 			\WP_REST_Server::CREATABLE,
@@ -127,39 +133,45 @@ final class CacheController extends Controller {
 		}
 		$queue = $this->container->get( PurgeQueueRepository::class )->counts();
 		return [
-			'enabled'  => $enabled,
-			'settings' => [
+			'enabled'   => $enabled,
+			'settings'  => [
 				'mode'          => $settings->get( 'cache_mode', 'sync' ),
 				'edge_ttl'      => $settings->get( 'cache_edge_ttl', DAY_IN_SECONDS ),
 				'swr'           => $settings->get( 'cache_swr', DAY_IN_SECONDS ),
 				'sie'           => $settings->get( 'cache_sie', 3 * DAY_IN_SECONDS ),
 				'nonce_refresh' => $settings->get( 'cache_nonce_refresh', true ),
 				'warm'          => $settings->get( 'cache_warm', true ),
+				'fragments'     => $settings->get( 'cache_fragments', false ),
 			],
-			'adapter'  => [
+			'fragments' => [
+				'available' => FragmentCache::available(),
+				'ajax'      => AjaxFragments::KNOWN[ (string) get_template() ] ?? [],
+				'verify'    => is_array( get_option( FragmentVerifier::OPTION ) ) ? get_option( FragmentVerifier::OPTION ) : null,
+			],
+			'adapter'   => [
 				'id'             => $compiled['adapter'],
 				'server'         => $compiled['server'],
 				'headers_on_hit' => $adapter->headersOnHit(),
 				'edge_html'      => $compiled['edge_html'],
 				'verified'       => 'litespeed' !== $compiled['adapter'] || 'openlitespeed' === $compiled['server'],
 			],
-			'edge'     => [
+			'edge'      => [
 				'available'     => $this->container->get( EdgePurger::class )->available(),
 				'supports_tags' => $this->container->get( EdgePurger::class )->supportsTags(),
 			],
-			'tags'     => [
+			'tags'      => [
 				'prefix' => $this->container->get( TagBuilder::class )->prefix(),
 			],
-			'queue'    => [
+			'queue'     => [
 				'tags' => $queue[ PurgeQueueRepository::KIND_TAG ],
 				'urls' => $queue[ PurgeQueueRepository::KIND_URL ],
 				'all'  => $queue[ PurgeQueueRepository::KIND_ALL ] > 0,
 				'warm' => $queue[ PurgeQueueRepository::KIND_WARM ],
 			],
 			// Objeto aunque esté vacío: [] en JSON tiene métodos de arreglo en JavaScript (last.at).
-			'last'     => (object) PurgeWorker::lastState(),
-			'warmer'   => $this->container->get( Warmer::class )->state(),
-			'sitemaps' => $compiled['sitemaps'],
+			'last'      => (object) PurgeWorker::lastState(),
+			'warmer'    => $this->container->get( Warmer::class )->state(),
+			'sitemaps'  => $compiled['sitemaps'],
 		];
 	}
 
@@ -172,6 +184,7 @@ final class CacheController extends Controller {
 			'sie'           => 'cache_sie',
 			'nonce_refresh' => 'cache_nonce_refresh',
 			'warm'          => 'cache_warm',
+			'fragments'     => 'cache_fragments',
 		] as $param => $key ) {
 			if ( null !== $request->get_param( $param ) ) {
 				$changes[ $key ] = $request->get_param( $param );
@@ -182,20 +195,63 @@ final class CacheController extends Controller {
 		if ( 'headers' === ( $changes['cache_mode'] ?? null ) && 'headers' !== $settings->get( 'cache_mode', 'sync' ) && true !== $request->get_param( 'confirm' ) ) {
 			return $this->error( 'itb_confirm', __( 'Confirma que verificaste el sitio antes de emitir cabeceras para el edge.', 'imagina-turbo' ), 428 );
 		}
+		// Caché de fragmentos: sin una verificación aprobada en los últimos 7 días, se confirma (moderado).
+		if ( true === ( $changes['cache_fragments'] ?? null ) && ! (bool) $settings->get( 'cache_fragments', false ) && true !== $request->get_param( 'confirm' ) && ! self::fragmentsVerified() ) {
+			return $this->error( 'itb_confirm', __( 'La caché de fragmentos no tiene una verificación aprobada reciente. Verifícala o confirma que revisarás las páginas.', 'imagina-turbo' ), 428 );
+		}
 		$settings->update( $changes );
 		$result = $this->container->get( ConfigCompiler::class )->compile();
+		if ( array_key_exists( 'cache_fragments', $changes ) ) {
+			FragmentCache::flush();
+		}
 		if ( 'wp-rocket' === CacheModule::settings()['adapter'] ) {
 			WpRocketAdapter::flushHtaccess();
 		}
 		$this->container->get( EventLog::class )->log(
 			'cache_coordinator',
 			'settings',
-			isset( $changes['cache_mode'] ) ? EventLog::WARNING : EventLog::INFO,
+			isset( $changes['cache_mode'] ) || true === ( $changes['cache_fragments'] ?? null ) ? EventLog::WARNING : EventLog::INFO,
 			__( 'Ajustes de caché actualizados.', 'imagina-turbo' ),
 			[
 				'user'    => get_current_user_id(),
 				'changes' => $changes,
 				'config'  => $result['ok'],
+			]
+		);
+		return $this->ok( $this->status() );
+	}
+
+	public static function fragmentsVerified(): bool {
+		$last = get_option( FragmentVerifier::OPTION );
+		return is_array( $last ) && true === ( $last['pass'] ?? false ) && (int) ( $last['at'] ?? 0 ) > time() - 7 * DAY_IN_SECONDS;
+	}
+
+	/**
+	 * Compara páginas renderizadas de cero con las mismas servidas desde la caché de fragmentos.
+	 */
+	public function verifyFragments(): \WP_REST_Response {
+		$scanner = $this->container->get( AssetScanner::class );
+		$paths   = $scanner->samplePaths();
+		if ( function_exists( 'wc_get_page_id' ) ) {
+			foreach ( [ 'cart', 'myaccount' ] as $page ) {
+				$link = get_permalink( (int) wc_get_page_id( $page ) );
+				$home = untrailingslashit( home_url() );
+				if ( is_string( $link ) && str_starts_with( $link, $home ) ) {
+					$paths[] = '/' . ltrim( substr( $link, strlen( $home ) ), '/' );
+				}
+			}
+		}
+		$result = ( new FragmentVerifier() )->run( $paths );
+		update_option( FragmentVerifier::OPTION, $result, false );
+		$this->container->get( EventLog::class )->log(
+			'cache_coordinator',
+			'fragments_verify',
+			$result['pass'] ? EventLog::INFO : EventLog::WARNING,
+			$result['pass'] ? __( 'Caché de fragmentos verificada: las páginas son iguales con y sin ella.', 'imagina-turbo' ) : __( 'La verificación de la caché de fragmentos no pasó.', 'imagina-turbo' ),
+			[
+				'user'  => get_current_user_id(),
+				'pages' => array_map( static fn( array $p ): string => $p['path'] . ' ' . $p['result'], $result['pages'] ),
+				'error' => $result['error'],
 			]
 		);
 		return $this->ok( $this->status() );

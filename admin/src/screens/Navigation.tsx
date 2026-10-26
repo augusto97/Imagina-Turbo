@@ -13,7 +13,7 @@ import { ApiError, api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { LazyRenderRule, NavigationSettings, NavigationStatus, RumInsightsData, RumReportData } from '@/lib/types';
+import type { LazyDocument, LazyRenderRule, NavigationSettings, NavigationStatus, RumInsightsData, RumReportData } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const ms = ( v: number | null ) => ( v === null ? '—' : v >= 1000 ? `${ ( v / 1000 ).toFixed( 2 ) } s` : `${ v } ms` );
@@ -51,6 +51,7 @@ export function Navigation() {
 						<SummaryCard report={ data.report } status={ data } />
 					</div>
 					<LazyRenderCard status={ data } />
+					<LazyElementsCard status={ data } />
 					<VitalsCard report={ data.report } />
 					<TtfbCard report={ data.report } />
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
@@ -243,6 +244,145 @@ function LazyRenderCard( { status }: { status: NavigationStatus } ) {
 				</div>
 				{ save.error && <Notice level="error">{ save.error.message }</Notice> }
 			</CardContent>
+		</Card>
+	);
+}
+
+const whereLabel = ( where: string ) => ( { menu: __( 'Menú' ), header: __( 'Cabecera' ), footer: __( 'Pie' ), content: __( 'Contenido' ) } )[ where ] ?? where;
+
+function LazyElementsCard( { status }: { status: NavigationStatus } ) {
+	const client = useQueryClient();
+	const [ docs, setDocs ] = useState<LazyDocument[]>( status.settings.lazy_documents );
+	const [ confirm, setConfirm ] = useState( false );
+	useEffect( () => setDocs( status.settings.lazy_documents ), [ status ] );
+	const save = useAction( ( body: Record<string, unknown> ) => api<NavigationStatus>( 'navigation/settings', 'PUT', body ) );
+	const scan = useAction( () => api<NavigationStatus>( 'navigation/lazy-documents/scan', 'POST' ) );
+	const done = { onSuccess: ( s: NavigationStatus ) => client.setQueryData( [ 'navigation' ], s ) };
+	const toggle = ( on: boolean, withConfirm = false ) =>
+		save.mutate( { lazy_elements: on, confirm: withConfirm }, {
+			...done,
+			onError: ( e ) => {
+				if ( e instanceof ApiError && e.status === 428 ) {
+					setConfirm( true );
+				}
+			},
+			onSettled: () => withConfirm && setConfirm( false ),
+		} );
+	const detected = status.lazy_detected?.docs ?? [];
+	const savedOnly = docs.filter( ( d ) => ! detected.some( ( x ) => x.id === d.id ) );
+	const modeOf = ( id: number ) => docs.find( ( d ) => d.id === id );
+	const setMode = ( id: number, mode: '' | 'v' | 'i', height?: number ) => {
+		const rest = docs.filter( ( d ) => d.id !== id );
+		setDocs( mode === '' ? rest : [ ...rest, { id, mode, height: height ?? modeOf( id )?.height ?? ( mode === 'v' ? 400 : 0 ) } ] );
+	};
+	const suggested = detected.filter( ( d ) => d.suggest !== '' && ! modeOf( d.id ) );
+	const dirty = JSON.stringify( [ ...docs ].sort( ( a, b ) => a.id - b.id ) ) !== JSON.stringify( [ ...status.settings.lazy_documents ].sort( ( a, b ) => a.id - b.id ) );
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:gap-2">
+					<CardTitle>{ __( 'Elementos diferidos (Elementor)' ) }</CardTitle>
+					<Badge tone="amber">{ __( 'Moderado' ) }</Badge>
+				</div>
+				<CardDescription>
+					{ __( 'Las partes que no se ven al cargar (megamenús, pie, carruseles de abajo) se envían dentro de un <template>: el navegador no las convierte en DOM ni descarga sus imágenes hasta que hacen falta. Menos DOM, menos estilo y maquetación, menos imágenes al cargar. Hasta que se muestran no las ven otros scripts, la búsqueda del navegador (Ctrl+F) ni Google: úsalo en contenido sin valor para SEO o repetido en otra parte.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ ! status.elementor && <Notice level="info">{ __( 'Elementor no está activo: no hay nada que diferir.' ) }</Notice> }
+				<Toggle
+					label={ __( 'Activar elementos diferidos' ) }
+					help={ __( 'También en Elementor, por elemento: clase CSS itb-lazy (al acercarse a la pantalla), itb-lazy-interaction (en la primera interacción, para desplegables) e itb-lazy-h600 para reservar 600 px de alto mientras tanto.' ) }
+					checked={ status.settings.lazy_elements }
+					onChange={ ( v ) => toggle( v ) }
+				/>
+				<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+					<Button size="sm" variant="outline" disabled={ scan.isPending || ! status.elementor } onClick={ () => scan.mutate( undefined, done ) }>
+						<RefreshCw className={ scan.isPending ? 'itb:animate-spin' : '' } aria-hidden />
+						{ scan.isPending ? __( 'Detectando…' ) : __( 'Detectar documentos' ) }
+					</Button>
+					{ status.lazy_detected && <span className="itb:text-xs itb:text-zinc-500">{ `${ __( 'Última detección:' ) } ${ formatDate( status.lazy_detected.generated_at, config.locale ) }` }</span> }
+					{ suggested.length > 0 && (
+						<Button size="sm" variant="outline" onClick={ () => setDocs( [ ...docs, ...suggested.map( ( d ) => ( { id: d.id, mode: d.suggest as 'v' | 'i', height: d.suggest === 'v' ? 400 : 0 } ) ) ] ) }>
+							<Sparkles aria-hidden />
+							{ __( 'Usar las sugerencias' ) }
+						</Button>
+					) }
+				</div>
+				{ ( status.lazy_detected?.errors ?? [] ).map( ( e ) => (
+					<Notice key={ e } level="warning">{ e }</Notice>
+				) ) }
+				{ detected.length > 0 && (
+					<div className="itb:overflow-x-auto">
+						<table className="itb:w-full itb:text-left itb:text-xs">
+							<thead className="itb:text-zinc-500">
+								<tr>
+									<th className="itb:py-1 itb:pr-2 itb:font-medium">{ __( 'Documento' ) }</th>
+									<th className="itb:py-1 itb:pr-2 itb:font-medium">{ __( 'Dónde' ) }</th>
+									<th className="itb:py-1 itb:pr-2 itb:font-medium">{ __( 'Tamaño' ) }</th>
+									<th className="itb:py-1 itb:pr-2 itb:font-medium">{ __( 'Etiquetas' ) }</th>
+									<th className="itb:py-1 itb:pr-2 itb:font-medium">{ __( 'Imágenes' ) }</th>
+									<th className="itb:py-1 itb:pr-2 itb:font-medium">{ __( 'Diferir' ) }</th>
+									<th className="itb:py-1 itb:font-medium">{ __( 'Alto reservado' ) }</th>
+								</tr>
+							</thead>
+							<tbody>
+								{ detected.map( ( d ) => {
+									const current = modeOf( d.id );
+									return (
+										<tr key={ d.id } className="itb:border-t itb:border-zinc-100">
+											<td className="itb:py-1.5 itb:pr-2">
+												<span className="itb:font-medium">{ d.title || `#${ d.id }` }</span>
+												<span className="itb:block itb:text-zinc-500">{ `#${ d.id } · ${ d.type } · ${ d.pages } ${ __( 'pág.' ) }` }</span>
+											</td>
+											<td className="itb:py-1.5 itb:pr-2">{ whereLabel( d.where ) }</td>
+											<td className="itb:py-1.5 itb:pr-2 itb:tabular-nums">{ `${ Math.round( d.bytes / 1024 ) } KB` }</td>
+											<td className="itb:py-1.5 itb:pr-2 itb:tabular-nums">{ d.tags }</td>
+											<td className="itb:py-1.5 itb:pr-2 itb:tabular-nums">{ d.imgs }</td>
+											<td className="itb:py-1.5 itb:pr-2">
+												<Select className="itb:h-8" value={ current?.mode ?? '' } onChange={ ( e ) => setMode( d.id, e.target.value as '' | 'v' | 'i' ) } aria-label={ __( 'Diferir' ) }>
+													<option value="">{ __( 'No' ) }</option>
+													<option value="v">{ __( 'Al acercarse' ) }</option>
+													<option value="i">{ __( 'Al interactuar' ) }</option>
+												</Select>
+												{ d.suggest !== '' && ! current && <span className="itb:block itb:text-zinc-500">{ d.suggest === 'i' ? __( 'Sugerido: al interactuar' ) : __( 'Sugerido: al acercarse' ) }</span> }
+											</td>
+											<td className="itb:py-1.5">
+												<Input className="itb:h-8 itb:w-20" type="number" min={ 0 } max={ 3000 } disabled={ ! current } value={ current?.height ?? 0 } onChange={ ( e ) => current && setMode( d.id, current.mode, Math.max( 0, Math.min( 3000, Number( e.target.value ) || 0 ) ) ) } aria-label={ __( 'Alto reservado (px)' ) } />
+											</td>
+										</tr>
+									);
+								} ) }
+							</tbody>
+						</table>
+					</div>
+				) }
+				{ savedOnly.length > 0 && (
+					<p className="itb:text-xs itb:text-zinc-500">
+						{ `${ __( 'También diferidos (no aparecieron en la última detección):' ) } ${ savedOnly.map( ( d ) => `#${ d.id }` ).join( ', ' ) }` }{ ' ' }
+						<button type="button" className="itb:underline" onClick={ () => setDocs( docs.filter( ( d ) => detected.some( ( x ) => x.id === d.id ) ) ) }>
+							{ __( 'Quitar' ) }
+						</button>
+					</p>
+				) }
+				<div>
+					<Button size="sm" disabled={ save.isPending || ! dirty } onClick={ () => save.mutate( { lazy_documents: docs }, done ) }>
+						{ save.isPending ? __( 'Guardando…' ) : __( 'Guardar documentos' ) }
+					</Button>
+				</div>
+				{ ! status.settings.lazy_elements && docs.length > 0 && <Notice level="info">{ __( 'Los documentos elegidos se difieren cuando actives la opción.' ) }</Notice> }
+				{ ( save.error && ! ( save.error instanceof ApiError && save.error.status === 428 ) ) && <Notice level="error">{ save.error.message }</Notice> }
+				{ scan.error && <Notice level="error">{ scan.error.message }</Notice> }
+			</CardContent>
+			<ConfirmDialog
+				open={ confirm }
+				onOpenChange={ setConfirm }
+				title={ __( '¿Activar los elementos diferidos?' ) }
+				description={ __( 'Lo diferido llega al DOM al acercarse o con la primera interacción. Hasta entonces no lo ven otros scripts, la búsqueda del navegador ni Google. Revisa los menús y las páginas después de activarlo.' ) }
+				confirmLabel={ __( 'Activar' ) }
+				pending={ save.isPending }
+				onConfirm={ () => toggle( true, true ) }
+			/>
 		</Card>
 	);
 }

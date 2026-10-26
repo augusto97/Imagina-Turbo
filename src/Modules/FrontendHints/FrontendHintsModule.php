@@ -25,6 +25,7 @@
  *   navegador no las maqueta ni pinta hasta acercarse; en una categoría de WoodMart con 56 productos,
  *   el re-maquetado tras una interacción bajó de 267 a 213 ms (móvil, CPU 4x). Una hoja <style> en el
  *   <head>, solo en las plantillas de cada regla.
+ * - Elementos diferidos de Elementor (0.17.0, moderado, apagado por defecto): ver LazyElements.
  * - El delay de JS y de fuentes de terceros es del plugin de caché.
  *
  * @package ImaginaTurbo
@@ -91,6 +92,7 @@ final class FrontendHintsModule implements ModuleInterface {
 			add_filter( 'embed_oembed_html', [ self::class, 'facade' ], 20, 2 );
 			add_action( 'wp_footer', [ self::class, 'printFacadeAssets' ], 50 );
 		}
+		LazyElements::register( LazyElements::settings() );
 	}
 
 	/**

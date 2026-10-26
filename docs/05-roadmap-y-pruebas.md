@@ -568,3 +568,13 @@ El CLS de las categorías de La Tienda del Pintor (0,31–0,44 en móvil lento) 
   - En Turbo, precarga manual de hasta 3 fuentes (`fonts_manual`) además de la del RUM.
   - Con la hoja en el head y las fuentes precargadas: **CLS 0,000** en 4 de 4 mediciones (Chromium con CPU ×4 y red de 1,6 Mbps, HTML modificado solo en el navegador de pruebas).
 
+## Versión 0.17.0
+
+Menos DOM y menos PHP en las páginas que no salen de la caché, medido primero en La Tienda del Pintor:
+
+- **Perfil del sitio** (cookie de diagnóstico, un administrador): las páginas sin caché tardan 0,9–2,8 s en PHP. En una categoría, 277 ms de `init` y 1,2 s de render; 49 lecturas de entradas una por una de WoodMart (17 ms: la base de datos no es el cuello). JetFormBuilder cuesta 35–45 ms en cada página y solo se usa en un formulario: candidato a carga condicional.
+- **El menú «Categorías» de WoodMart** imprime 10 bloques HTML de Elementor en todas las páginas: 287 KB de los 680 KB de la portada, ~4.900 etiquetas y 92 imágenes. Y cada megamenú cargado por AJAX (`woodmart_load_html_dropdowns`) tarda 1,3 s en PHP la primera vez que un visitante pasa el cursor.
+- **Elementos diferidos de Elementor** (docs/02 módulo 9): esos bloques, fuera del DOM hasta la primera interacción; el pie y el contenido de abajo, hasta acercarse. Por documento o por clase CSS, compatible con la caché de elementos de Elementor.
+- **Caché de fragmentos** (docs/02 módulo 2): los menús de las páginas sin caché y las respuestas AJAX de solo render del tema, desde Redis, con verificación automática antes de activarla.
+- **QUIC.cloud** (revisado en el sitio, solo lectura): los servicios en línea de LiteSpeed Cache no están activados; el CSS único y el crítico están apagados y la cuota gratuita sin usar. Activarlo implica aceptar el servicio de QUIC.cloud: queda como decisión del dueño del sitio. Imagina Turbo no genera CSS crítico (es del plugin de caché).
+

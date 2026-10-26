@@ -2,7 +2,8 @@
 /**
  * Cloudflare: GET /cloudflare/status, POST|DELETE /cloudflare/connect, GET /cloudflare/zone,
  * GET /cloudflare/plan, POST /cloudflare/apply, GET /cloudflare/snapshots,
- * POST /cloudflare/snapshots/{id}/restore, GET /cloudflare/analytics.
+ * POST /cloudflare/snapshots/{id}/restore, GET /cloudflare/analytics, GET /cloudflare/zaraz,
+ * POST /cloudflare/zaraz/scan|apply|revert.
  *
  * Aplicar y restaurar exigen el módulo activo, un dominio permitido y confirmación explícita.
  *
@@ -14,7 +15,11 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Cloudflare\CloudflareService;
+use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Integrations\AnalyticsTags;
+use ImaginaTurbo\Integrations\ZarazBridge;
+use ImaginaTurbo\Modules\PluginFilter\LoopbackClient;
 
 /**
  * Rutas de Cloudflare.
@@ -93,6 +98,123 @@ final class CloudflareController extends Controller {
 			]
 		);
 		$this->route( '/cloudflare/analytics', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->service()->analytics() ) );
+		$this->route( '/cloudflare/zaraz', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->zarazStatus() ) );
+		$this->route( '/cloudflare/zaraz/scan', \WP_REST_Server::CREATABLE, [ $this, 'zarazScan' ] );
+		$this->route(
+			'/cloudflare/zaraz/apply',
+			\WP_REST_Server::CREATABLE,
+			[ $this, 'zarazApply' ],
+			[
+				'ga4'        => [
+					'type'    => 'boolean',
+					'default' => false,
+				],
+				'meta'       => [
+					'type'    => 'boolean',
+					'default' => false,
+				],
+				'meta_token' => [
+					'type'      => 'string',
+					'maxLength' => 500,
+					'default'   => '',
+				],
+				'confirm'    => [
+					'type'    => 'boolean',
+					'default' => false,
+				],
+			]
+		);
+		$this->route(
+			'/cloudflare/zaraz/revert',
+			\WP_REST_Server::CREATABLE,
+			[ $this, 'zarazRevert' ],
+			[
+				'confirm' => [
+					'type'    => 'boolean',
+					'default' => false,
+				],
+			]
+		);
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	private function zarazStatus(): array {
+		// Del ajuste, no de la config cargada al empezar el request (que no ve un cambio recién hecho).
+		$takeover = $this->container->get( Settings::class )->get( 'zaraz_takeover', [] );
+		$takeover = is_array( $takeover ) ? $takeover : [];
+		return $this->service()->zarazStatus(
+			[
+				'ga4'  => true === ( $takeover['ga4'] ?? false ),
+				'meta' => true === ( $takeover['meta'] ?? false ),
+			]
+		) + [ 'cloudflare_module' => null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' ) ];
+	}
+
+	/**
+	 * Busca los ids de analítica en el HTML de la portada (cualquier origen: tema, fragmentos, plugins).
+	 */
+	public function zarazScan(): \WP_REST_Response|\WP_Error {
+		$reply = LoopbackClient::request( 'GET', '/?itb_nc=' . strtolower( wp_generate_password( 12, false ) ), '', '' );
+		if ( is_string( $reply ) ) {
+			return $this->error( 'itb_loopback', $reply, 502 );
+		}
+		update_option(
+			'itb_zaraz_scan',
+			[
+				'at'  => time(),
+				'ids' => AnalyticsTags::scanHtml( $reply['body'] ),
+			],
+			false
+		);
+		return $this->ok( $this->zarazStatus() );
+	}
+
+	public function zarazApply( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$check = $this->canWrite( $request );
+		if ( null !== $check ) {
+			return $check;
+		}
+		$ga4  = true === $request->get_param( 'ga4' );
+		$meta = true === $request->get_param( 'meta' );
+		if ( ! $ga4 && ! $meta ) {
+			return $this->error( 'itb_zaraz_none', __( 'Elige Google Analytics, Meta o los dos.', 'imagina-turbo' ), 400 );
+		}
+		$result = $this->service()->zarazApply( $ga4, $meta, trim( (string) $request->get_param( 'meta_token' ) ) );
+		if ( ! $result['ok'] ) {
+			return $this->error( 'itb_zaraz', $result['error'], 400 );
+		}
+		// Las etiquetas del sitio se apagan solo después de que Zaraz quedó configurado.
+		ZarazBridge::setTakeover(
+			$this->container,
+			[
+				'ga4'  => $ga4,
+				'meta' => $meta,
+			],
+			'zaraz'
+		);
+		return $this->ok( [ 'result' => $result ] + $this->zarazStatus() );
+	}
+
+	/**
+	 * Las etiquetas del sitio vuelven primero (aunque Cloudflare no responda); después se quitan las
+	 * herramientas propias de Zaraz.
+	 */
+	public function zarazRevert( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		if ( true !== $request->get_param( 'confirm' ) ) {
+			return $this->error( 'itb_confirm', __( 'Confirma: las etiquetas del sitio vuelven y se quitan de Zaraz las herramientas de Imagina Turbo.', 'imagina-turbo' ), 428 );
+		}
+		ZarazBridge::setTakeover(
+			$this->container,
+			[
+				'ga4'  => false,
+				'meta' => false,
+			],
+			'zaraz_revert'
+		);
+		$result = $this->service()->zarazRevert();
+		return $this->ok( [ 'result' => $result ] + $this->zarazStatus() );
 	}
 
 	public function connect( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {

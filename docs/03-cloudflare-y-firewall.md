@@ -11,7 +11,8 @@
   - Zone → Zone WAF: Edit (reglas personalizadas y rate limiting)
   - Zone → Cache Purge: Purge
   - Zone → Analytics: Read
-  - Zone → Config Rules / Transform Rules: Edit (solo si se usan; ver 4.3)
+  - Zone → Config Rules / Transform Rules: Edit (solo si se usan; ver 4.3 y 4.5)
+  - Zone → Zaraz: Edit (opcional, solo para la sección 10)
 - El admin muestra un enlace a la plantilla de creación de token con instrucciones paso a paso.
 - `TokenVault`: cifrar con `sodium_crypto_secretbox` usando una clave derivada de `AUTH_KEY` y `SECURE_AUTH_SALT`. Guardar en una opción autoload = no. Mostrar solo los últimos 4 caracteres. Nunca incluir en exportaciones.
   - **Rotación de salts**: si alguien cambia las claves de `wp-config.php` (plugins de seguridad, limpieza tras un hackeo), el token ya no se puede descifrar. Guardar junto al cifrado un identificador de la clave (`hash` corto de la clave derivada); si no coincide, marcar Cloudflare como "desconectado: reconectar el token", registrar el evento y no reintentar.
@@ -94,7 +95,7 @@ and not (http.request.uri.path eq "/mi-cuenta" or starts_with(http.request.uri.p
 - `itb_bypass` (cookie del kill switch por admin) se excluye para que el admin vea el origen sin el plugin, no la copia del edge.
 
 - Si el módulo `WooCart` está **inactivo**, agregar `and not http.cookie contains "woocommerce_items_in_cart"`.
-- Agregar las cookies de variación/bypass de la matriz que apliquen al sitio (moneda, idioma, consentimiento). En el edge, una cookie de variación se trata como **bypass** salvo en planes que permitan cookies en la llave de caché.
+- Agregar las cookies de variación/bypass de la matriz que apliquen al sitio (moneda, idioma, consentimiento). En el edge, una cookie de variación se trata como **bypass** salvo que estén activas las variantes por cookie (4.5, 0.18.0).
 - Excluir `s=` solo si Imagina Search no marca sus resultados como cacheables.
 - Controlar la longitud de la expresión: hay un límite por plan. Si se excede, agrupar rutas con `starts_with` o mover exclusiones al origen (que manda `no-store`).
 
@@ -128,6 +129,25 @@ Objetivo: que `?fbclid=...` o `?utm_source=...` no generen copias nuevas. Estrat
 | Bloqueo de crawlers de IA | Decisión del cliente; mostrar la opción gestionada de Cloudflare |
 
 Endpoint general: `GET/PATCH /zones/{zone_id}/settings/{setting}` con cuerpo `{"value": …}`. *Verificado:* `http3`, `early_hints`, `rocket_loader` (`on`/`off`), `browser_cache_ttl` (0 = respetar cabeceras, todos los planes), `ssl` y `always_use_https` (solo lectura). El `GET`/`PATCH` masivo de `/settings` está obsoleto: se leen uno por uno. Smart Tiered Cache: `GET/PATCH /zones/{zone_id}/cache/tiered_cache_smart_topology_enable` `{"value":"on"}`, todos los planes. Rocket Loader se propone con riesgo moderado (apagarlo puede cambiar un sitio que lo usa a propósito).
+
+### 4.5 Variantes por cookie en el edge (0.18.0, `cache_edge_variants`)
+
+Sin esto, una visita con la cookie de consentimiento, moneda o idioma (cookies `vary` de la matriz) no se sirve desde el edge: la regla del HTML las trata como bypass. En una tienda con banner de cookies, eso es casi todo el tráfico que vuelve.
+
+> **Verificado en la documentación de Cloudflare (2026-10-26):**
+> - La llave de caché por cookie (`cache_key.custom_key.cookie`) y `cf.cacheKey` en Workers son solo Enterprise.
+> - Las Cache Rules tienen `vary` en todos los planes: `{ default: { action }, headers: { nombre: { action: normalize | passthrough | bypass } } }`. El origen tiene que mandar `Vary` con esa cabecera.
+> - Las Transform Rules de cabeceras de petición (fase `http_request_late_transform`, acción `rewrite`, `headers.{nombre}.operation = set` con `expression`) existen en todos los planes y pueden leer `http.request.cookies`. Una cookie ausente es nula: `coalesce(x, "")` la convierte en cadena vacía.
+
+**Implementado:**
+
+- Regla de transformación `itb-…-variant` (fase `http_request_late_transform`, comparte el límite de reglas Transform): escribe `x-itb-variant` = `concat("v1", "|", coalesce(http.request.cookies["c1"][0], ""), "|", …)` con las cookies de variación del sitio (máximo 10). Se escribe siempre, así una visita no puede elegir la variante mandando la cabecera a mano.
+- Con variantes, la regla del HTML deja de excluir esas cookies y usa `edge_ttl: bypass_by_default` (solo guarda lo que el origen marca) y `vary: { default: bypass, headers: { accept-encoding: normalize, x-itb-variant: passthrough } }`. Cualquier otra cabecera que el origen ponga en `Vary` no se guarda.
+- El origen (`HeaderEmitter`, modo cabeceras) añade `Vary: X-Itb-Variant` a cada respuesta cacheable, y el coordinador deja de tratar esas cookies como bypass.
+- Activar o apagar las variantes purga todo (las copias guardadas tienen otra llave).
+- Requisitos: módulo Cloudflare, coordinador en modo cabeceras y al menos una cookie de variación detectada. Riesgo moderado, apagado por defecto (Caché → Variantes por cookie).
+
+**Decisión: sin Worker.** Las islas de un Worker (HTML del edge con los trozos por visita cosidos en el borde) eran la forma de cachear páginas con cookies de variación. Con `vary` y la regla de cabeceras se consigue lo mismo sin pagar Workers Paid (5 USD al mes por cuenta), sin un punto de fallo nuevo (la API no permite elegir fail open por ruta; solo el panel) y sin código en el borde que mantener. El carrito, el único trozo realmente por visita, ya va por Store API (`WooCart`).
 
 ## 5. Purga
 
@@ -266,3 +286,30 @@ El plugin no toca la configuración de Access: su token no tiene permisos de Zer
 | Acción `log` en WAF | No | No | No (solo Enterprise) |
 
 El plugin adapta las plantillas: en Free combina condiciones en menos reglas; en planes superiores separa reglas para tener mejor visibilidad.
+
+## 10. Zaraz: Google Analytics 4 y Meta desde Cloudflare (0.18.0)
+
+Las etiquetas de Google Analytics (Site Kit) y del píxel de Meta (Meta for WooCommerce) son el JavaScript de terceros más pesado de una tienda. Zaraz las ejecuta en Cloudflare: el navegador carga un script pequeño y los envíos a Google y Meta salen desde el borde. Gratis hasta 1 millón de eventos al mes por cuenta.
+
+> **Verificado en la documentación y el esquema de la API (2026-10-26):**
+> - `GET /zones/{zone_id}/settings/zaraz/config` devuelve la configuración sin el valor de las variables secretas; `PUT` exige la configuración completa (`tools`, `triggers`, `variables`, `settings`, `dataLayer`, `debugKey`, `zarazVersion`), no hay `PATCH`. `GET/PUT …/workflow` (`"realtime"` o `"preview"`), `POST …/publish` publica la vista previa y `GET …/export` devuelve la publicada con los secretos.
+> - Herramienta de Meta: componente `facebook-pixel`, ajustes `property` (ID del píxel) y `accessToken` (obligatorio: la API de conversiones). GA4: ajuste `tid` (ID de medición); el valor exacto del campo `component` no está documentado (se usa `google-analytics-4`, el espacio de nombres de su manifiesto).
+> - E-commerce: `zaraz.ecommerce("Evento", datos)` con `settings.ecommerce` global y en cada herramienta, sin disparadores. Eventos usados: `Product Viewed`, `Product Added`, `Cart Viewed`, `Checkout Started`, `Order Completed`.
+> - Permiso del token: Zone → Zaraz → Edit.
+
+**Implementado** (`Cloudflare\Zaraz`, `Integrations\ZarazBridge`, `Integrations\AnalyticsTags`, pantalla Cloudflare → Zaraz):
+
+1. **Detectar**: los IDs configurados en Site Kit (GA4 y GTM), WooCommerce Google Analytics y Meta for WooCommerce, más un escaneo de la portada (`POST /cloudflare/zaraz/scan`) que encuentra `G-…`, `GT-…`, `GTM-…` y píxeles de Meta impresos por el tema u otros plugins.
+2. **Proponer**: el admin elige GA4, Meta o ambos. Meta pide el token de la API de conversiones (se usa solo para escribirlo en Zaraz, no se guarda en WordPress).
+3. **Aplicar**: lee la configuración (o la exportada, si tiene secretos), añade o reutiliza las herramientas (`itbga4`, `itbmeta`, con la acción de vista de página), activa el e-commerce y la inyección automática, escribe con `PUT` y publica si la zona trabaja en vista previa. Una herramienta del mismo ID añadida a mano se reutiliza en vez de duplicarla. No va a la tabla de snapshots (su restauración solo sabe de reglas y ajustes): la reversibilidad (regla 4) la dan el botón de revertir, que quita solo lo propio y devuelve el interruptor de e-commerce como estaba, y el historial de versiones de Zaraz en Cloudflare (`GET …/history`), que guarda cada cambio. Cada aplicación y reversión queda en el registro de eventos.
+4. **En el sitio** (con la herramienta ya en Zaraz): `googlesitekit_analytics-4_tag_blocked` y `facebook_for_woocommerce_integration_pixel_enabled` (falso apaga píxel y API de conversiones del plugin) en todas las peticiones; y en la ficha, el carrito, el pago y la página de pedido recibido, los datos de e-commerce más `itb-zaraz.js` (1,3 KB minificado) que los envía y arma «Product Added» (formulario de la ficha y `added_to_cart` de WooCommerce). El pedido solo se informa con su clave correcta y una sola vez por navegador.
+   - **No se condiciona a `CF-Ray`**: el rastreador de LSCache y el recalentado visitan el origen directo y comparten la caché de páginas con las visitas que llegan por Cloudflare. Una página guardada con las etiquetas del sitio, servida con Zaraz activo, contaría dos veces.
+5. **Vigilar**: la tarea horaria comprueba que las herramientas sigan en Zaraz, activas, con la inyección automática y la zona sin pausar. Si no, devuelve las etiquetas del sitio (apaga el reemplazo, recompila y purga) y lo registra.
+6. **Revertir**: `POST /cloudflare/zaraz/revert` apaga primero el reemplazo en el sitio y después quita las herramientas propias de Zaraz.
+
+**Límites conocidos**:
+
+- **Google Tag Manager** no se reemplaza: un contenedor puede llevar cualquier cosa. Si el sitio usa GTM además de GA4, el admin lo avisa para que se revise a mano antes de mover GA4 (si el contenedor también envía a GA4, contaría dos veces).
+- Quitar el proxy de Cloudflare del dominio (nube gris) no se detecta (leer DNS no está en los permisos): hay que revertir Zaraz antes. La pantalla lo dice.
+- Más de 1 millón de eventos al mes en el plan gratuito deja Zaraz sin enviar hasta el ciclo siguiente: el panel de Cloudflare muestra el consumo.
+

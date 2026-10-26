@@ -49,7 +49,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/plugin-filter/rules/{id}/step` · `/recheck` | Avanza el experimento (presupuesto de ~12 s; se repite hasta terminar) · revisa una regla activa con 5 pares |
 | POST / DELETE | `/plugin-filter/rules/{id}/disable` · `/plugin-filter/rules/{id}` | Desactivar · eliminar (recompila y registra) |
 | GET | `/cache/status` | Adaptador detectado, ajustes, cola, última sincronización, recalentado |
-| PUT | `/cache/settings` | Modo (`sync` / `headers`), TTL, SWR, SIE, refresco de nonces, recalentado y caché de fragmentos (`fragments`, 0.17.0). Pasar a `headers` exige `confirm: true` (428 sin ella); activar los fragmentos también, salvo que haya una verificación aprobada en los últimos 7 días |
+| PUT | `/cache/settings` | Modo (`sync` / `headers`), TTL, SWR, SIE, refresco de nonces, recalentado, caché de fragmentos (`fragments`, 0.17.0) y variantes por cookie en el edge (`edge_variants`, 0.18.0, purga todo al cambiar). Pasar a `headers` exige `confirm: true` (428 sin ella); activar los fragmentos también, salvo que haya una verificación aprobada en los últimos 7 días |
 | POST | `/cache/fragments/verify` | Compara cada página de muestra (más carrito y cuenta) renderizada de cero con la misma servida con los menús de la caché de fragmentos (loopback con cookie firmada `itb_frag`, `?itb_frag=b\|f\|h`). Guarda el resultado en `itb_frag_verify` y lo devuelve en `/cache/status` (`fragments.verify`) |
 | POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`; `all` exige `confirm: true`) |
 | POST | `/cache/warm` | `seed` (recalentar el sitemap) / `stop` (vaciar la cola de recalentado) |
@@ -61,6 +61,10 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/cloudflare/apply` | `{ids, confirm}`: valida con `dry_run`, guarda snapshot, aplica y restaura solo si algo falla. Exige módulo activo y dominio permitido (409) y `confirm` (428) |
 | GET / POST | `/cloudflare/snapshots` · `/cloudflare/snapshots/{id}/restore` | Historial (50 por zona) · restaurar (`confirm`), guardando antes un snapshot del estado actual |
 | POST | `/cloudflare/remove-all` | Quitar todo lo del plugin de la zona (`confirm`, 428): reglas propias y ajustes devueltos a su valor original, con snapshot previo. No exige el módulo activo. `DELETE /cloudflare/connect` exige `confirm` si quedan reglas o ajustes (`footprint` en `/cloudflare/status`) |
+| GET | `/cloudflare/zaraz` | Zaraz (0.18.0): IDs detectados en los plugins y en el último escaneo, herramientas actuales en Zaraz (propias o a mano), e-commerce, inyección automática, permiso del token y qué reemplaza hoy |
+| POST | `/cloudflare/zaraz/scan` | Escanea la portada (petición loopback) en busca de GA4, etiqueta de Google, GTM y píxeles de Meta |
+| POST | `/cloudflare/zaraz/apply` | `{ga4, meta, meta_token, confirm}` (428 sin `confirm`): escribe las herramientas en Zaraz, publica si la zona trabaja en vista previa y, si salió bien, apaga las etiquetas del sitio (recompila y purga) |
+| POST | `/cloudflare/zaraz/revert` | `{confirm}`: devuelve primero las etiquetas del sitio y después quita las herramientas propias de Zaraz |
 | GET | `/cloudflare/analytics` | Peticiones de las últimas 24 h por estado de caché y rutas que más llegan al origen (se renueva cada hora) |
 | GET | `/firewall/status` | Reglas elegidas, cambios pendientes del firewall en la zona (fases WAF y rate limit), notas del plan, eventos guardados, origen cerrado (muestras de 7 días), IP real, estado del `.htaccess` y su bloque |
 | PUT | `/firewall/settings` | `{rules: {exploits, surface, bots}, ratelimit}` (recompila; se aplican desde `/cloudflare/apply`) |
@@ -105,7 +109,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 
 | Opción | Contenido |
 |---|---|
-| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write`. 0.16.0–0.17.0: `late_styles`, `fonts_manual`, `lazy_elements`, `lazy_documents`, `cache_fragments` |
+| `itb_settings` | Ajustes de todos los módulos (JSON validado por esquema). Fase 3: `woo_count_selectors`, `woo_total_selectors` (hasta 20 selectores CSS validados) y `woo_recently_viewed`. Fase 4: `shield_*`, `tweaks` (id → bool), `tweak_revisions`, `tweak_autosave`, `firewall_rules`, `firewall_ratelimit`. Fase 6: `rum_rate`, `spec_*`, `view_transitions`, `hints_lcp`, `hints_facades`. 0.14.3–0.15.0: `delay_js_scope`, `lsdelay_timeout`, `hints_fonts`, `ai_write`. 0.16.0–0.17.0: `late_styles`, `fonts_manual`, `lazy_elements`, `lazy_documents`, `cache_fragments`. 0.18.0: `cache_edge_variants`, `zaraz_takeover` (`{ga4, meta}`, lo escribe solo el flujo de Zaraz) |
 | `itb_cf_token` | Token cifrado (`sodium_crypto_secretbox`, clave derivada de `AUTH_KEY` + `SECURE_AUTH_SALT`), id corto de la clave para detectar rotación, últimos 4 caracteres |
 | `itb_cf_state` | Zona, cuenta, plan, permisos de lectura detectados y, por regla propia, el hash de cómo quedó en Cloudflare tras aplicarla (deriva) |
 | `itb_site_key` | Clave del sitio para el hub |
@@ -116,6 +120,8 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_warm_state` | Estado del recalentado (contadores, última pausa por carga) |
 | `itb_cf_analytics` | Últimas analíticas del edge (24 h) |
 | `itb_cf_drift` | Reglas propias detectadas como modificadas a mano (para avisar una sola vez) |
+| `itb_zaraz_state` | Zaraz (0.18.0): IDs que Turbo pasó a Zaraz, herramientas propias escritas, estado previo del e-commerce, si se publicó y cuándo |
+| `itb_zaraz_scan` | Último escaneo de la portada (IDs de GA4, etiqueta de Google, GTM y Meta encontrados en el HTML) |
 | `itb_cf_firewall` | Últimos eventos del firewall (24 h) |
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |

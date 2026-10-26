@@ -8,7 +8,9 @@
  * Implementa lo que usa el plugin, con la forma documentada (verificada el 2026-10-13):
  * zonas, verificación de tokens, rulesets de fase (entrypoint 404 si no existe, PUT, reglas con ref
  * y position, ?dry_run=true con cupos por plan), ajustes de zona, Smart Tiered Cache, purga (con el
- * límite de Free: 5 por minuto, 429 y código 1134) y GraphQL con datos fijos.
+ * límite de Free: 5 por minuto, 429 y código 1134), GraphQL con datos fijos y, desde la 0.18.0, la fase
+ * de cabeceras (http_request_late_transform) y la configuración de Zaraz (config, workflow, publish,
+ * export).
  *
  * Control (sin autenticación, solo para la prueba):
  * - POST /__mock/reset   {token, zone_name, plan, rules?: {phase: [regla...]}, settings?: {...}}
@@ -28,15 +30,16 @@ if ( ! is_dir( $dir ) ) {
 $file = $dir . '/state.json';
 
 const PLAN_LIMITS = [
-	'free'       => [ 'http_request_cache_settings' => 10, 'http_request_transform' => 10, 'http_request_firewall_custom' => 5, 'http_ratelimit' => 1 ],
-	'pro'        => [ 'http_request_cache_settings' => 25, 'http_request_transform' => 25, 'http_request_firewall_custom' => 20, 'http_ratelimit' => 2 ],
-	'business'   => [ 'http_request_cache_settings' => 50, 'http_request_transform' => 50, 'http_request_firewall_custom' => 100, 'http_ratelimit' => 5 ],
-	'enterprise' => [ 'http_request_cache_settings' => 300, 'http_request_transform' => 300, 'http_request_firewall_custom' => 1000, 'http_ratelimit' => 100 ],
+	'free'       => [ 'http_request_cache_settings' => 10, 'http_request_transform' => 10, 'http_request_late_transform' => 10, 'http_request_firewall_custom' => 5, 'http_ratelimit' => 1 ],
+	'pro'        => [ 'http_request_cache_settings' => 25, 'http_request_transform' => 25, 'http_request_late_transform' => 25, 'http_request_firewall_custom' => 20, 'http_ratelimit' => 2 ],
+	'business'   => [ 'http_request_cache_settings' => 50, 'http_request_transform' => 50, 'http_request_late_transform' => 50, 'http_request_firewall_custom' => 100, 'http_ratelimit' => 5 ],
+	'enterprise' => [ 'http_request_cache_settings' => 300, 'http_request_transform' => 300, 'http_request_late_transform' => 300, 'http_request_firewall_custom' => 1000, 'http_ratelimit' => 100 ],
 ];
 
 const PHASE_ACTIONS = [
 	'http_request_cache_settings'  => [ 'set_cache_settings' ],
 	'http_request_transform'       => [ 'rewrite' ],
+	'http_request_late_transform'  => [ 'rewrite' ],
 	'http_request_firewall_custom' => [ 'block', 'managed_challenge', 'js_challenge', 'challenge', 'skip', 'log' ],
 	'http_ratelimit'               => [ 'block', 'managed_challenge', 'js_challenge', 'challenge', 'log' ],
 ];
@@ -164,6 +167,7 @@ if ( '/__mock/reset' === $uri ) {
 			'id'      => $body['zone_id'] ?? '023e105f4ecef8ad9ca31a8372d0c353',
 			'name'    => $body['zone_name'] ?? 'example.com',
 			'status'  => 'active',
+			'paused'  => (bool) ( $body['paused'] ?? false ),
 			'account' => [ 'id' => '01a7362d577a6c3019a474fd6f485823', 'name' => 'Cuenta de prueba' ],
 			'plan'    => [ 'id' => 'p', 'name' => ucfirst( $plan ) . ' Website', 'legacy_id' => $plan ],
 		],
@@ -183,6 +187,12 @@ if ( '/__mock/reset' === $uri ) {
 		'purges'   => [],
 		'calls'    => [],
 	];
+	// Zaraz: {zaraz: {config, workflow}} para partir de una configuración; zaraz_no_publish simula un
+	// token sin permiso de publicar.
+	if ( is_array( $body['zaraz'] ?? null ) ) {
+		$state['zaraz'] = $body['zaraz'] + [ 'published' => 0 ];
+	}
+	$state['zaraz_no_publish'] = ! empty( $body['zaraz_no_publish'] );
 	foreach ( $body['rules'] ?? [] as $phase => $rules ) {
 		$state['rulesets'][ $phase ] = [
 			'id'    => new_id(),
@@ -259,6 +269,62 @@ if ( '' !== ( $state['fail'] ?? '' ) && $method . ' ' . $rest === $state['fail']
 	}
 	save_state( $file, $state );
 	fail( 500, 10001, 'Internal error (simulado)' );
+}
+
+// Detalle de la zona (la salud de Zaraz mira si está en pausa).
+if ( '' === $rest && 'GET' === $method ) {
+	reply( 200, $state['zone'] );
+}
+
+// Zaraz (0.18.0): configuración completa (PUT exige los campos obligatorios), modo de trabajo,
+// publicar y exportar. GET /config omite el valor de las variables secretas.
+if ( preg_match( '#^/settings/zaraz/(config|workflow|publish|export)$#', $rest, $z ) ) {
+	$zaraz = $state['zaraz'] ?? [ 'config' => [ 'tools' => (object) [], 'triggers' => (object) [], 'variables' => (object) [], 'settings' => [ 'autoInjectScript' => true ], 'dataLayer' => true, 'debugKey' => 'mock', 'zarazVersion' => 1 ], 'workflow' => 'realtime', 'published' => 0 ];
+	if ( 'config' === $z[1] && 'PUT' === $method ) {
+		foreach ( [ 'tools', 'triggers', 'variables', 'settings', 'dataLayer', 'debugKey', 'zarazVersion' ] as $key ) {
+			if ( ! array_key_exists( $key, $body ) ) {
+				fail( 400, 1001, 'config.' . $key . ' is required' );
+			}
+		}
+		if ( ! array_key_exists( 'autoInjectScript', (array) $body['settings'] ) ) {
+			fail( 400, 1001, 'settings.autoInjectScript is required' );
+		}
+		foreach ( (array) $body['tools'] as $id => $tool ) {
+			foreach ( [ 'enabled', 'blockingTriggers', 'name', 'defaultFields', 'component', 'settings', 'permissions', 'type' ] as $key ) {
+				if ( ! array_key_exists( $key, (array) $tool ) ) {
+					fail( 400, 1001, 'tools.' . $id . '.' . $key . ' is required' );
+				}
+			}
+		}
+		$zaraz['config'] = $body;
+		$state['zaraz']  = $zaraz;
+		save_state( $file, $state );
+		reply( 200, $body );
+	}
+	if ( 'config' === $z[1] || 'export' === $z[1] ) {
+		$config = $zaraz['config'];
+		if ( 'config' === $z[1] ) {
+			foreach ( (array) ( $config['variables'] ?? [] ) as $k => $v ) {
+				if ( 'secret' === ( $v['type'] ?? '' ) ) {
+					unset( $config['variables'][ $k ]['value'] );
+				}
+			}
+		}
+		reply( 200, $config );
+	}
+	if ( 'workflow' === $z[1] ) {
+		reply( 200, $zaraz['workflow'] );
+	}
+	if ( 'publish' === $z[1] && 'POST' === $method ) {
+		if ( ! empty( $state['zaraz_no_publish'] ) ) {
+			fail( 403, 10000, 'Authentication error' );
+		}
+		$zaraz['published'] = (int) $zaraz['published'] + 1;
+		$state['zaraz']     = $zaraz;
+		save_state( $file, $state );
+		reply( 200, 'Config has been published successfully' );
+	}
+	fail( 405, 10000, 'Method not allowed' );
 }
 
 // Ajustes.

@@ -26,6 +26,8 @@ final class SiteContext {
 	 * @param list<string>               $ignoreParams   Parámetros de campañas.
 	 * @param list<string>               $stagingDomains Sufijos de dominios de staging.
 	 * @param list<string>               $webhookPaths   Rutas de webhooks de pasarelas (fase 4).
+	 * @param list<string>               $varyCookies    Cookies de variación con nombre exacto (moneda, idioma, consentimiento).
+	 * @param bool                       $edgeVariants   Variantes por cookie en el edge (0.18.0): esas cookies ya no impiden la caché.
 	 */
 	public function __construct(
 		public readonly string $host,
@@ -41,6 +43,8 @@ final class SiteContext {
 		public readonly bool $xmlrpcRequired = false,
 		public readonly array $webhookPaths = [],
 		public readonly bool $deviceCache = false,
+		public readonly array $varyCookies = [],
+		public readonly bool $edgeVariants = false,
 	) {
 	}
 
@@ -55,8 +59,16 @@ final class SiteContext {
 			}
 		}
 
-		$cookies = $list( $get( 'bypass_cookies', [] ) );
-		$cookies = array_merge( $cookies, $list( $get( 'vary_cookies', [] ) ) );
+		$valid    = static fn( string $c ): bool => 1 === preg_match( '/^[A-Za-z0-9_\-.]{2,80}$/', $c );
+		$cache    = CacheModule::settings();
+		$headers  = null !== $config && $config->moduleEnabled( 'cache_coordinator' ) && 'headers' === $cache['mode'] && $cache['edge_html'];
+		$vary     = $list( $get( 'vary_cookies', [] ) );
+		$exact    = array_values( array_unique( array_filter( $vary, $valid ) ) );
+		$variants = $headers && $cache['edge_variants'] && [] !== $exact;
+		$cookies  = $list( $get( 'bypass_cookies', [] ) );
+		// Con variantes en el edge, las cookies de nombre exacto entran en la llave (cabecera x-itb-variant)
+		// en lugar de impedir la caché; las que son un prefijo siguen impidiéndola.
+		$cookies = array_merge( $cookies, $variants ? array_values( array_diff( $vary, $exact ) ) : $vary );
 		$woo     = null !== $config && $config->moduleEnabled( 'woo_cart' );
 		if ( ! $woo ) {
 			// Sin el carrito por Store API, tener carrito impide la caché (docs/03, 4.1).
@@ -78,12 +90,10 @@ final class SiteContext {
 		$staging = array_values( array_unique( array_merge( $staging, is_array( $custom ) ? array_values( array_filter( $custom, 'is_string' ) ) : [] ) ) );
 
 		$requires = (array) $get( 'requires', [] );
-		$cache    = CacheModule::settings();
 		$prefix   = $get( 'tags', [] );
 		$prefix   = is_array( $prefix ) && is_string( $prefix['prefix'] ?? null ) && '' !== $prefix['prefix'] ? $prefix['prefix'] : 'site';
 
-		$headers = null !== $config && $config->moduleEnabled( 'cache_coordinator' ) && 'headers' === $cache['mode'] && $cache['edge_html'];
-		$xmlrpc  = isset( $requires['xmlrpc'] ) && true === $requires['xmlrpc'];
+		$xmlrpc = isset( $requires['xmlrpc'] ) && true === $requires['xmlrpc'];
 
 		return new self(
 			$host,
@@ -99,6 +109,8 @@ final class SiteContext {
 			$xmlrpc,
 			$list( $requires['webhook_paths'] ?? [] ),
 			$cache['mobile_split'],
+			$exact,
+			$variants,
 		);
 	}
 

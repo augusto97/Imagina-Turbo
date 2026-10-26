@@ -66,6 +66,7 @@ use ImaginaTurbo\Repository\PurgeQueueRepository;
 use ImaginaTurbo\Repository\SampleRepository;
 use ImaginaTurbo\Repository\SnapshotRepository;
 use ImaginaTurbo\Integrations\Abilities;
+use ImaginaTurbo\Integrations\ZarazBridge;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
 
@@ -162,7 +163,21 @@ final class Plugin {
 			fn() => $this->whenActive(
 				function (): void {
 					if ( null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' ) ) {
-						$this->container->get( CloudflareService::class )->hourly();
+						$cloudflare = $this->container->get( CloudflareService::class );
+						$cloudflare->hourly();
+						// Si alguien quitó de Zaraz lo que reemplaza a las etiquetas del sitio, vuelven (0.18.0).
+						$takeover = ZarazBridge::compiled();
+						if ( ( $takeover['ga4'] || $takeover['meta'] ) && false === $cloudflare->zarazHealthy( $takeover ) ) {
+							ZarazBridge::setTakeover(
+								$this->container,
+								[
+									'ga4'  => false,
+									'meta' => false,
+								],
+								'zaraz_missing'
+							);
+							$this->container->get( EventLog::class )->warning( 'cloudflare', 'zaraz_missing', __( 'Zaraz ya no tiene Google Analytics o Meta, está apagado o la zona de Cloudflare está en pausa: las etiquetas del sitio vuelven a imprimirse.', 'imagina-turbo' ) );
+						}
 					}
 				}
 			)

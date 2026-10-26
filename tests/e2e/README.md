@@ -63,7 +63,7 @@ ITB_CF_MOCK_DIR=/tmp/itb-cf php -S 127.0.0.1:8098 tests/e2e/mock-cloudflare.php
 
 En `wp-config.php` del sitio de pruebas: `define( 'ITB_CF_API_BASE', 'http://127.0.0.1:8098/client/v4' );`. Con esa constante la pantalla muestra el aviso «Conectado a un simulador» y la búsqueda de zona acepta el host tal cual, aunque sea una IP.
 
-El simulador reproduce la forma documentada de la API: zonas, verificación de tokens, rulesets de fase (404 si no existen, `PUT`, reglas con `ref` y `position`, `?dry_run=true` con cupos por plan), ajustes, Smart Tiered Cache, purga con el límite de Free (5 por minuto, 429, código 1134) y GraphQL con datos fijos. Endpoints de control: `/__mock/reset`, `/__mock/state`, `/__mock/edit` (cambiar una regla «a mano») y `/__mock/fail` (forzar errores 500).
+El simulador reproduce la forma documentada de la API: zonas, verificación de tokens, rulesets de fase (404 si no existen, `PUT`, reglas con `ref` y `position`, `?dry_run=true` con cupos por plan), ajustes, Smart Tiered Cache, purga con el límite de Free (5 por minuto, 429, código 1134), GraphQL con datos fijos, el detalle de la zona (`paused` en el reset la pausa) y Zaraz (0.18.0: `config` con los campos obligatorios en `PUT`, `workflow`, `publish` y `export`; `zaraz` en el reset parte de una configuración y `zaraz_no_publish` hace fallar la publicación con 403). Endpoints de control: `/__mock/reset`, `/__mock/state`, `/__mock/edit` (cambiar una regla «a mano») y `/__mock/fail` (forzar errores 500).
 
 La prueba del admin incluye Cloudflare si se define `ITB_CF_MOCK=http://127.0.0.1:8098`.
 

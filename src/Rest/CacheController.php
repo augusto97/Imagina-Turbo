@@ -13,6 +13,7 @@ use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Modules\AssetManager\AssetScanner;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\CacheAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\AjaxFragments;
@@ -64,6 +65,7 @@ final class CacheController extends Controller {
 				'nonce_refresh' => [ 'type' => 'boolean' ],
 				'warm'          => [ 'type' => 'boolean' ],
 				'fragments'     => [ 'type' => 'boolean' ],
+				'edge_variants' => [ 'type' => 'boolean' ],
 				'confirm'       => [
 					'type'    => 'boolean',
 					'default' => false,
@@ -133,8 +135,8 @@ final class CacheController extends Controller {
 		}
 		$queue = $this->container->get( PurgeQueueRepository::class )->counts();
 		return [
-			'enabled'   => $enabled,
-			'settings'  => [
+			'enabled'      => $enabled,
+			'settings'     => [
 				'mode'          => $settings->get( 'cache_mode', 'sync' ),
 				'edge_ttl'      => $settings->get( 'cache_edge_ttl', DAY_IN_SECONDS ),
 				'swr'           => $settings->get( 'cache_swr', DAY_IN_SECONDS ),
@@ -142,36 +144,40 @@ final class CacheController extends Controller {
 				'nonce_refresh' => $settings->get( 'cache_nonce_refresh', true ),
 				'warm'          => $settings->get( 'cache_warm', true ),
 				'fragments'     => $settings->get( 'cache_fragments', false ),
+				'edge_variants' => $settings->get( 'cache_edge_variants', false ),
 			],
-			'fragments' => [
+			// Cookies de variación de los plugins activos (moneda, idioma, consentimiento): hoy impiden la caché
+			// del HTML en el edge; con variantes, van en la llave (0.18.0).
+			'vary_cookies' => array_values( array_filter( (array) ( null !== Runtime::$config ? Runtime::$config->get( 'vary_cookies', [] ) : [] ), 'is_string' ) ),
+			'fragments'    => [
 				'available' => FragmentCache::available(),
 				'ajax'      => AjaxFragments::KNOWN[ (string) get_template() ] ?? [],
 				'verify'    => is_array( get_option( FragmentVerifier::OPTION ) ) ? get_option( FragmentVerifier::OPTION ) : null,
 			],
-			'adapter'   => [
+			'adapter'      => [
 				'id'             => $compiled['adapter'],
 				'server'         => $compiled['server'],
 				'headers_on_hit' => $adapter->headersOnHit(),
 				'edge_html'      => $compiled['edge_html'],
 				'verified'       => 'litespeed' !== $compiled['adapter'] || 'openlitespeed' === $compiled['server'],
 			],
-			'edge'      => [
+			'edge'         => [
 				'available'     => $this->container->get( EdgePurger::class )->available(),
 				'supports_tags' => $this->container->get( EdgePurger::class )->supportsTags(),
 			],
-			'tags'      => [
+			'tags'         => [
 				'prefix' => $this->container->get( TagBuilder::class )->prefix(),
 			],
-			'queue'     => [
+			'queue'        => [
 				'tags' => $queue[ PurgeQueueRepository::KIND_TAG ],
 				'urls' => $queue[ PurgeQueueRepository::KIND_URL ],
 				'all'  => $queue[ PurgeQueueRepository::KIND_ALL ] > 0,
 				'warm' => $queue[ PurgeQueueRepository::KIND_WARM ],
 			],
 			// Objeto aunque esté vacío: [] en JSON tiene métodos de arreglo en JavaScript (last.at).
-			'last'      => (object) PurgeWorker::lastState(),
-			'warmer'    => $this->container->get( Warmer::class )->state(),
-			'sitemaps'  => $compiled['sitemaps'],
+			'last'         => (object) PurgeWorker::lastState(),
+			'warmer'       => $this->container->get( Warmer::class )->state(),
+			'sitemaps'     => $compiled['sitemaps'],
 		];
 	}
 
@@ -185,6 +191,7 @@ final class CacheController extends Controller {
 			'nonce_refresh' => 'cache_nonce_refresh',
 			'warm'          => 'cache_warm',
 			'fragments'     => 'cache_fragments',
+			'edge_variants' => 'cache_edge_variants',
 		] as $param => $key ) {
 			if ( null !== $request->get_param( $param ) ) {
 				$changes[ $key ] = $request->get_param( $param );
@@ -199,10 +206,15 @@ final class CacheController extends Controller {
 		if ( true === ( $changes['cache_fragments'] ?? null ) && ! (bool) $settings->get( 'cache_fragments', false ) && true !== $request->get_param( 'confirm' ) && ! self::fragmentsVerified() ) {
 			return $this->error( 'itb_confirm', __( 'La caché de fragmentos no tiene una verificación aprobada reciente. Verifícala o confirma que revisarás las páginas.', 'imagina-turbo' ), 428 );
 		}
+		$wasVariants = (bool) $settings->get( 'cache_edge_variants', false );
 		$settings->update( $changes );
 		$result = $this->container->get( ConfigCompiler::class )->compile();
 		if ( array_key_exists( 'cache_fragments', $changes ) ) {
 			FragmentCache::flush();
+		}
+		// Las copias guardadas antes no llevan la variante en la llave: se purga todo (0.18.0).
+		if ( array_key_exists( 'cache_edge_variants', $changes ) && (bool) $changes['cache_edge_variants'] !== $wasVariants ) {
+			$this->container->get( Purger::class )->purge( PurgeRequest::all( 'edge_variants' ) );
 		}
 		if ( 'wp-rocket' === CacheModule::settings()['adapter'] ) {
 			WpRocketAdapter::flushHtaccess();

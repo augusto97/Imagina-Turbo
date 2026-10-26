@@ -258,6 +258,8 @@ final class ConfigCompiler {
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
+			// Lo que Zaraz reemplaza en el sitio (0.18.0), solo con el módulo Cloudflare activo.
+			'zaraz'                       => $this->zarazConfig( true === ( $modules['cloudflare'] ?? false ) ),
 			// Caché de fragmentos (0.17.0): menús y respuestas AJAX de solo render, con el coordinador activo.
 			'fragments'                   => $this->fragmentsConfig( true === ( $modules['cache_coordinator'] ?? false ), (string) ( $theme['template'] ?? '' ), $ignoreParams ),
 			// Exclusiones de delay JS para WP Rocket o LSCache (solo si alguno está activo).
@@ -307,6 +309,18 @@ final class ConfigCompiler {
 
 		$data['hash'] = self::hash( $data );
 		return $data;
+	}
+
+	/**
+	 * @return array{ga4: bool, meta: bool}
+	 */
+	private function zarazConfig( bool $moduleOn ): array {
+		$takeover = $this->settings->get( 'zaraz_takeover', [] );
+		$takeover = is_array( $takeover ) ? $takeover : [];
+		return [
+			'ga4'  => $moduleOn && true === ( $takeover['ga4'] ?? false ),
+			'meta' => $moduleOn && true === ( $takeover['meta'] ?? false ),
+		];
 	}
 
 	/**
@@ -429,6 +443,8 @@ final class ConfigCompiler {
 			'edge_html'       => 'wp-rocket' !== $adapter || 'apache' === $server,
 			// El plugin de caché guarda una copia para móviles: el edge también debe separar por dispositivo.
 			'mobile_split'    => self::mobileSplit( $adapter ),
+			// Variantes por cookie en el edge (0.18.0, Transform Rule + vary en la regla del HTML).
+			'edge_variants'   => (bool) $this->settings->get( 'cache_edge_variants', false ),
 			'purge_all_hooks' => $compat['purge_all_hooks'] ?? [],
 			'sitemaps'        => $compat['sitemaps'] ?? [],
 			'preload_exclude' => $compat['preload_exclude'] ?? [],

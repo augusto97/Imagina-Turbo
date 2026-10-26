@@ -34,6 +34,9 @@ final class HeaderEmitter {
 
 	public const HEADER = 'Cloudflare-CDN-Cache-Control';
 
+	/** Cabecera que una Transform Rule de Cloudflare arma con las cookies de variación (0.18.0). */
+	public const VARY_HEADER = 'X-Itb-Variant';
+
 	/** Productos anotados como máximo por página (la cabecera Cache-Tag tiene límite). */
 	public const MAX_LISTED = 100;
 
@@ -47,7 +50,7 @@ final class HeaderEmitter {
 	private array $listed = [];
 
 	/**
-	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>} $settings Ajustes compilados.
+	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>, edge_variants?: bool} $settings Ajustes compilados.
 	 * @param list<string>                                                                               $bypassCookies Prefijos de cookies que impiden la caché.
 	 * @param callable(): void                                                                           $onCacheable   Se llama si la respuesta es cacheable (refresco de nonces).
 	 * @param list<string>                                                                               $cartCookies   Prefijos de cookies de carrito: esa respuesta tampoco la guarda el plugin de caché.
@@ -130,6 +133,11 @@ final class HeaderEmitter {
 		header( self::HEADER . ': ' . Cacheability::edgeHeader( $this->verdict['cacheable'], $this->verdict['ttl'], $this->settings['swr'], $this->settings['sie'] ), true );
 		if ( [] !== $tags ) {
 			header( 'Cache-Tag: ' . implode( ',', $tags ), true );
+		}
+		// Toda copia que guarda el edge lleva la variante en su llave (0.18.0). Siempre, no solo con las
+		// variantes activas: así ninguna copia queda guardada sin ella si se activan después.
+		if ( $this->verdict['cacheable'] ) {
+			header( 'Vary: ' . self::VARY_HEADER, false );
 		}
 	}
 

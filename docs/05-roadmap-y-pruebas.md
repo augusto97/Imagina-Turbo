@@ -578,3 +578,21 @@ Menos DOM y menos PHP en las páginas que no salen de la caché, medido primero 
 - **Caché de fragmentos** (docs/02 módulo 2): los menús de las páginas sin caché y las respuestas AJAX de solo render del tema, desde Redis, con verificación automática antes de activarla.
 - **QUIC.cloud** (revisado en el sitio, solo lectura): los servicios en línea de LiteSpeed Cache no están activados; el CSS único y el crítico están apagados y la cuota gratuita sin usar. Activarlo implica aceptar el servicio de QUIC.cloud: queda como decisión del dueño del sitio. Imagina Turbo no genera CSS crítico (es del plugin de caché).
 
+## Versión 0.18.0
+
+Menos JavaScript de terceros y más visitas servidas desde el edge, sin costos nuevos:
+
+- **Zaraz** (docs/03 sección 10, docs/02 módulo 15): Google Analytics 4 (Site Kit) y el píxel de Meta (Meta for WooCommerce) pasan a ejecutarse en Cloudflare, con los eventos de e-commerce de WooCommerce. Gratis hasta 1 millón de eventos al mes por cuenta. Detecta, aplica con confirmación, vigila cada hora y revierte.
+- **Variantes por cookie en el edge** (docs/03 sección 4.5): las visitas con la cookie del banner de consentimiento, la moneda o el idioma se sirven desde el edge con una copia por combinación. Regla de transformación más `vary` de Cache Rules, ambos en el plan gratuito.
+- **Sin Worker**: las islas en el borde eran para cachear páginas con cookies por visita. Con lo anterior no hace falta pagar Workers Paid ni mantener código en el borde, y el carrito ya va por Store API.
+- **Ya existían y solo esperan el token de Cloudflare**: la regla de caché del HTML en el edge y los ajustes de zona (HTTP/3, Early Hints, Smart Tiered Cache, Speed Brain, Always Online, Rocket Loader apagado), desde la fase 2b.
+
+**Criterios de aceptación** (probados en local con el simulador de la API, `tests/e2e/mock-cloudflare.php`):
+
+- [x] La regla de variantes y la del HTML con `vary` se aplican con `dry_run`; la cookie de variación deja de estar en la expresión del HTML; el origen manda `Vary: X-Itb-Variant` también con la cookie.
+- [x] Zaraz: aplicar con y sin vista previa, con secretos (usa la exportación) y con un borrador sin publicar (se niega); revertir quita solo lo propio.
+- [x] Con el reemplazo activo, los filtros de Site Kit y Meta for WooCommerce devuelven lo esperado y los datos de ficha, carrito, pago y pedido recibido salen bien; un pedido con clave incorrecta no se informa.
+- [x] En el navegador, con un Zaraz simulado que carga tarde: los eventos esperan en cola, «Product Added» sale del formulario y de `added_to_cart`, sin errores.
+- [x] La salud devuelve falso con la zona pausada y verdadero al reanudarla.
+- [ ] En un sitio real con token: aplicar Zaraz en una zona de pruebas y comparar en GA4 (DebugView) y en el Administrador de eventos de Meta que llegan la vista de página y las compras, sin duplicados.
+

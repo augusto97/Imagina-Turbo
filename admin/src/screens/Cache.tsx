@@ -70,6 +70,7 @@ export function Cache() {
 						<PurgeCard status={ data } onDone={ onDone } />
 					</div>
 					<FragmentsCard status={ data } onDone={ onDone } />
+					{ data.vary_cookies.length > 0 && <VariantsCard status={ data } onDone={ onDone } /> }
 					<InspectCard />
 				</div>
 			) }
@@ -422,6 +423,37 @@ function FragmentsCard( { status, onDone }: { status: CacheStatus; onDone: ( s: 
 				pending={ save.isPending }
 				onConfirm={ () => toggle( true, true ) }
 			/>
+		</Card>
+	);
+}
+
+function VariantsCard( { status, onDone }: { status: CacheStatus; onDone: ( s: CacheStatus ) => void } ) {
+	const save = useAction( ( vars: { edge_variants: boolean } ) => api<CacheStatus>( 'cache/settings', 'PUT', vars ) );
+	const exact = status.vary_cookies.filter( ( c ) => /^[A-Za-z0-9_\-.]{2,80}$/.test( c ) );
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:gap-2">
+					<CardTitle>{ __( 'Variantes por cookie en el edge' ) }</CardTitle>
+					<Badge tone="amber">{ __( 'Moderado' ) }</Badge>
+				</div>
+				<CardDescription>
+					{ __( 'Los plugins activos declaran cookies que cambian la página (moneda, idioma o el aviso de cookies aceptado). Hoy, quien las tiene no recibe el HTML desde el edge: va al servidor en cada página. Con esta opción, Cloudflare guarda una copia por cada combinación de valores (una Transform Rule escribe la cabecera X-Itb-Variant y la regla del HTML la usa en la llave). Gratis en todos los planes, sin Worker. Al cambiarla se purga todo.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				<p className="itb:font-mono itb:text-xs">{ status.vary_cookies.join( ', ' ) }</p>
+				{ exact.length < status.vary_cookies.length && <Notice level="info">{ __( 'Las cookies con nombre variable (terminan en *) siguen impidiendo la caché: una regla de Cloudflare no puede leerlas.' ) }</Notice> }
+				<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
+					<span>
+						<span className="itb:font-medium">{ __( 'Guardar variantes en el edge' ) }</span>
+						<span className="itb:block itb:text-xs itb:text-zinc-500">{ __( 'Después aplica en Cloudflare el plan: la regla «Variantes por cookie en el edge» y la del HTML actualizada. Necesita el modo «Emitir cabeceras para el edge».' ) }</span>
+					</span>
+					<Switch checked={ status.settings.edge_variants } disabled={ save.isPending || ! status.enabled || exact.length === 0 } onCheckedChange={ ( v ) => save.mutate( { edge_variants: v }, { onSuccess: onDone } ) } aria-label={ __( 'Guardar variantes en el edge' ) } />
+				</label>
+				{ status.settings.edge_variants && status.settings.mode !== 'headers' && <Notice level="warning">{ __( 'Sin el modo «Emitir cabeceras para el edge» no hay caché del HTML en Cloudflare y las variantes no se usan.' ) }</Notice> }
+				{ save.error && <Notice level="error">{ save.error.message }</Notice> }
+			</CardContent>
 		</Card>
 	);
 }

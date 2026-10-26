@@ -47,8 +47,11 @@ final class CacheModule implements ModuleInterface {
 			// mini-carrito). Con WooCart sí puede RECIBIR páginas cacheadas: eso lo decide la regla del edge.
 			$cart = Runtime::$config?->get( 'cart_cookies', [] );
 			$vary = Runtime::$config?->get( 'vary_cookies', [] );
-			// Una cookie de variación (moneda, idioma) o de carrito se trata como bypass en el edge.
-			$cookies = array_values( array_filter( array_merge( is_array( $bypass ) ? $bypass : [], is_array( $cart ) ? $cart : [], is_array( $vary ) ? $vary : [] ), 'is_string' ) );
+			// Una cookie de variación (moneda, idioma) o de carrito se trata como bypass en el edge. Con
+			// variantes en el edge (0.18.0) las de nombre exacto van en la llave: ya no lo impiden.
+			$vary    = is_array( $vary ) ? array_values( array_filter( $vary, 'is_string' ) ) : [];
+			$vary    = $settings['edge_variants'] ? array_values( array_filter( $vary, static fn( string $c ): bool => 1 !== preg_match( '/^[A-Za-z0-9_\-.]{2,80}$/', $c ) ) ) : $vary;
+			$cookies = array_values( array_filter( array_merge( is_array( $bypass ) ? $bypass : [], is_array( $cart ) ? $cart : [], $vary ), 'is_string' ) );
 
 			$onCacheable = null;
 			if ( RequestType::FrontendHtml === $type && $settings['nonce_refresh'] ) {
@@ -98,7 +101,7 @@ final class CacheModule implements ModuleInterface {
 	/**
 	 * Ajustes compilados con valores por defecto.
 	 *
-	 * @return array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, warm: bool, adapter: string, server: string, edge_html: bool, mobile_split: bool, purge_all_hooks: list<string>, sitemaps: list<string>, preload_exclude: list<string>, bypass_paths: list<string>}
+	 * @return array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, warm: bool, adapter: string, server: string, edge_html: bool, mobile_split: bool, edge_variants: bool, purge_all_hooks: list<string>, sitemaps: list<string>, preload_exclude: list<string>, bypass_paths: list<string>}
 	 */
 	public static function settings(): array {
 		$cache = Runtime::$config?->get( 'cache', [] );
@@ -115,6 +118,7 @@ final class CacheModule implements ModuleInterface {
 			'server'          => is_string( $cache['server'] ?? null ) ? $cache['server'] : 'unknown',
 			'edge_html'       => false !== ( $cache['edge_html'] ?? true ),
 			'mobile_split'    => true === ( $cache['mobile_split'] ?? false ),
+			'edge_variants'   => true === ( $cache['edge_variants'] ?? false ),
 			'purge_all_hooks' => $list( $cache['purge_all_hooks'] ?? [] ),
 			'sitemaps'        => $list( $cache['sitemaps'] ?? [] ),
 			'preload_exclude' => $list( $cache['preload_exclude'] ?? [] ),

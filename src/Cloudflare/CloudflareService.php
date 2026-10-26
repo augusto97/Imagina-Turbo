@@ -31,6 +31,7 @@ final class CloudflareService {
 		'Zone → Cache Purge → Purge',
 		'Zone → Analytics → Read',
 		'Zone → Zone WAF → Edit (firewall, fase 4)',
+		'Zone → Zaraz → Edit (opcional: Google Analytics y Meta desde Cloudflare)',
 	];
 
 	/**
@@ -299,7 +300,7 @@ final class CloudflareService {
 			}
 		}
 		// Las fases del firewall siempre se revisan: si el módulo se apaga, sus reglas se proponen para eliminar.
-		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::WAF, Phases::RATELIMIT ], Templates::settings( $this->site->edgeHeaders ), $this->site->refPrefix, $limits, $this->state );
+		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::HEADERS, Phases::WAF, Phases::RATELIMIT ], Templates::settings( $this->site->edgeHeaders ), $this->site->refPrefix, $limits, $this->state );
 		if ( ! $this->site->edgeHeaders ) {
 			$notes[] = __( 'La caché del HTML en el edge necesita el coordinador de caché en modo «Emitir cabeceras para el edge» (pantalla Caché).', 'imagina-turbo' );
 		}
@@ -391,6 +392,201 @@ final class CloudflareService {
 		}
 		update_option( 'itb_cf_drift', $drifted, false );
 		$this->state->update( [ 'checked_at' => time() ] );
+	}
+
+	public function zaraz(): Zaraz {
+		return new Zaraz( $this->client, $this->state->zoneId() );
+	}
+
+	/**
+	 * Zaraz: lo que hay en el sitio, lo que hay en la zona y lo que Turbo cambió.
+	 *
+	 * @param array{ga4: bool, meta: bool} $takeover Lo que Zaraz reemplaza hoy en el sitio.
+	 * @return array<string, mixed>
+	 */
+	public function zarazStatus( array $takeover ): array {
+		$read  = $this->ready() ? $this->zaraz()->read() : null;
+		$state = get_option( Zaraz::STATE_OPTION, [] );
+		return [
+			'ready'    => $this->ready(),
+			'plugins'  => \ImaginaTurbo\Integrations\AnalyticsTags::fromPlugins(),
+			'page'     => get_option( 'itb_zaraz_scan', null ),
+			'zone'     => null === $read ? null : [
+				'ok'       => $read['ok'],
+				'error'    => $read['error'],
+				'workflow' => $read['workflow'],
+				'secrets'  => $read['secrets'],
+			] + ( $read['ok'] ? Zaraz::summary( $read['config'] ) : [] ),
+			'takeover' => $takeover,
+			'state'    => is_array( $state ) ? (object) $state : (object) [],
+		];
+	}
+
+	/**
+	 * Agrega GA4 y/o Meta a Zaraz con e-commerce (los ids salen de los plugins del sitio).
+	 *
+	 * @return array{ok: bool, error: string, published: bool, ga4: string, meta: string}
+	 */
+	public function zarazApply( bool $ga4, bool $meta, string $metaToken ): array {
+		$fail = static fn( string $error ): array => [
+			'ok'        => false,
+			'error'     => $error,
+			'published' => false,
+			'ga4'       => '',
+			'meta'      => '',
+		];
+		if ( ! $this->ready() ) {
+			return $fail( __( 'Cloudflare no está conectado.', 'imagina-turbo' ) );
+		}
+		$plugins = \ImaginaTurbo\Integrations\AnalyticsTags::fromPlugins();
+		$ga4Id   = '';
+		$metaId  = '';
+		foreach ( $plugins['ga4'] as $item ) {
+			$ga4Id = '' === $ga4Id && $item['takeover'] ? $item['id'] : $ga4Id;
+		}
+		foreach ( $plugins['meta'] as $item ) {
+			$metaId = '' === $metaId && $item['takeover'] ? $item['id'] : $metaId;
+		}
+		if ( $ga4 && '' === $ga4Id ) {
+			return $fail( __( 'No hay un Google Analytics 4 de Site Kit que se pueda pasar a Zaraz.', 'imagina-turbo' ) );
+		}
+		if ( $meta && ( '' === $metaId || 1 !== preg_match( '/^[A-Za-z0-9_\-]{40,500}$/', $metaToken ) ) ) {
+			return $fail( '' === $metaId ? __( 'No hay un píxel de Meta for WooCommerce que se pueda pasar a Zaraz.', 'imagina-turbo' ) : __( 'Zaraz envía los eventos de Meta por la API de conversiones: hace falta su token de acceso (Administrador de eventos → Configuración → API de conversiones).', 'imagina-turbo' ) );
+		}
+		$zaraz = $this->zaraz();
+		$read  = $zaraz->read();
+		if ( ! $read['ok'] ) {
+			return $fail( $read['error'] );
+		}
+		$base = $zaraz->baseConfig( $read );
+		if ( null === $base ) {
+			return $fail( __( 'La zona tiene variables secretas y un borrador de Zaraz sin publicar: publícalo (o descártalo) en Cloudflare antes de que Turbo toque la configuración.', 'imagina-turbo' ) );
+		}
+		$tools = [];
+		if ( $ga4 && null === Zaraz::findTool( $base, 'google-analytics', 'tid', $ga4Id ) ) {
+			$tools[ Zaraz::TOOL_GA4 ] = Zaraz::ga4Tool( $ga4Id );
+		}
+		if ( $meta ) {
+			// El token puede haber cambiado: la herramienta propia se reescribe; una agregada a mano se respeta.
+			$found = Zaraz::findTool( $base, 'facebook-pixel', 'property', $metaId );
+			if ( null === $found || Zaraz::TOOL_META === $found ) {
+				$tools[ Zaraz::TOOL_META ] = Zaraz::metaTool( $metaId, $metaToken );
+			}
+		}
+		$state = get_option( Zaraz::STATE_OPTION, [] );
+		$state = is_array( $state ) ? $state : [];
+		if ( ! isset( $state['ecommerce_before'] ) ) {
+			$state['ecommerce_before'] = Zaraz::summary( $base )['ecommerce'];
+		}
+		$result = $zaraz->write( Zaraz::merge( $base, $tools ), $read['workflow'] );
+		if ( ! $result['ok'] ) {
+			$this->events->warning( 'cloudflare', 'zaraz', __( 'Cloudflare rechazó la configuración de Zaraz.', 'imagina-turbo' ), [ 'error' => $result['error'] ] );
+			return $fail(
+				sprintf(
+				/* translators: %s: error de la API. */
+					__( 'Cloudflare rechazó la configuración de Zaraz: %s. Puedes agregar la herramienta a mano en Cloudflare → Zaraz con el mismo id y volver a intentarlo: Turbo la reconoce.', 'imagina-turbo' ),
+					$result['error']
+				)
+			);
+		}
+		update_option(
+			Zaraz::STATE_OPTION,
+			[
+				'applied_at'       => time(),
+				'ecommerce_before' => (bool) $state['ecommerce_before'],
+				'ga4'              => $ga4 ? $ga4Id : '',
+				'meta'             => $meta ? $metaId : '',
+				'tools'            => array_keys( $tools ),
+				'published'        => $result['published'],
+			],
+			false
+		);
+		$this->events->warning(
+			'cloudflare',
+			'zaraz',
+			__( 'Zaraz configurado: Google Analytics y/o Meta se cargan desde Cloudflare.', 'imagina-turbo' ),
+			[
+				'ga4'       => $ga4 ? $ga4Id : '',
+				'meta'      => $meta ? $metaId : '',
+				'published' => $result['published'],
+			]
+		);
+		return [
+			'ok'        => true,
+			'error'     => $result['error'],
+			'published' => $result['published'],
+			'ga4'       => $ga4 ? $ga4Id : '',
+			'meta'      => $meta ? $metaId : '',
+		];
+	}
+
+	/**
+	 * Quita las herramientas propias de Zaraz y devuelve el interruptor de e-commerce.
+	 *
+	 * @return array{ok: bool, error: string}
+	 */
+	public function zarazRevert(): array {
+		$state = get_option( Zaraz::STATE_OPTION, [] );
+		$state = is_array( $state ) ? $state : [];
+		if ( ! $this->ready() ) {
+			return [
+				'ok'    => false,
+				'error' => __( 'Cloudflare no está conectado: quita las herramientas a mano en Cloudflare → Zaraz.', 'imagina-turbo' ),
+			];
+		}
+		$zaraz = $this->zaraz();
+		$read  = $zaraz->read();
+		$base  = $read['ok'] ? $zaraz->baseConfig( $read ) : null;
+		if ( null === $base ) {
+			return [
+				'ok'    => false,
+				'error' => '' !== $read['error'] ? $read['error'] : __( 'No se pudo leer la configuración de Zaraz sin perder secretos o el borrador.', 'imagina-turbo' ),
+			];
+		}
+		$result = $zaraz->write( Zaraz::strip( $base, ! empty( $state['ecommerce_before'] ) ), $read['workflow'] );
+		if ( $result['ok'] ) {
+			delete_option( Zaraz::STATE_OPTION );
+			$this->events->info( 'cloudflare', 'zaraz', __( 'Herramientas de Imagina Turbo quitadas de Zaraz.', 'imagina-turbo' ) );
+		}
+		return [
+			'ok'    => $result['ok'],
+			'error' => $result['error'],
+		];
+	}
+
+	/**
+	 * ¿Siguen en Zaraz las herramientas que reemplazan a las del sitio? Si alguien las quitó o apagó
+	 * Zaraz, las etiquetas del sitio tienen que volver (tarea horaria). null = no se pudo leer.
+	 *
+	 * @param array{ga4: bool, meta: bool} $takeover Lo que Zaraz reemplaza hoy.
+	 */
+	public function zarazHealthy( array $takeover ): ?bool {
+		$state = get_option( Zaraz::STATE_OPTION, [] );
+		$state = is_array( $state ) ? $state : [];
+		$read  = $this->ready() ? $this->zaraz()->read() : null;
+		if ( null === $read || ! $read['ok'] ) {
+			return null;
+		}
+		$tools = Zaraz::summary( $read['config'] )['tools'];
+		$has   = static function ( string $component, string $id ) use ( $tools ): bool {
+			foreach ( $tools as $tool ) {
+				if ( $tool['enabled'] && str_contains( $tool['component'], $component ) && strtoupper( $tool['id_value'] ) === strtoupper( $id ) ) {
+					return true;
+				}
+			}
+			return false;
+		};
+		$ok    = ( ! $takeover['ga4'] || $has( 'google-analytics', (string) ( $state['ga4'] ?? '' ) ) ) && ( ! $takeover['meta'] || $has( 'facebook-pixel', (string) ( $state['meta'] ?? '' ) ) );
+		if ( ! $ok || false === Zaraz::summary( $read['config'] )['auto_inject'] ) {
+			return false;
+		}
+		// Zona en pausa (Cloudflare deja de hacer de proxy): Zaraz ya no se inyecta.
+		$zone = $this->client->get( '/zones/' . rawurlencode( $this->state->zoneId() ) );
+		if ( ! $zone->ok() ) {
+			return null;
+		}
+		$raw = $zone->resultArray();
+		return true !== ( $raw['paused'] ?? false ) && 'active' === ( $raw['status'] ?? 'active' );
 	}
 
 	/**

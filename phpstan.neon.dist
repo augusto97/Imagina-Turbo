@@ -13,6 +13,7 @@ parameters:
     treatPhpDocTypesAsCertain: false
     scanFiles:
         - vendor/woocommerce/action-scheduler/functions.php
+        - vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php
     scanDirectories:
         - vendor/woocommerce/action-scheduler/classes
     ignoreErrors:
@@ -25,3 +26,7 @@ parameters:
         -
             identifier: greaterOrEqual.alwaysTrue
             path: mu-loader/imagina-turbo-loader.php
+        # Con los stubs de WooCommerce la clase siempre existe para PHPStan; en un sitio sin WooCommerce no.
+        -
+            identifier: function.alreadyNarrowedType
+            path: src/Modules/Database/DatabaseAudit.php

@@ -64,7 +64,7 @@ final class PlanLimits {
 	public function rulesFor( string $phase ): int {
 		return match ( $phase ) {
 			Phases::CACHE     => $this->int( 'cache_rules', 10 ),
-			Phases::TRANSFORM => $this->int( 'transform_rules', 10 ),
+			Phases::TRANSFORM, Phases::HEADERS => $this->int( 'transform_rules', 10 ),
 			Phases::WAF       => $this->int( 'waf_custom_rules', 5 ),
 			Phases::RATELIMIT => $this->int( 'ratelimit_rules', 1 ),
 			default           => 0,

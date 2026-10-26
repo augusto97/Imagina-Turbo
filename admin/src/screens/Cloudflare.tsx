@@ -8,11 +8,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { CfAction, CfAnalytics, CfApplyResult, CfChange, CfPlan, CfSnapshot, CfStatus, CfZone } from '@/lib/types';
+import type { CfAction, CfAnalytics, CfApplyResult, CfChange, CfPlan, CfSnapshot, CfStatus, CfZone, ZarazStatus } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 export const ACTIONS: Record<CfAction, { label: string; tone: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }> = {
@@ -73,6 +74,7 @@ export function Cloudflare() {
 					{ connected && ! data.enabled && <Notice level="info">{ __( 'El módulo Cloudflare está apagado: puedes revisar la zona, pero para aplicar cambios y purgar el edge actívalo en el Panel.' ) }</Notice> }
 					{ connected && data.guard.blocked && <Notice level="warning">{ data.guard.reason }</Notice> }
 					{ connected && <PlanCard status={ data } /> }
+					{ connected && <ZarazCard /> }
 					{ connected && (
 						<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 							<AnalyticsCard />
@@ -483,3 +485,121 @@ function AnalyticsCard() {
 		</Card>
 	);
 }
+
+function ZarazCard() {
+	const client = useQueryClient();
+	const { data, isLoading, error } = useQuery( { queryKey: [ 'zaraz' ], queryFn: () => api<ZarazStatus>( 'cloudflare/zaraz' ) } );
+	const [ ga4, setGa4 ] = useState( false );
+	const [ meta, setMeta ] = useState( false );
+	const [ token, setToken ] = useState( '' );
+	const [ confirm, setConfirm ] = useState<'' | 'apply' | 'revert'>( '' );
+	const done = { onSuccess: ( s: ZarazStatus ) => client.setQueryData( [ 'zaraz' ], s ) };
+	const scan = useAction( () => api<ZarazStatus>( 'cloudflare/zaraz/scan', 'POST' ) );
+	const apply = useAction( () => api<ZarazStatus>( 'cloudflare/zaraz/apply', 'POST', { ga4, meta, meta_token: token, confirm: true } ) );
+	const revert = useAction( () => api<ZarazStatus>( 'cloudflare/zaraz/revert', 'POST', { confirm: true } ) );
+	if ( isLoading ) {
+		return <Skeleton className="itb:h-40" />;
+	}
+	if ( error || ! data ) {
+		return <Notice level="error">{ error?.message ?? '' }</Notice>;
+	}
+	const ga4Item = data.plugins.ga4.find( ( g ) => g.takeover );
+	const metaItem = data.plugins.meta.find( ( m ) => m.takeover );
+	const active = data.takeover.ga4 || data.takeover.meta;
+	const ids = data.page?.ids;
+	const gtm = [ ...new Set( [ ...data.plugins.gtm.map( ( g ) => g.id ), ...( ids?.gtm ?? [] ) ] ) ];
+	return (
+		<Card>
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:gap-2">
+					<CardTitle>{ __( 'Zaraz: Google Analytics y Meta desde Cloudflare' ) }</CardTitle>
+					<Badge tone="amber">{ __( 'Moderado' ) }</Badge>
+				</div>
+				<CardDescription>
+					{ __( 'Cloudflare carga Google Analytics 4 y el píxel de Meta desde sus servidores: la página deja de descargar gtag.js y fbevents.js (cientos de KB de JavaScript de terceros). Los eventos de la tienda (producto visto, añadido al carrito, pago iniciado, pedido completado) se envían con la API de e-commerce de Zaraz. Gratis hasta 1 millón de eventos al mes por cuenta; si se pasa sin el plan de pago, Zaraz se apaga hasta el mes siguiente. Necesita el permiso Zona → Zaraz → Editar en el token.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+				{ data.zone && ! data.zone.ok && <Notice level="warning">{ data.zone.error }</Notice> }
+				<div className="itb:grid itb:gap-2 itb:sm:grid-cols-2">
+					<KeyValue label={ __( 'Google Analytics 4' ) }>{ data.plugins.ga4.map( ( g ) => `${ g.id } (${ g.source })` ).join( ', ' ) || '—' }</KeyValue>
+					<KeyValue label={ __( 'Píxel de Meta' ) }>{ data.plugins.meta.map( ( m ) => `${ m.id } (${ m.source })` ).join( ', ' ) || '—' }</KeyValue>
+					<KeyValue label={ __( 'Google Tag Manager' ) }>{ gtm.join( ', ' ) || '—' }</KeyValue>
+					<KeyValue label={ __( 'En Zaraz' ) }>{ data.zone?.tools?.map( ( t ) => `${ t.name }${ t.enabled ? '' : ` (${ __( 'apagada' ) })` }` ).join( ', ' ) || '—' }</KeyValue>
+				</div>
+				{ ids && (
+					<p className="itb:text-xs itb:text-zinc-500">
+						{ `${ __( 'En el HTML de la portada' ) } (${ formatDate( data.page?.at, config.locale ) }): ` }
+						{ [ ...ids.ga4, ...ids.google_tag, ...ids.gtm, ...ids.meta ].join( ', ' ) || __( 'ninguna etiqueta' ) }
+					</p>
+				) }
+				{ gtm.length > 0 && <Notice level="info">{ __( 'Un contenedor de Google Tag Manager no se puede pasar a Zaraz. Revisa qué etiquetas tiene: si repite Google Analytics o Meta, quítalas del contenedor para no contar dos veces.' ) }</Notice> }
+				<div>
+					<Button size="sm" variant="outline" disabled={ scan.isPending } onClick={ () => scan.mutate( undefined, done ) }>
+						<RefreshCw className={ scan.isPending ? 'itb:animate-spin' : '' } aria-hidden />
+						{ __( 'Buscar etiquetas en la portada' ) }
+					</Button>
+				</div>
+				{ active ? (
+					<>
+						<Notice level="success">
+							{ `${ __( 'Zaraz reemplaza en el sitio a:' ) } ${ [ data.takeover.ga4 ? `Google Analytics ${ data.state.ga4 ?? '' }` : '', data.takeover.meta ? `Meta ${ data.state.meta ?? '' }` : '' ].filter( Boolean ).join( ' · ' ) }. ${ __( 'Las etiquetas de Site Kit y Meta for WooCommerce dejan de imprimirse. Si alguien quita las herramientas de Zaraz, lo apaga o pausa la zona, vuelven solas en la siguiente revisión horaria. Si quitas el proxy de Cloudflare (nube gris) de este dominio, revierte Zaraz aquí primero.' ) }` }
+						</Notice>
+						{ data.state.published === false && <Notice level="warning">{ __( 'La configuración quedó como borrador: publícala en Cloudflare → Zaraz.' ) }</Notice> }
+						<div>
+							<Button size="sm" variant="outline" disabled={ revert.isPending } onClick={ () => setConfirm( 'revert' ) }>
+								{ __( 'Volver a las etiquetas del sitio' ) }
+							</Button>
+						</div>
+					</>
+				) : (
+					<>
+						<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
+							<span>
+								<span className="itb:font-medium">{ ga4Item ? `Google Analytics 4 → Zaraz (${ ga4Item.id })` : __( 'Google Analytics 4 → Zaraz' ) }</span>
+								<span className="itb:block itb:text-xs itb:text-zinc-500">{ ga4Item ? __( 'Se apaga la etiqueta de Site Kit (y sus eventos de conversión: los reemplazan los de Zaraz).' ) : __( 'Solo se puede tomar el de Site Kit. Si viene de otro plugin o del tema, configúralo en Zaraz a mano y quítalo del sitio.' ) }</span>
+							</span>
+							<Switch checked={ ga4 } disabled={ ! ga4Item } onCheckedChange={ setGa4 } aria-label="GA4" />
+						</label>
+						<label className="itb:flex itb:items-center itb:justify-between itb:gap-3">
+							<span>
+								<span className="itb:font-medium">{ metaItem ? `Meta → Zaraz (${ metaItem.id })` : __( 'Meta → Zaraz' ) }</span>
+								<span className="itb:block itb:text-xs itb:text-zinc-500">{ metaItem ? __( 'Se apagan el píxel y la API de conversiones de Meta for WooCommerce: Zaraz los envía desde Cloudflare (el catálogo sigue igual).' ) : __( 'Solo se puede tomar el de Meta for WooCommerce.' ) }</span>
+							</span>
+							<Switch checked={ meta } disabled={ ! metaItem } onCheckedChange={ setMeta } aria-label="Meta" />
+						</label>
+						{ meta && (
+							<label className="itb:flex itb:flex-col itb:gap-1">
+								<span className="itb:text-xs itb:font-medium">{ __( 'Token de la API de conversiones de Meta' ) }</span>
+								<Input type="password" value={ token } autoComplete="off" onChange={ ( e ) => setToken( e.target.value ) } placeholder="EAA…" />
+								<span className="itb:text-xs itb:text-zinc-500">{ __( 'Administrador de eventos → tu píxel → Configuración → API de conversiones → Generar token de acceso. Se envía a Cloudflare y no se guarda en el sitio.' ) }</span>
+							</label>
+						) }
+						<div>
+							<Button size="sm" disabled={ apply.isPending || ! data.ready || ! data.cloudflare_module || ( ! ga4 && ! meta ) || ( meta && token.trim().length < 40 ) } onClick={ () => setConfirm( 'apply' ) }>
+								{ apply.isPending ? __( 'Configurando…' ) : __( 'Configurar Zaraz' ) }
+							</Button>
+						</div>
+						{ ! data.cloudflare_module && <Notice level="info">{ __( 'Activa el módulo Cloudflare para configurar Zaraz.' ) }</Notice> }
+					</>
+				) }
+				{ ( apply.error || revert.error || scan.error ) && <Notice level="error">{ ( apply.error ?? revert.error ?? scan.error )?.message }</Notice> }
+				{ revert.data?.result && ! revert.data.result.ok && <Notice level="warning">{ revert.data.result.error }</Notice> }
+			</CardContent>
+			<ConfirmDialog
+				open={ confirm !== '' }
+				onOpenChange={ ( open ) => ! open && setConfirm( '' ) }
+				title={ confirm === 'apply' ? __( '¿Pasar la analítica a Zaraz?' ) : __( '¿Volver a las etiquetas del sitio?' ) }
+				description={
+					confirm === 'apply'
+						? __( 'Se agregan las herramientas a Zaraz con e-commerce y, si Cloudflare las acepta, se apagan las etiquetas del sitio y se purga la caché. Revisa en Google Analytics (Tiempo real) y en el Administrador de eventos de Meta que lleguen las visitas y las compras.' )
+						: __( 'Las etiquetas del sitio vuelven en el acto (se purga la caché) y se quitan de Zaraz las herramientas de Imagina Turbo.' )
+				}
+				confirmLabel={ confirm === 'apply' ? __( 'Configurar' ) : __( 'Volver' ) }
+				pending={ apply.isPending || revert.isPending }
+				onConfirm={ () => ( confirm === 'apply' ? apply : revert ).mutate( undefined, { ...done, onSettled: () => setConfirm( '' ) } ) }
+			/>
+		</Card>
+	);
+}
+

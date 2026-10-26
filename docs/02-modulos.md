@@ -100,6 +100,10 @@ Para lo que el plugin de caché no guarda (carrito, checkout, cuenta, visitantes
   - En la instancia de pruebas encontró dos fallos antes de publicar: la versión de la hoja del bloque se registraba distinta (`?ver=` de más) y, servido desde la caché, el menú con un bloque diferido no imprimía el script que lo muestra.
   - Medido con un megamenú de prueba pequeño (8 grupos de widgets): carrito 294 → 219 ms y cuenta 224 → 176 ms de TTFB.
 
+### Variantes por cookie en el edge (`cache_edge_variants`, 0.18.0)
+
+Las visitas con cookies de variación de la matriz (consentimiento, moneda, idioma) se sirven desde el edge de Cloudflare, con una copia por combinación, en vez de pasar siempre al origen. El origen añade `Vary: X-Itb-Variant` a cada respuesta cacheable (`HeaderEmitter`, modo cabeceras) y deja de tratar esas cookies como bypass. La cabecera la escribe una regla de transformación en Cloudflare a partir de las cookies (gratis, todos los planes), y la regla del HTML guarda una copia por valor. Detalle y decisión de no usar un Worker: `docs/03`, sección 4.5. Riesgo moderado, apagado por defecto; activarlo o apagarlo purga todo.
+
 ---
 
 ## 3. WooCommerce: carrito y sesión (`WooCart`)
@@ -474,3 +478,16 @@ Verificado en `augusto97/imagina-search` (Woo Smart Search 6.0.2):
 - **Costo**: no se registra nada en el HTML público. En las demás peticiones son dos `add_action`; el registro real solo ocurre si algo pide la lista de habilidades.
 - **Metadatos**: `meta.public` y `meta.mcp.public`. Anotaciones `readonly`/`idempotent` en las de lectura y `destructive: false` en todas.
 - **Verificado en el código de WordPress 7.1.3** (`wp-includes/abilities-api.php`). Probado en local: las cinco de lectura, purgar una URL, el rechazo de un módulo moderado, de un módulo desconocido y de un tipo inválido, y el permiso sin sesión.
+
+## 15. Zaraz (`Integrations/ZarazBridge`, 0.18.0)
+
+- **Qué es**: Google Analytics 4 y el píxel de Meta se ejecutan en Cloudflare (Zaraz) en vez de en el navegador. Detalle de la API, el ciclo y los límites: `docs/03`, sección 10.
+- **Riesgo**: moderado. Nada cambia hasta que el admin lo aplica desde Cloudflare → Zaraz (con confirmación) y la herramienta queda escrita en Zaraz.
+- **En el sitio**, con el reemplazo activo (config compilada `zaraz`):
+  - Site Kit deja de imprimir GA4 (`googlesitekit_analytics-4_tag_blocked`) y Meta for WooCommerce deja el píxel y su API de conversiones (`facebook_for_woocommerce_integration_pixel_enabled`). En todas las peticiones, no solo las que traen `CF-Ray`: la caché de páginas es la misma para el origen y el borde.
+  - En la ficha, el carrito, el pago y el pedido recibido: `window.itbZaraz` con los datos de e-commerce de WooCommerce y `itb-zaraz.js` (1,3 KB minificado, sin dependencias), que los envía con `zaraz.ecommerce` cuando Zaraz carga y arma «Product Added». El pedido solo con su clave correcta y una vez por navegador.
+  - WooCommerce se carga después que Imagina Turbo: la comprobación de que existe se hace al imprimir, no al registrar.
+- **Costo**: en las páginas sin WooCommerce, dos `add_filter`. En las de la tienda, un `wp_footer` que lee el carrito ya cargado.
+- **Vigilancia**: la tarea horaria devuelve las etiquetas del sitio si Zaraz pierde las herramientas, se apaga o la zona se pausa.
+- **Probado en local** con el simulador de la API: aplicar y revertir, publicación en vista previa, configuración con secretos, los dos filtros, los datos de ficha, carrito, pago y pedido (y el pedido con clave incorrecta), «Product Added» por formulario y por `added_to_cart`, y la salud con la zona pausada.
+

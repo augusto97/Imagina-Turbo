@@ -51,6 +51,8 @@ final class Settings {
 			'cache_nonce_refresh'      => true,
 			'cache_warm'               => true,
 			'cache_fragments'          => false,
+			'cache_edge_variants'      => false,
+			'zaraz_takeover'           => [],
 			'woo_count_selectors'      => [],
 			'woo_total_selectors'      => [],
 			'woo_recently_viewed'      => true,
@@ -290,7 +292,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments', 'cache_edge_variants' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
@@ -298,6 +300,13 @@ final class Settings {
 
 		if ( isset( $input['lazy_render'] ) && is_array( $input['lazy_render'] ) ) {
 			$out['lazy_render'] = self::lazyRender( $input['lazy_render'] );
+		}
+		// Lo que Zaraz reemplaza en el sitio (0.18.0): lo escribe CloudflareService al configurarlo.
+		if ( isset( $input['zaraz_takeover'] ) && is_array( $input['zaraz_takeover'] ) ) {
+			$out['zaraz_takeover'] = [
+				'ga4'  => true === ( $input['zaraz_takeover']['ga4'] ?? false ),
+				'meta' => true === ( $input['zaraz_takeover']['meta'] ?? false ),
+			];
 		}
 		// Documentos de Elementor diferidos (0.17.0).
 		if ( isset( $input['lazy_documents'] ) && is_array( $input['lazy_documents'] ) ) {

@@ -78,7 +78,7 @@ final class WooCartModule implements ModuleInterface {
 	 * WooCommerce refresca el Mini-Cart de bloques por su cuenta al cargar la página.
 	 */
 	public static function iapiRefreshes(): bool {
-		return defined( 'WC_VERSION' ) && is_string( WC_VERSION ) && version_compare( WC_VERSION, self::IAPI_REFRESH_SINCE, '>=' );
+		return defined( 'WC_VERSION' ) && version_compare( (string) constant( 'WC_VERSION' ), self::IAPI_REFRESH_SINCE, '>=' );
 	}
 
 	/**

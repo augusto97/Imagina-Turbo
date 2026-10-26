@@ -275,6 +275,7 @@ export interface CacheSettings {
 	nonce_refresh: boolean;
 	warm: boolean;
 	fragments: boolean;
+	edge_variants: boolean;
 }
 
 export interface FragmentPageResult {
@@ -297,6 +298,7 @@ export interface CacheStatus {
 	warmer: { last_run: number; warmed: number; errors: number; avg_ms: number; paused_at: number; load: number; seeded_at: number };
 	sitemaps: string[];
 	fragments: { available: boolean; ajax: string[]; verify: { at: number; pass: boolean; pages: FragmentPageResult[]; error: string } | null };
+	vary_cookies: string[];
 	result?: Record<string, unknown>;
 }
 
@@ -801,3 +803,28 @@ export interface FleetStatus {
 	endpoint: string;
 	result?: { applied: string[]; skipped: { key: string; reason: string }[]; cloudflare: Record<string, unknown> | null; snapshot: string };
 }
+
+export interface ZarazTool {
+	id: string;
+	name: string;
+	component: string;
+	enabled: boolean;
+	own: boolean;
+	id_value: string;
+}
+
+export interface ZarazStatus {
+	ready: boolean;
+	cloudflare_module: boolean;
+	plugins: {
+		ga4: { id: string; source: string; takeover: boolean }[];
+		gtm: { id: string; source: string }[];
+		meta: { id: string; source: string; takeover: boolean }[];
+	};
+	page: { at: number; ids: { ga4: string[]; google_tag: string[]; gtm: string[]; meta: string[] } } | null;
+	zone: { ok: boolean; error: string; workflow: string; secrets: boolean; tools?: ZarazTool[]; ecommerce?: boolean; auto_inject?: boolean } | null;
+	takeover: { ga4: boolean; meta: boolean };
+	state: { applied_at?: number; ga4?: string; meta?: string; published?: boolean };
+	result?: { ok: boolean; error: string; published?: boolean };
+}
+

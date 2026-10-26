@@ -32,6 +32,11 @@ final class Templates {
 
 	public const STATIC_EXTENSIONS = [ 'css', 'js', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'svg', 'woff', 'woff2', 'ttf', 'ico', 'mp4', 'webm', 'pdf' ];
 
+	/** Cabecera de la variante (en minúsculas, como la pide vary en Cache Rules). */
+	public const VARIANT_HEADER = 'x-itb-variant';
+
+	public const MAX_VARIANT_COOKIES = 10;
+
 	/** Parámetros de acciones y endpoints dinámicos (por nombre completo: sin "s=", ver docs/03 4.1). */
 	private const DYNAMIC_QUERY = [ 'wc-ajax=', 'add-to-cart=', 'remove_item=', 'removed_item=', 'undo_item=', '_wpnonce=', 'preview=', 'rest_route=', 'action=' ];
 
@@ -68,6 +73,23 @@ final class Templates {
 				default => '',
 			},
 		];
+
+		// Variantes por cookie (0.18.0): la cabecera x-itb-variant lleva las cookies de variación; la regla
+		// del HTML la usa en la llave (vary) en lugar de mandar esas visitas al servidor.
+		if ( $this->site->edgeVariants ) {
+			$params = $this->variantParameters();
+			$out[]  = [
+				'rule'        => new Rule( Phases::HEADERS, $p . 'variant', Rule::DESCRIPTION_PREFIX . 'Variante por cookies', '(http.host eq ' . self::quote( $this->site->host ) . ')', 'rewrite', $params ),
+				'risk'        => 'moderate',
+				'title'       => __( 'Variantes por cookie en el edge', 'imagina-turbo' ),
+				'description' => sprintf(
+					/* translators: %s: nombres de cookies. */
+					__( 'Cloudflare guarda una copia del HTML por cada combinación de %s (moneda, idioma o consentimiento de cookies) en lugar de mandar esas visitas al servidor. Esta regla escribe esas cookies en la cabecera X-Itb-Variant (siempre: una visita no puede enviarla a mano) y el sitio la declara en Vary.', 'imagina-turbo' ),
+					implode( ', ', array_slice( $this->site->varyCookies, 0, self::MAX_VARIANT_COOKIES ) )
+				),
+				'blocked'     => strlen( (string) $params['headers'][ self::VARIANT_HEADER ]['expression'] ) > self::MAX_EXPRESSION ? __( 'Demasiadas cookies de variación para una expresión.', 'imagina-turbo' ) : '',
+			];
+		}
 
 		if ( ! $this->limits->bool( 'cache_key_query_lists' ) && [] !== $this->site->ignoreParams ) {
 			$out[] = [
@@ -258,6 +280,19 @@ final class Templates {
 				],
 			];
 		}
+		// Variantes por cookie: la llave lleva x-itb-variant (passthrough) y accept-encoding (normalizado);
+		// cualquier otra cabecera que el sitio declare en Vary impide guardar la copia. Solo se guarda lo
+		// que el sitio marca como cacheable (bypass_by_default): sin Imagina Turbo, nada.
+		if ( $this->site->edgeVariants ) {
+			$params['edge_ttl'] = [ 'mode' => 'bypass_by_default' ];
+			$params['vary']     = [
+				'default' => [ 'action' => 'bypass' ],
+				'headers' => [
+					'accept-encoding'    => [ 'action' => 'normalize' ],
+					self::VARIANT_HEADER => [ 'action' => 'passthrough' ],
+				],
+			];
+		}
 		// El plugin de caché guarda una copia para móviles: el edge separa por tipo de dispositivo
 		// (cache_key.cache_by_device_type, todos los planes; Cloudflare envía CF-Device-Type al origen).
 		// Sin esto, el primer visitante decide qué versión reciben todos.
@@ -266,6 +301,28 @@ final class Templates {
 			$params['cache_key']['cache_by_device_type'] = true;
 		}
 		return $params;
+	}
+
+	/**
+	 * Cabecera x-itb-variant con las cookies de variación. Siempre se escribe (coalesce da "" si falta
+	 * una cookie), así una visita no puede elegir la variante enviando la cabecera.
+	 *
+	 * @return array{headers: array<string, array{operation: string, expression: string}>}
+	 */
+	public function variantParameters(): array {
+		$parts = [ '"v1"' ];
+		foreach ( array_slice( $this->site->varyCookies, 0, self::MAX_VARIANT_COOKIES ) as $cookie ) {
+			$parts[] = '"|"';
+			$parts[] = 'coalesce(http.request.cookies[' . self::quote( $cookie ) . '][0], "")';
+		}
+		return [
+			'headers' => [
+				self::VARIANT_HEADER => [
+					'operation'  => 'set',
+					'expression' => 'concat(' . implode( ', ', $parts ) . ')',
+				],
+			],
+		];
 	}
 
 	public function campaignExpression(): string {

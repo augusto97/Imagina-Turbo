@@ -26,8 +26,9 @@ final class TokenVault {
 
 	/**
 	 * @param string|null $keyMaterial Material de la clave (pruebas); por defecto AUTH_KEY + SECURE_AUTH_SALT.
+	 * @param string      $option      Opción donde se guarda (0.20.0: también la clave del verificador).
 	 */
-	public function __construct( private readonly ?string $keyMaterial = null ) {
+	public function __construct( private readonly ?string $keyMaterial = null, private readonly string $option = self::OPTION ) {
 	}
 
 	public static function available(): bool {
@@ -50,7 +51,7 @@ final class TokenVault {
 		$nonce = random_bytes( SODIUM_CRYPTO_SECRETBOX_NONCEBYTES );
 		$box   = sodium_crypto_secretbox( $token, $nonce, $key );
 		update_option(
-			self::OPTION,
+			$this->option,
 			[
 				'v'     => 1,
 				'kid'   => self::keyId( $key ),
@@ -121,14 +122,14 @@ final class TokenVault {
 	}
 
 	public function forget(): void {
-		delete_option( self::OPTION );
+		delete_option( $this->option );
 	}
 
 	/**
 	 * @return array{kid: string, nonce: string, box: string, last4: string, saved: int}|null
 	 */
 	private function stored(): ?array {
-		$stored = get_option( self::OPTION, null );
+		$stored = get_option( $this->option, null );
 		if ( ! is_array( $stored ) || ! is_string( $stored['kid'] ?? null ) || ! is_string( $stored['nonce'] ?? null ) || ! is_string( $stored['box'] ?? null ) ) {
 			return null;
 		}

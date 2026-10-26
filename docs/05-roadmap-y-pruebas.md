@@ -93,6 +93,15 @@ Antes de la fase 1, en paralelo: medir 3 sitios representativos (un WooCommerce,
 - Devuelve pasa/falla con evidencia. El plugin revierte automáticamente lo probado si falla.
 - Autenticación con firma HMAC; nunca guarda credenciales del sitio.
 
+**Implementado en la 0.20.0** (`verifier/`, con su README; en el plugin, Avanzado → Verificador externo):
+
+- Node 22, Playwright 1.56.1 (Chromium móvil, es-CO), Lighthouse 13.5.0 con `chrome-launcher` sobre el mismo Chromium, `pixelmatch` para el cambio visual. Docker (`node:22-bookworm-slim` + `playwright install --with-deps chromium`) con docker-compose, escuchando solo en localhost (TLS con Caddy o un túnel de Cloudflare).
+- Firma: la cadena canónica del hub (`Hub\Signer`), ventana de 5 minutos y nonces de un solo uso. La clave la genera el plugin, se guarda cifrada (`TokenVault` en su propia opción) y se copia a `sites.json`. Solo se prueban URLs del mismo host que el sitio y solo se aceptan cookies `itb_*` (nunca una sesión).
+- Batería por página: estado (o el 404 esperado), errores de JavaScript, peticiones propias rotas, errores de PHP en el HTML, LCP/CLS/TTFB, cabeceras de caché, captura de la primera pantalla contra una referencia y, en la ficha, añadir al carrito comprobado por la Store API y deshecho después. Interactúa antes de mirar (ratón, desplazamiento, Tab) para que carguen los scripts retrasados y lo diferido.
+- **No cubre (todavía)**: enviar el formulario de prueba (en producción mandaría correos), la comprobación del origen desde fuera (IP del servidor con el `Host` del sitio) ni las llamadas de los experimentos de `PluginFilter` y `AssetManager`, que siguen siendo loopback.
+- Nocturna: batería + Lighthouse cada día a `NIGHTLY_HOUR`; avisa si una página falla o baja 10 puntos frente a la anterior. El plugin lo lee una vez al día (`itb_verifier_daily`) y lo deja en el registro una sola vez por corrida.
+- Probado en local contra el WordPress de pruebas, con el servicio en Node y con la imagen Docker construida: encontró el error de JavaScript que deja a propósito un plugin de pruebas, añadió y quitó el producto del carrito, aceptó la 404 esperada y corrió Lighthouse 13.5.0 dentro del contenedor. Sus propias pruebas encontraron un fallo antes de publicar: el nombre del archivo de referencia de una página con tilde («Categoría») metía un guion de más.
+
 ### Herramientas
 
 | Comando | Qué hace |
@@ -610,4 +619,21 @@ Saber cuándo un sitio empeora sin mirarlo, y qué pasa con sus imágenes:
 - [x] La comparación avisa de los excesos del sitio y de cada plantilla, el mensaje cabe en el registro y al subir los presupuestos los excesos desaparecen; una clave desconocida responde 400.
 - [x] La auditoría recorre la biblioteca con EWWW 8.9.0 real y da la calidad WebP efectiva, la cola y la cobertura.
 - [ ] En La Tienda del Pintor (cuando instale 0.19): fijar los presupuestos con los datos de una semana de RUM y revisar la biblioteca (la cola de EWWW quedó a medias, tarea pendiente).
+
+## Versión 0.20.0
+
+- **Verificador externo** (sección «Verificador» de este documento y `verifier/README.md`): servicio Node + Playwright + Lighthouse para el VPS, con la batería funcional por página y la corrida nocturna. En el plugin: configuración con clave cifrada, prueba de conexión, «Ejecutar batería» (con o sin Lighthouse), resultados por página, referencia visual y el aviso diario de la nocturna.
+- **El RUM ya no cuenta** las visitas de Lighthouse, PageSpeed Insights ni del verificador.
+- **Dos fallos de JavaScript encontrados por el verificador en su primera corrida** (con LiteSpeed Cache en «Delayed», como en La Tienda del Pintor):
+  - **Mi cuenta**: «woocommerce_params is not defined». Las exclusiones de delay JS (`DelayJsExclusions`) solo se registraban en las páginas `FrontendHtml`. En el carrito, el pago y la cuenta, `woocommerce.min.js` corría (defer nativo) y sus datos en línea (`woocommerce-js-extra`) esperaban a la interacción. Ahora se registran también en esos tres tipos.
+  - **Carrito y pago con bloques**: al arreglar lo anterior apareció «Cannot read properties of undefined (reading 'wcUpdateDependencyRegistry')». WooCommerce 11.2 imprime a mano dos scripts en línea que van en orden (`wc-dependency-detection` en la cabecera, el registro en el pie). El registro lleva las URL de todos los scripts, así que alguna exclusión coincidía y no se retrasaba, pero la cabecera sí. Las dos contienen `wcUpdateDependencyRegistry`, que pasa a ser una exclusión fija (`DelayJsExclusions::INLINE_PAIRS`): así ninguna se retrasa.
+  - Después de los dos arreglos, las 10 páginas pasan (portada, entrada, página, producto con el carrito, tienda, categoría, carrito, pago, cuenta y la 404).
+- **CSS crítico**: no se genera aquí (lo hace el plugin de caché; ver el README del verificador).
+
+**Criterios de aceptación** (probados en local):
+
+- [x] La firma del plugin (PHP) y la del verificador (Node) coinciden byte a byte (vector fijo en las pruebas de los dos lados); firma, ventana, nonce repetido y ruta distinta se rechazan.
+- [x] Una corrida pedida desde el admin del plugin llega firmada, corre y se lee desde el admin.
+- [x] La imagen Docker se construye y corre la batería y Lighthouse dentro del contenedor.
+- [ ] En el VPS de Hetzner: instalar, conectar La Tienda del Pintor y revisar la primera nocturna.
 

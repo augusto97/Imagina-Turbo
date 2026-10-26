@@ -70,6 +70,7 @@ use ImaginaTurbo\Integrations\Abilities;
 use ImaginaTurbo\Integrations\ZarazBridge;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
+use ImaginaTurbo\Verifier\VerifierService;
 
 /**
  * Cablea servicios y hooks según el tipo de request.
@@ -223,6 +224,7 @@ final class Plugin {
 				}
 			)
 		);
+		add_action( Jobs::DAILY_VERIFIER, fn() => $this->whenActive( fn() => $this->container->get( VerifierService::class )->daily() ) );
 		add_action( 'rest_api_init', fn() => $this->container->get( RestRegistrar::class )->register() );
 		// Habilidades para asistentes de IA (Abilities API, 0.15.0): fuera del HTML público, sin costo ahí.
 		if ( RequestType::FrontendHtml !== $type ) {
@@ -256,13 +258,16 @@ final class Plugin {
 		}
 
 		if ( null !== Runtime::$config ) {
-			// Coexistencia: exclusiones de delay JS de la matriz para el plugin de caché del sitio.
-			if ( RequestType::FrontendHtml === $type ) {
+			// Coexistencia: exclusiones de delay JS de la matriz para el plugin de caché del sitio. También
+			// en el carrito, el pago y la cuenta (0.20.0): el plugin de caché retrasa su JS igual aunque no
+			// las guarde, y sin marcar los datos en línea de los scripts que no retrasa (woocommerce_params)
+			// el verificador encontró «woocommerce_params is not defined» en Mi cuenta.
+			if ( in_array( $type, [ RequestType::FrontendHtml, RequestType::Cart, RequestType::Checkout, RequestType::Account ], true ) ) {
 				DelayJsExclusions::register();
-				// Inventario de assets (petición loopback firmada desde el admin).
-				if ( isset( $_COOKIE['itb_assets_inv'] ) ) {
-					AssetInventory::register();
-				}
+			}
+			// Inventario de assets (petición loopback firmada desde el admin).
+			if ( RequestType::FrontendHtml === $type && isset( $_COOKIE['itb_assets_inv'] ) ) {
+				AssetInventory::register();
 			}
 			( new ModuleRegistry() )->boot( $this->container, Runtime::$config, self::request() );
 		}
@@ -564,6 +569,7 @@ final class Plugin {
 				static fn(): CloudflareService => $cloudflareFactory( $c )
 			)
 		);
+		$c->set( VerifierService::class, static fn( Container $c ): VerifierService => new VerifierService( $c->get( EventLog::class ) ) );
 		// Purga en el edge: Cloudflare si el módulo está activo y conectado; si no, nada.
 		$c->set(
 			EdgePurger::class,

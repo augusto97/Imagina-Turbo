@@ -48,6 +48,9 @@ final class Jobs {
 	/** Flota: plantilla del hub y desviaciones. */
 	public const DAILY_FLEET = 'itb_fleet_daily';
 
+	/** Verificador externo: avisos de la corrida nocturna (0.20.0). */
+	public const DAILY_VERIFIER = 'itb_verifier_daily';
+
 	/**
 	 * Tareas recurrentes: hook => intervalo en segundos.
 	 *
@@ -64,6 +67,7 @@ final class Jobs {
 			self::DAILY_RUM           => DAY_IN_SECONDS,
 			self::DAILY_DB            => DAY_IN_SECONDS,
 			self::DAILY_FLEET         => DAY_IN_SECONDS,
+			self::DAILY_VERIFIER      => DAY_IN_SECONDS,
 		];
 	}
 

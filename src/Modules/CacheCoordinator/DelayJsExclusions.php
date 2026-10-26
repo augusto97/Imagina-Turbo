@@ -110,6 +110,17 @@ final class DelayJsExclusions {
 	public const OWN = '/imagina-turbo/assets/js/';
 
 	/**
+	 * Parejas en línea que WooCommerce imprime a mano (echo, sin pasar por los filtros de WordPress) y
+	 * que tienen que correr en orden (0.20.0). En las páginas con bloques del carrito o del pago,
+	 * wc-dependency-detection (cabecera, crea window.wc) y wc-dependency-detection-registry (pie, lo
+	 * usa); verificado en src/Blocks/DependencyDetection.php de WooCommerce 11.2.1. El registro lleva
+	 * las URL de todos los scripts, así que alguna exclusión siempre coincide y LSCache no lo retrasaba,
+	 * pero sí la cabecera: «Cannot read properties of undefined (reading 'wcUpdateDependencyRegistry')»
+	 * (lo encontró el verificador). Las dos contienen este nombre: así ninguna se retrasa.
+	 */
+	public const INLINE_PAIRS = [ 'wcUpdateDependencyRegistry' ];
+
+	/**
 	 * Marca la etiqueta de un script que no se debe diferir ni retrasar.
 	 *
 	 * @param mixed $tag    Etiqueta.
@@ -366,7 +377,7 @@ final class DelayJsExclusions {
 		$list = Runtime::$config?->get( 'delay_js', [] );
 		$list = is_array( $list ) ? array_values( array_filter( $list, 'is_string' ) ) : [];
 		// Solo hay lista con WP Rocket o LSCache activos: entonces también los scripts propios.
-		return [] === $list ? [] : array_values( array_unique( array_merge( $list, [ self::OWN ] ) ) );
+		return [] === $list ? [] : array_values( array_unique( array_merge( $list, [ self::OWN ], self::INLINE_PAIRS ) ) );
 	}
 
 	/**

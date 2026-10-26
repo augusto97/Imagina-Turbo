@@ -44,6 +44,7 @@ final class RestRegistrar {
 			new AssetsController( $this->container ),
 			new DatabaseController( $this->container ),
 			new FleetController( $this->container ),
+			new VerifierController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

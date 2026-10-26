@@ -41,6 +41,8 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/diagnostics/platform` | Ajustes de Elementor, WoodMart, WooCommerce (caché de pedidos HPOS, tabla de atributos), caché de objetos e índices, con recomendación. Solo lectura |
 | GET | `/profiler/per-visit` | Peticiones AJAX, REST y Store API de visitantes sin sesión (48 h de muestreo aleatorio): por día, CPU por día y, con datos del RUM, por página vista; regla de carga condicional y qué hacer |
 | PUT / POST | `/profiler/settings` · `/profiler/intensive` | Tasa de muestreo · muestreo intensivo de 15 min |
+| GET · PUT | `/verifier` | Verificador externo (0.20.0): configuración (URL, id, estado de la clave), páginas que se prueban, bloque para `sites.json` y últimas corridas · guardar `{url, site, new_key}` (la primera vez, o con `new_key`, devuelve la clave nueva una sola vez) |
+| GET · POST · GET · POST | `/verifier/health` · `/verifier/runs` · `/verifier/runs/{id}` · `/verifier/baseline` | Prueba de conexión · pedir una corrida con las páginas clave (`lighthouse`) · resultado · tomar sus capturas como referencia visual. Todo firmado hacia el verificador; 502 si no responde |
 | GET · POST | `/diagnostics/images` · `/diagnostics/images/scan` | Auditoría de imágenes (0.19.0): último escaneo, estado de EWWW, optimizadores activos y recomendaciones · avanzar el escaneo de la biblioteca (8 s por paso; `restart: true` empieza de cero). Solo lectura sobre los medios y el optimizador |
 | GET / POST | `/diagnostics/audit` | Última auditoría de cacheabilidad · ejecutarla ahora (loopback) |
 | GET / PUT / DELETE | `/hub` | Estado · URL del hub · olvidar el registro |
@@ -126,6 +128,8 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_zaraz_scan` | Último escaneo de la portada (IDs de GA4, etiqueta de Google, GTM y Meta encontrados en el HTML) |
 | `itb_budgets_state` | Presupuestos (0.19.0): última comparación, presupuestos usados, p75 del sitio por dispositivo y excesos por plantilla |
 | `itb_image_audit` | Auditoría de imágenes (0.19.0): escaneo en curso o terminado (cursor, contadores, listas de las más pesadas y las más grandes) |
+| `itb_verifier` | Verificador (0.20.0): URL, id del sitio y la última corrida nocturna ya avisada |
+| `itb_verifier_key` | Clave compartida con el verificador, cifrada como el token de Cloudflare (solo sus últimos 4 caracteres se muestran) |
 | `itb_cf_firewall` | Últimos eventos del firewall (24 h) |
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |

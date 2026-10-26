@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, Download, ExternalLink, Link2, RotateCcw, Send, ShieldOff, Unlink, Upload } from 'lucide-react';
+import { Activity, Download, ExternalLink, Gauge, Link2, Play, RotateCcw, Send, ShieldOff, Unlink, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -16,7 +16,7 @@ import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction, useStatus } from '@/lib/queries';
-import type { CompileResult, HubStatus, PublicSettings, Safety, SignedCookie, Status } from '@/lib/types';
+import type { CompileResult, HubStatus, PublicSettings, Safety, SignedCookie, Status, VerifierRun, VerifierStatus } from '@/lib/types';
 import { downloadFile, formatDate } from '@/lib/utils';
 
 export function Advanced() {
@@ -54,6 +54,7 @@ export function Advanced() {
 					<LicenseCard status={ data } />
 					<HubCard />
 					<LoaderCard status={ data } />
+					<VerifierCard />
 				</div>
 			) }
 		</>
@@ -601,3 +602,191 @@ function HubCard() {
 		</Card>
 	);
 }
+
+const runStatus: Record<VerifierRun[ 'status' ], string> = { queued: __( 'En cola' ), running: __( 'Corriendo' ), done: __( 'Terminada' ), error: __( 'Error' ) };
+
+function VerifierCard() {
+	const client = useQueryClient();
+	const { data, isLoading, error } = useQuery( { queryKey: [ 'verifier' ], queryFn: () => api<VerifierStatus>( 'verifier' ) } );
+	const [ url, setUrl ] = useState( '' );
+	const [ site, setSite ] = useState( '' );
+	const [ newKey, setNewKey ] = useState( '' );
+	const [ run, setRun ] = useState<VerifierRun | null>( null );
+	const [ runError, setRunError ] = useState( '' );
+	const [ polling, setPolling ] = useState( false );
+	const save = useAction( ( body: { url: string; site: string; new_key: boolean } ) => api<VerifierStatus>( 'verifier', 'PUT', body ) );
+	const health = useAction( () => api<{ ok: boolean; version: string; queue: number }>( 'verifier/health' ) );
+	const baseline = useAction( ( runId: string ) => api<{ updated: number }>( 'verifier/baseline', 'POST', { run_id: runId } ) );
+	useEffect( () => {
+		if ( data ) {
+			setUrl( data.url );
+			setSite( data.site || data.site_url.replace( /^https?:\/\//, '' ).replace( /[^A-Za-z0-9_.-]/g, '-' ) );
+		}
+	}, [ data ] );
+	const onSaved = ( s: VerifierStatus ) => {
+		client.setQueryData( [ 'verifier' ], s );
+		setNewKey( s.new_key ?? '' );
+	};
+	// Pide la corrida y la sigue hasta que termina (el verificador trabaja de una en una).
+	const start = async ( lighthouse: boolean ) => {
+		setRunError( '' );
+		setPolling( true );
+		try {
+			const started = await api<{ id: string }>( 'verifier/runs', 'POST', { lighthouse } );
+			let current = await api<VerifierRun>( `verifier/runs/${ started.id }` );
+			setRun( current );
+			while ( current.status === 'queued' || current.status === 'running' ) {
+				await new Promise( ( r ) => setTimeout( r, 3000 ) );
+				current = await api<VerifierRun>( `verifier/runs/${ started.id }` );
+				setRun( current );
+			}
+			void client.invalidateQueries( { queryKey: [ 'verifier' ] } );
+		} catch ( e ) {
+			setRunError( e instanceof Error ? e.message : String( e ) );
+		} finally {
+			setPolling( false );
+		}
+	};
+	const open = async ( id: string ) => {
+		setRunError( '' );
+		try {
+			setRun( await api<VerifierRun>( `verifier/runs/${ id }` ) );
+		} catch ( e ) {
+			setRunError( e instanceof Error ? e.message : String( e ) );
+		}
+	};
+	const snippet = data && newKey ? JSON.stringify( { [ data.site ]: { key: newKey, ...Object.fromEntries( Object.entries( data.sites_json ).filter( ( [ k ] ) => k !== 'id' ) ) } }, null, 2 ) : '';
+	return (
+		<Card className="itb:lg:col-span-2">
+			<CardHeader>
+				<div className="itb:flex itb:items-center itb:justify-between">
+					<CardTitle>{ __( 'Verificador externo' ) }</CardTitle>
+					{ data && <Badge tone={ data.configured ? ( data.error ? 'amber' : 'green' ) : 'neutral' }>{ data.configured ? ( data.error ? __( 'Con errores' ) : __( 'Configurado' ) ) : __( 'Apagado' ) }</Badge> }
+				</div>
+				<CardDescription>
+					{ __( 'Servicio aparte (Node + Playwright, en tu VPS; está en la carpeta verifier/ del repositorio). Abre las páginas clave como un visitante en el móvil, interactúa para que carguen los scripts retrasados y avisa de errores de JavaScript o PHP, peticiones rotas, cambios visuales y si se puede añadir al carrito. Cada noche corre también Lighthouse y el registro avisa si algo falla o baja 10 puntos. Firma cada petición; nunca recibe usuarios ni contraseñas del sitio.' ) }
+				</CardDescription>
+			</CardHeader>
+			<CardContent>
+				{ isLoading && <Skeleton className="itb:h-24" /> }
+				{ error && <Notice level="error">{ error.message }</Notice> }
+				{ data && (
+					<div className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
+						<div className="itb:flex itb:flex-wrap itb:items-start itb:gap-2">
+							<Input className="itb:min-w-0 itb:flex-1" placeholder="https://verificador.imaginawp.com" aria-label={ __( 'URL del verificador' ) } value={ url } onChange={ ( e ) => setUrl( e.target.value ) } />
+							<Input className="itb:w-56" placeholder={ __( 'Id del sitio' ) } aria-label={ __( 'Id del sitio' ) } value={ site } onChange={ ( e ) => setSite( e.target.value ) } />
+							<Button size="sm" className="itb:h-9" variant="outline" disabled={ save.isPending } onClick={ () => save.mutate( { url, site, new_key: false }, { onSuccess: onSaved } ) }>
+								{ __( 'Guardar' ) }
+							</Button>
+						</div>
+						{ data.key.state !== 'none' && (
+							<dl className="itb:m-0">
+								<KeyValue label={ __( 'Clave' ) }>{ data.key.state === 'ok' ? `…${ data.key.last4 }` : data.key.state }</KeyValue>
+								<KeyValue label={ __( 'Páginas que prueba' ) }>{ data.pages.map( ( p ) => p.label ).join( ', ' ) }</KeyValue>
+							</dl>
+						) }
+						{ newKey && (
+							<Notice level="info">
+								{ __( 'Clave nueva (solo se muestra ahora). Copia este bloque dentro de "sites" en sites.json del verificador y recárgalo (docker compose kill -s HUP verifier):' ) }
+								<Textarea readOnly rows={ 8 } className="itb:mt-2 itb:font-mono itb:text-xs" value={ snippet } />
+							</Notice>
+						) }
+						{ data.error && <Notice level="warning">{ data.error }</Notice> }
+						<div className="itb:flex itb:flex-wrap itb:gap-2">
+							<Button size="sm" variant="ghost" disabled={ save.isPending || ! data.url } onClick={ () => save.mutate( { url, site, new_key: true }, { onSuccess: onSaved } ) }>
+								<RotateCcw aria-hidden />
+								{ __( 'Generar clave nueva' ) }
+							</Button>
+							<Button size="sm" variant="outline" disabled={ ! data.configured || health.isPending } onClick={ () => health.mutate( undefined ) }>
+								<Activity aria-hidden />
+								{ __( 'Probar conexión' ) }
+							</Button>
+							<Button size="sm" disabled={ ! data.configured || polling } onClick={ () => void start( false ) }>
+								<Play aria-hidden />
+								{ polling ? __( 'Corriendo…' ) : __( 'Ejecutar batería' ) }
+							</Button>
+							<Button size="sm" variant="outline" disabled={ ! data.configured || polling } onClick={ () => void start( true ) }>
+								<Gauge aria-hidden />
+								{ __( 'Batería + Lighthouse' ) }
+							</Button>
+						</div>
+						{ health.data && <Notice level="success">{ `${ __( 'Conectado con el verificador' ) } ${ health.data.version } · ${ __( 'en cola:' ) } ${ health.data.queue }` }</Notice> }
+						<ErrorText error={ save.error ?? health.error ?? baseline.error } />
+						{ runError && <Notice level="error">{ runError }</Notice> }
+						{ run && (
+							<div className="itb:overflow-x-auto">
+								<div className="itb:mb-1 itb:flex itb:flex-wrap itb:items-center itb:gap-2 itb:text-xs itb:text-zinc-500">
+									<span>{ `${ run.trigger === 'nightly' ? __( 'Nocturna' ) : __( 'Manual' ) } · ${ formatDate( run.created_at, config.locale ) } · ${ runStatus[ run.status ] }` }</span>
+									{ run.pass !== null && <Badge tone={ run.pass ? 'green' : 'red' }>{ run.pass ? __( 'Pasa' ) : __( 'Falla' ) }</Badge> }
+									{ run.status === 'done' && run.options.visual && (
+										<Button size="sm" variant="ghost" disabled={ baseline.isPending } onClick={ () => baseline.mutate( run.id ) }>
+											{ baseline.data ? __( 'Referencia actualizada' ) : __( 'Usar como referencia visual' ) }
+										</Button>
+									) }
+								</div>
+								{ run.error && <Notice level="error">{ run.error }</Notice> }
+								{ run.alerts.length > 0 && <Notice level="warning">{ run.alerts.join( ' · ' ) }</Notice> }
+								<table className="itb:w-full itb:border-collapse">
+									<thead>
+										<tr className="itb:text-left itb:text-xs itb:text-zinc-500">
+											<th className="itb:py-1 itb:pr-3 itb:font-medium">{ __( 'Página' ) }</th>
+											<th className="itb:py-1 itb:pr-3 itb:font-medium">{ __( 'Resultado' ) }</th>
+											<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">LCP · CLS</th>
+											<th className="itb:py-1 itb:pr-3 itb:text-right itb:font-medium">Lighthouse</th>
+											<th className="itb:py-1 itb:font-medium">{ __( 'Detalle' ) }</th>
+										</tr>
+									</thead>
+									<tbody>
+										{ run.results.map( ( r ) => (
+											<tr key={ r.url } className="itb:border-t itb:border-zinc-100 itb:align-top">
+												<td className="itb:py-1.5 itb:pr-3">
+													<a href={ r.url } target="_blank" rel="noreferrer">{ r.label }</a>
+													<span className="itb:block itb:text-xs itb:text-zinc-500">{ `HTTP ${ r.status }${ r.ttfb !== null ? ` · TTFB ${ r.ttfb } ms` : '' }` }</span>
+												</td>
+												<td className="itb:py-1.5 itb:pr-3">
+													<Badge tone={ r.pass ? 'green' : 'red' }>{ r.pass ? __( 'Pasa' ) : __( 'Falla' ) }</Badge>
+													{ r.flow && <span className="itb:block itb:text-xs itb:text-zinc-500">{ r.flow.pass ? __( 'Carrito: bien' ) : __( 'Carrito: falla' ) }</span> }
+												</td>
+												<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ `${ r.lcp ?? '—' } ms · ${ r.cls ?? '—' }` }</td>
+												<td className="itb:py-1.5 itb:pr-3 itb:text-right itb:tabular-nums">{ r.lighthouse ? ( r.lighthouse.score ?? r.lighthouse.error ?? '—' ) : '—' }</td>
+												<td className="itb:py-1.5 itb:text-xs">
+													{ r.failures.slice( 0, 3 ).map( ( f ) => (
+														<span key={ f } className="itb:block itb:text-red-700">{ f }</span>
+													) ) }
+													{ r.warnings.length > 0 && <span className="itb:block itb:text-zinc-500">{ `${ r.warnings.length } ${ r.warnings.length === 1 ? __( 'aviso' ) : __( 'avisos' ) }` }</span> }
+													{ typeof r.visual === 'number' && r.visual > 0 && <span className="itb:block itb:text-zinc-500">{ `${ __( 'Cambio visual' ) }: ${ Math.round( r.visual * 100 ) } %` }</span> }
+												</td>
+											</tr>
+										) ) }
+									</tbody>
+								</table>
+							</div>
+						) }
+						{ data.runs && data.runs.length > 0 && (
+							<div className="itb:overflow-x-auto">
+								<p className="itb:m-0 itb:mb-1 itb:text-xs itb:text-zinc-500">{ __( 'Últimas corridas' ) }</p>
+								<table className="itb:w-full itb:border-collapse">
+									<tbody>
+										{ data.runs.map( ( r ) => (
+											<tr key={ r.id } className="itb:border-t itb:border-zinc-100">
+												<td className="itb:py-1.5 itb:pr-3">
+													<button type="button" className="itb:cursor-pointer itb:border-0 itb:bg-transparent itb:p-0 itb:text-left itb:text-[13px] itb:text-zinc-900 itb:underline" onClick={ () => void open( r.id ) }>
+														{ formatDate( r.created_at, config.locale ) }
+													</button>
+												</td>
+												<td className="itb:py-1.5 itb:pr-3">{ r.trigger === 'nightly' ? __( 'Nocturna' ) : __( 'Manual' ) }</td>
+												<td className="itb:py-1.5 itb:pr-3">{ r.pass === null ? runStatus[ r.status ] : <Badge tone={ r.pass ? 'green' : 'red' }>{ r.pass ? __( 'Pasa' ) : __( 'Falla' ) }</Badge> }</td>
+												<td className="itb:py-1.5 itb:text-xs itb:text-zinc-500">{ r.alerts.slice( 0, 2 ).join( ' · ' ) }</td>
+											</tr>
+										) ) }
+									</tbody>
+								</table>
+							</div>
+						) }
+					</div>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+

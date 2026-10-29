@@ -69,6 +69,8 @@ final class Settings {
 			'shield_facets'            => false,
 			'shield_facets_views'      => true,
 			'shield_facets_robots'     => false,
+			'shield_facets_scope'      => 'combos',
+			'shield_facets_empty404'   => false,
 			'tweaks'                   => [],
 			'tweak_revisions'          => 5,
 			'tweak_autosave'           => 120,
@@ -301,7 +303,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'shield_facets', 'shield_facets_views', 'shield_facets_robots', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments', 'cache_edge_variants' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'shield_facets', 'shield_facets_views', 'shield_facets_robots', 'shield_facets_empty404', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments', 'cache_edge_variants' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
@@ -320,6 +322,10 @@ final class Settings {
 				'ga4'  => true === ( $input['zaraz_takeover']['ga4'] ?? false ),
 				'meta' => true === ( $input['zaraz_takeover']['meta'] ?? false ),
 			];
+		}
+		// Alcance del corte de filtros para crawlers (0.21.1): solo combinaciones o todos los filtros.
+		if ( isset( $input['shield_facets_scope'] ) && in_array( $input['shield_facets_scope'], [ 'combos', 'all' ], true ) ) {
+			$out['shield_facets_scope'] = $input['shield_facets_scope'];
 		}
 		// Turnstile (0.21.0): clave del sitio, formularios activos, pasarelas sin verificación y la firma de
 		// las claves que pasaron la prueba (sin ella no se activa ningún formulario).

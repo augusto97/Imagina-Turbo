@@ -53,6 +53,8 @@ final class FleetPolicy {
 		'shield_facets',
 		'shield_facets_views',
 		'shield_facets_robots',
+		'shield_facets_scope',
+		'shield_facets_empty404',
 		'tweak_revisions',
 		'tweak_autosave',
 		'firewall_rules',

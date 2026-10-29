@@ -21,7 +21,7 @@ const RULES: { id: 'exploits' | 'surface' | 'bots' | 'facets'; label: string; de
 	{ id: 'exploits', label: __( 'Ataques en la URL' ), description: __( 'Recorrido de directorios, inyección SQL y XSS en el query, archivos sensibles (.git, .env, .sql, .bak, phpunit) y métodos TRACE/TRACK/DEBUG.' ) },
 	{ id: 'surface', label: __( 'Superficie de WordPress' ), description: __( 'Enumeración de usuarios, PHP dentro de uploads, readme.html, license.txt, copias de wp-config y XML-RPC (salvo que un plugin lo necesite).' ) },
 	{ id: 'bots', label: __( 'Escáneres conocidos' ), description: __( 'sqlmap, nikto, wpscan, nuclei y otros, por su user agent.' ) },
-	{ id: 'facets', label: __( 'Combinaciones de filtros para crawlers' ), description: __( 'Google, Bing, Meta y otros crawlers que piden dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro se cortan en Cloudflare, sin llegar al servidor. Cada filtro por separado sigue abierto. Apagada por defecto; ocupa una de las 5 reglas del plan Free.' ) },
+	{ id: 'facets', label: __( 'Combinaciones de filtros para crawlers' ), description: __( 'Google, Bing, Meta y otros crawlers que piden dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro se cortan en Cloudflare, sin llegar al servidor. Cada filtro por separado sigue abierto, salvo que el escudo esté en «Todos los filtros» (Ajustes rápidos). Apagada por defecto; ocupa una de las 5 reglas del plan Free.' ) },
 ];
 
 export function Firewall() {

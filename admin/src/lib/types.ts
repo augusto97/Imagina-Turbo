@@ -477,7 +477,7 @@ export interface WooInspect {
 
 export interface ShieldStatus {
 	enabled: boolean;
-	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; facets: boolean; facets_views: boolean; facets_robots: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
+	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; facets: boolean; facets_views: boolean; facets_robots: boolean; facets_empty404: boolean; facets_scope: 'combos' | 'all'; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
 	required: { xmlrpc: boolean; rest_users: boolean };
 	robots: { url: string; physical: boolean; rules: string[] };
 	cron: { disabled: boolean; command: string; wp_cli: string };

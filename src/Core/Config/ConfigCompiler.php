@@ -526,6 +526,9 @@ final class ConfigCompiler {
 			'facets'           => true === $this->settings->get( 'shield_facets', false ),
 			'facets_views'     => $on( 'shield_facets_views' ),
 			'facets_robots'    => true === $this->settings->get( 'shield_facets_robots', false ),
+			// 0.21.1: todos los filtros (no solo las combinaciones) y 404 cuando un filtro no tiene productos.
+			'facets_scope'     => 'all' === $this->settings->get( 'shield_facets_scope', 'combos' ) ? 'all' : 'combos',
+			'facets_empty404'  => true === $this->settings->get( 'shield_facets_empty404', false ),
 			'prefetch_paths'   => $this->prefetchPaths(),
 			'required'         => [
 				'xmlrpc'     => $xmlrpcRequired,

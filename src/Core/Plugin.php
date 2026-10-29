@@ -71,6 +71,7 @@ use ImaginaTurbo\Integrations\ZarazBridge;
 use ImaginaTurbo\Rest\RestRegistrar;
 use ImaginaTurbo\Support\Jobs;
 use ImaginaTurbo\Verifier\VerifierService;
+use ImaginaTurbo\Modules\Turnstile\Turnstile;
 
 /**
  * Cablea servicios y hooks según el tipo de request.
@@ -554,6 +555,7 @@ final class Plugin {
 					'enabled'   => null !== $config && $config->moduleEnabled( 'firewall' ),
 					'rules'     => (array) $c->get( Settings::class )->get( 'firewall_rules', [] ),
 					'ratelimit' => (bool) $c->get( Settings::class )->get( 'firewall_ratelimit', true ),
+					'views'     => (bool) $c->get( Settings::class )->get( 'shield_facets_views', true ),
 				]
 			);
 		};
@@ -570,6 +572,7 @@ final class Plugin {
 			)
 		);
 		$c->set( VerifierService::class, static fn( Container $c ): VerifierService => new VerifierService( $c->get( EventLog::class ) ) );
+		$c->set( Turnstile::class, static fn( Container $c ): Turnstile => new Turnstile( Turnstile::vault(), $c->get( EventLog::class ) ) );
 		// Purga en el edge: Cloudflare si el módulo está activo y conectado; si no, nada.
 		$c->set(
 			EdgePurger::class,

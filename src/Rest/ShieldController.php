@@ -14,7 +14,10 @@ use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Modules\CacheCoordinator\Purger;
+use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
+use ImaginaTurbo\Modules\Shield\ShieldModule;
 use ImaginaTurbo\Support\CloudflareAccess;
 
 /**
@@ -22,7 +25,10 @@ use ImaginaTurbo\Support\CloudflareAccess;
  */
 final class ShieldController extends Controller {
 
-	private const BOOLS = [ 'static', 'author', 'xmlrpc', 'rest_users', 'heartbeat', 'prefetch' ];
+	private const BOOLS = [ 'static', 'author', 'xmlrpc', 'rest_users', 'heartbeat', 'prefetch', 'facets', 'facets_views', 'facets_robots' ];
+
+	/** User agent de la prueba de combinaciones: se identifica como crawler por su enlace, sin suplantar a nadie. */
+	private const CRAWLER_TEST_UA = 'ImaginaTurbo-ShieldTest/1.0 (+https://imaginawp.com)';
 
 	public function registerRoutes(): void {
 		$this->route( '/shield/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->status() ) );
@@ -64,7 +70,7 @@ final class ShieldController extends Controller {
 		}
 		$values = [];
 		foreach ( self::BOOLS as $key ) {
-			$values[ $key ] = (bool) $settings->get( 'shield_' . $key, true );
+			$values[ $key ] = (bool) $settings->get( 'shield_' . $key, ! in_array( $key, [ 'facets', 'facets_robots' ], true ) );
 		}
 		$values['heartbeat_admin']  = (int) $settings->get( 'shield_heartbeat_admin', 60 );
 		$values['heartbeat_editor'] = (int) $settings->get( 'shield_heartbeat_editor', 15 );
@@ -76,6 +82,12 @@ final class ShieldController extends Controller {
 			'required' => [
 				'xmlrpc'     => true === ( $required['xmlrpc'] ?? false ),
 				'rest_users' => true === ( $required['rest_users'] ?? false ),
+			],
+			// robots.txt (0.21.0): uno físico no pasa por WordPress; entonces las reglas se copian a mano.
+			'robots'   => [
+				'url'      => home_url( '/robots.txt' ),
+				'physical' => file_exists( ABSPATH . 'robots.txt' ),
+				'rules'    => ShieldModule::robotsRules( $values['facets_views'] ),
 			],
 			'cron'     => [
 				'disabled' => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
@@ -94,6 +106,10 @@ final class ShieldController extends Controller {
 		}
 		$this->container->get( Settings::class )->update( $changes );
 		$this->container->get( ConfigCompiler::class )->compile();
+		// El robots.txt queda en la caché del origen y de Cloudflare: se purga si cambian sus reglas.
+		if ( isset( $changes['shield_facets_robots'] ) || isset( $changes['shield_facets_views'] ) ) {
+			$this->container->get( Purger::class )->purge( new PurgeRequest( [], [ home_url( '/robots.txt' ) ], false, 'robots' ) );
+		}
 		$this->container->get( EventLog::class )->info(
 			'shield',
 			'settings',
@@ -107,7 +123,8 @@ final class ShieldController extends Controller {
 	}
 
 	/**
-	 * Pide como anónimo un asset inexistente, ?author=1, xmlrpc.php y /wp/v2/users: muestra qué responde
+	 * Pide como anónimo un asset inexistente, ?author=1, xmlrpc.php, /wp/v2/users y, con la guardia de
+	 * filtros activa, una combinación como crawler: muestra qué responde
 	 * el escudo y cuánto tarda (un 404 de imagen debe resolverse sin cargar plugins).
 	 */
 	public function test(): \WP_REST_Response {
@@ -118,14 +135,25 @@ final class ShieldController extends Controller {
 			'xmlrpc'     => site_url( 'xmlrpc.php' ),
 			'rest_users' => home_url( '/' . $rest . '/wp/v2/users' ),
 		];
-		$out   = [];
+		// Combinación de dos filtros pedida como crawler: con la guardia activa responde 403 sin cargar nada.
+		if ( true === $this->container->get( Settings::class )->get( 'shield_facets', false ) ) {
+			$shop            = function_exists( 'wc_get_page_permalink' ) ? (string) wc_get_page_permalink( 'shop' ) : home_url( '/' );
+			$cases['facets'] = add_query_arg(
+				[
+					'filter_itb_a' => 'x',
+					'filter_itb_b' => 'y',
+				],
+				$shop
+			);
+		}
+		$out = [];
 		foreach ( $cases as $key => $url ) {
 			$start = microtime( true );
 			$args  = [
 				'method'      => 'xmlrpc' === $key ? 'POST' : 'GET',
 				'timeout'     => 10,
 				'redirection' => 0,
-				'user-agent'  => Warmer::USER_AGENT,
+				'user-agent'  => 'facets' === $key ? self::CRAWLER_TEST_UA : Warmer::USER_AGENT,
 				'sslverify'   => (bool) apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro del core para loopback.
 			];
 			if ( 'xmlrpc' === $key ) {

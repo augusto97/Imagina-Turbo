@@ -103,17 +103,48 @@ final class Templates {
 		return $out;
 	}
 
+	/** Preferencia para que el plan nunca cambie un ajuste. */
+	public const KEEP = 'keep';
+
+	/** Campos de /zones/{id}/bot_management (políticas de bots de IA por comportamiento, 0.21.0). */
+	public const BOT_FIELDS = [ 'ai_training', 'ai_search', 'ai_user' ];
+
+	private const ON_OFF = [ 'on', 'off' ];
+
 	/**
-	 * Ajustes de zona recomendados. read_only: solo se leen y se avisa (regla 8).
+	 * Ajustes de zona. read_only: solo se leen y se avisa (regla 8).
 	 *
-	 * @return list<array{id: string, label: string, recommended: mixed, risk: string, read_only: bool, note: string}>
+	 * Cada uno lleva su valor recomendado (default), las opciones que se pueden elegir y el valor que el
+	 * plan aplicará (recommended): el elegido en $prefs si es una opción válida, o el recomendado. Con
+	 * "keep" (elegido o recomendado) el ajuste no se gestiona y el plan nunca lo cambia (0.21.0).
+	 *
+	 * @param array<string, string|int> $prefs Valor elegido por ajuste.
+	 * @return list<array{id: string, label: string, recommended: mixed, default: mixed, options: list<string|int>, managed: bool, risk: string, read_only: bool, note: string}>
 	 */
-	public static function settings( bool $edgeHtml = false ): array {
+	public static function settings( bool $edgeHtml = false, array $prefs = [] ): array {
+		$out = [];
+		foreach ( self::settingDefs( $edgeHtml ) as $def ) {
+			$pref           = $prefs[ $def['id'] ] ?? null;
+			$def['default'] = $def['recommended'];
+			if ( ! $def['read_only'] && null !== $pref && ( self::KEEP === $pref || in_array( $pref, $def['options'], true ) ) ) {
+				$def['recommended'] = $pref;
+			}
+			$def['managed'] = ! $def['read_only'] && self::KEEP !== $def['recommended'];
+			$out[]          = $def;
+		}
+		return $out;
+	}
+
+	/**
+	 * @return list<array{id: string, label: string, recommended: mixed, options: list<string|int>, risk: string, read_only: bool, note: string}>
+	 */
+	private static function settingDefs( bool $edgeHtml ): array {
 		return [
 			[
 				'id'          => 'http3',
 				'label'       => 'HTTP/3',
 				'recommended' => 'on',
+				'options'     => self::ON_OFF,
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => __( 'Conexiones más rápidas en redes móviles.', 'imagina-turbo' ),
@@ -122,6 +153,7 @@ final class Templates {
 				'id'          => 'early_hints',
 				'label'       => 'Early Hints',
 				'recommended' => 'on',
+				'options'     => self::ON_OFF,
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => __( 'Adelanta los preload del sitio mientras el origen responde.', 'imagina-turbo' ),
@@ -130,6 +162,7 @@ final class Templates {
 				'id'          => 'tiered_cache_smart_topology_enable',
 				'label'       => 'Smart Tiered Cache',
 				'recommended' => 'on',
+				'options'     => self::ON_OFF,
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => __( 'Menos peticiones al origen: los centros de datos se piden entre sí antes de ir al servidor.', 'imagina-turbo' ),
@@ -138,6 +171,7 @@ final class Templates {
 				'id'          => 'browser_cache_ttl',
 				'label'       => __( 'TTL de caché del navegador', 'imagina-turbo' ),
 				'recommended' => 0,
+				'options'     => [ 0, 1800, 14400, 86400, 2678400, 31536000 ],
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => __( 'Respetar las cabeceras del sitio (0) en lugar de imponer 4 horas.', 'imagina-turbo' ),
@@ -146,6 +180,7 @@ final class Templates {
 				'id'          => 'speed_brain',
 				'label'       => 'Speed Brain',
 				'recommended' => $edgeHtml ? 'on' : 'off',
+				'options'     => self::ON_OFF,
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => $edgeHtml
@@ -156,6 +191,7 @@ final class Templates {
 				'id'          => 'always_online',
 				'label'       => 'Always Online',
 				'recommended' => 'off',
+				'options'     => self::ON_OFF,
 				'risk'        => 'safe',
 				'read_only'   => false,
 				'note'        => __( 'Con Always Online activo, Cloudflare ignora stale-while-revalidate: tras caducar una página, el visitante espera al servidor en lugar de recibir la copia anterior. Si el servidor cae, stale-if-error ya sirve la copia guardada.', 'imagina-turbo' ),
@@ -164,14 +200,52 @@ final class Templates {
 				'id'          => 'rocket_loader',
 				'label'       => 'Rocket Loader',
 				'recommended' => 'off',
+				'options'     => self::ON_OFF,
 				'risk'        => 'moderate',
 				'read_only'   => false,
 				'note'        => __( 'Choca con el retraso de JavaScript del plugin de caché y rompe scripts en línea.', 'imagina-turbo' ),
 			],
 			[
+				'id'          => '0rtt',
+				'label'       => '0-RTT',
+				'recommended' => 'on',
+				'options'     => self::ON_OFF,
+				'risk'        => 'moderate',
+				'read_only'   => false,
+				'note'        => __( 'Quien vuelve al sitio abre la conexión sin esperar el saludo TLS completo. Solo GET, HEAD y OPTIONS, nunca POST; esas peticiones se pueden repetir por diseño y llegan con la cabecera Early-Data: 1.', 'imagina-turbo' ),
+			],
+			[
+				'id'          => 'ai_training',
+				'label'       => __( 'Bots de IA: entrenamiento', 'imagina-turbo' ),
+				'recommended' => 'block',
+				'options'     => [ 'block', 'disallow', 'only_on_ad_pages', 'disabled' ],
+				'risk'        => 'safe',
+				'read_only'   => false,
+				'note'        => __( 'Crawlers que copian el contenido para entrenar modelos (y los de uso mixto, que también entrenan): consumen servidor y no traen visitas. «Bloquear» los corta en Cloudflare; «Solo pedirlo en robots.txt» no los frena si no lo respetan.', 'imagina-turbo' ),
+			],
+			[
+				'id'          => 'ai_search',
+				'label'       => __( 'Bots de IA: búsqueda', 'imagina-turbo' ),
+				'recommended' => self::KEEP,
+				'options'     => [ 'disabled', 'block', 'only_on_ad_pages' ],
+				'risk'        => 'moderate',
+				'read_only'   => false,
+				'note'        => __( 'Los que indexan para responder preguntas (búsqueda de ChatGPT, Perplexity…). Pueden traer compradores: sin gestionar por defecto.', 'imagina-turbo' ),
+			],
+			[
+				'id'          => 'ai_user',
+				'label'       => __( 'Bots de IA: agentes', 'imagina-turbo' ),
+				'recommended' => self::KEEP,
+				'options'     => [ 'disabled', 'block', 'only_on_ad_pages' ],
+				'risk'        => 'moderate',
+				'read_only'   => false,
+				'note'        => __( 'Actúan en tiempo real por una persona (un asistente que consulta un producto o un navegador automático). Bloquearlos puede costar ventas: sin gestionar por defecto.', 'imagina-turbo' ),
+			],
+			[
 				'id'          => 'ssl',
 				'label'       => 'SSL/TLS',
 				'recommended' => 'strict',
+				'options'     => [],
 				'risk'        => 'safe',
 				'read_only'   => true,
 				'note'        => __( 'Solo lectura. Flexible deja el tramo hasta el servidor sin cifrar.', 'imagina-turbo' ),
@@ -180,6 +254,7 @@ final class Templates {
 				'id'          => 'always_use_https',
 				'label'       => 'Always Use HTTPS',
 				'recommended' => 'on',
+				'options'     => [],
 				'risk'        => 'safe',
 				'read_only'   => true,
 				'note'        => __( 'Solo lectura.', 'imagina-turbo' ),

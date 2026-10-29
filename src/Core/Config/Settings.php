@@ -66,10 +66,18 @@ final class Settings {
 			'shield_heartbeat_admin'   => 60,
 			'shield_heartbeat_editor'  => 15,
 			'shield_filter_limit'      => 3,
+			'shield_facets'            => false,
+			'shield_facets_views'      => true,
+			'shield_facets_robots'     => false,
 			'tweaks'                   => [],
 			'tweak_revisions'          => 5,
 			'tweak_autosave'           => 120,
 			'firewall_rules'           => [],
+			'cf_zone_prefs'            => [],
+			'turnstile_site_key'       => '',
+			'turnstile_forms'          => [],
+			'turnstile_skip'           => [],
+			'turnstile_verified'       => '',
 			'firewall_ratelimit'       => true,
 			'rum_rate'                 => 0.05,
 			'spec_mode'                => 'prefetch',
@@ -293,7 +301,7 @@ final class Settings {
 				$out[ $key ] = $map;
 			}
 		}
-		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments', 'cache_edge_variants' ] as $key ) {
+		foreach ( [ 'cache_nonce_refresh', 'cache_warm', 'woo_recently_viewed', 'shield_static', 'shield_author', 'shield_xmlrpc', 'shield_rest_users', 'shield_heartbeat', 'shield_prefetch', 'shield_facets', 'shield_facets_views', 'shield_facets_robots', 'firewall_ratelimit', 'spec_predictive', 'spec_fallback', 'view_transitions', 'hints_lcp', 'hints_fonts', 'hints_facades', 'fleet_remote', 'ai_write', 'lazy_elements', 'cache_fragments', 'cache_edge_variants' ] as $key ) {
 			if ( isset( $input[ $key ] ) && is_bool( $input[ $key ] ) ) {
 				$out[ $key ] = $input[ $key ];
 			}
@@ -312,6 +320,29 @@ final class Settings {
 				'ga4'  => true === ( $input['zaraz_takeover']['ga4'] ?? false ),
 				'meta' => true === ( $input['zaraz_takeover']['meta'] ?? false ),
 			];
+		}
+		// Turnstile (0.21.0): clave del sitio, formularios activos, pasarelas sin verificación y la firma de
+		// las claves que pasaron la prueba (sin ella no se activa ningún formulario).
+		if ( isset( $input['turnstile_site_key'] ) && is_string( $input['turnstile_site_key'] ) ) {
+			$key                       = trim( $input['turnstile_site_key'] );
+			$out['turnstile_site_key'] = 1 === preg_match( '/^[0-9A-Za-z_\-]{10,100}$/', $key ) ? $key : '';
+		}
+		if ( isset( $input['turnstile_forms'] ) && is_array( $input['turnstile_forms'] ) ) {
+			$forms = [];
+			foreach ( [ 'login', 'register', 'lostpassword', 'checkout' ] as $form ) {
+				$forms[ $form ] = true === ( $input['turnstile_forms'][ $form ] ?? false );
+			}
+			$out['turnstile_forms'] = $forms;
+		}
+		if ( isset( $input['turnstile_skip'] ) && is_array( $input['turnstile_skip'] ) ) {
+			$out['turnstile_skip'] = array_values( array_unique( array_filter( array_map( static fn( $g ): string => is_string( $g ) ? trim( $g ) : '', $input['turnstile_skip'] ), static fn( string $g ): bool => 1 === preg_match( '/^[A-Za-z0-9_\-]{1,60}$/', $g ) ) ) );
+		}
+		if ( isset( $input['turnstile_verified'] ) && is_string( $input['turnstile_verified'] ) ) {
+			$out['turnstile_verified'] = 1 === preg_match( '/^[a-f0-9]{16}$/', $input['turnstile_verified'] ) ? $input['turnstile_verified'] : '';
+		}
+		// Valor elegido para cada ajuste de la zona de Cloudflare (0.21.0); Templates descarta lo que no sea una opción.
+		if ( isset( $input['cf_zone_prefs'] ) && is_array( $input['cf_zone_prefs'] ) ) {
+			$out['cf_zone_prefs'] = self::zonePrefs( $input['cf_zone_prefs'] );
 		}
 		// Documentos de Elementor diferidos (0.17.0).
 		if ( isset( $input['lazy_documents'] ) && is_array( $input['lazy_documents'] ) ) {
@@ -485,6 +516,27 @@ final class Settings {
 			];
 		}
 		return array_slice( array_values( $out ), 0, 10 );
+	}
+
+	/**
+	 * Preferencias de ajustes de la zona: id => valor (texto corto o entero).
+	 *
+	 * @param array<mixed> $input Entrada.
+	 * @return array<string, string|int>
+	 */
+	public static function zonePrefs( array $input ): array {
+		$out = [];
+		foreach ( $input as $id => $value ) {
+			if ( ! is_string( $id ) || 1 !== preg_match( '/^[a-z0-9_]{2,60}$/', $id ) ) {
+				continue;
+			}
+			if ( is_int( $value ) ) {
+				$out[ $id ] = $value;
+			} elseif ( is_string( $value ) && 1 === preg_match( '/^[a-z0-9_]{1,40}$/', $value ) ) {
+				$out[ $id ] = $value;
+			}
+		}
+		return $out;
 	}
 
 	/**

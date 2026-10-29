@@ -63,7 +63,7 @@ ITB_CF_MOCK_DIR=/tmp/itb-cf php -S 127.0.0.1:8098 tests/e2e/mock-cloudflare.php
 
 En `wp-config.php` del sitio de pruebas: `define( 'ITB_CF_API_BASE', 'http://127.0.0.1:8098/client/v4' );`. Con esa constante la pantalla muestra el aviso «Conectado a un simulador» y la búsqueda de zona acepta el host tal cual, aunque sea una IP.
 
-El simulador reproduce la forma documentada de la API: zonas, verificación de tokens, rulesets de fase (404 si no existen, `PUT`, reglas con `ref` y `position`, `?dry_run=true` con cupos por plan), ajustes, Smart Tiered Cache, purga con el límite de Free (5 por minuto, 429, código 1134), GraphQL con datos fijos, el detalle de la zona (`paused` en el reset la pausa) y Zaraz (0.18.0: `config` con los campos obligatorios en `PUT`, `workflow`, `publish` y `export`; `zaraz` en el reset parte de una configuración y `zaraz_no_publish` hace fallar la publicación con 403). Endpoints de control: `/__mock/reset`, `/__mock/state`, `/__mock/edit` (cambiar una regla «a mano») y `/__mock/fail` (forzar errores 500).
+El simulador reproduce la forma documentada de la API: zonas, verificación de tokens, rulesets de fase (404 si no existen, `PUT`, reglas con `ref` y `position`, `?dry_run=true` con cupos por plan), ajustes (desde 0.21.0 también `0rtt`), Smart Tiered Cache, Smart Shield (solo lectura), las políticas de bots de IA (`/bot_management` con `PUT` parcial; `no_bot_permission` en el reset simula un token sin ese permiso), purga con el límite de Free (5 por minuto, 429, código 1134), GraphQL con datos fijos, el detalle de la zona (`paused` en el reset la pausa) y Zaraz (0.18.0: `config` con los campos obligatorios en `PUT`, `workflow`, `publish` y `export`; `zaraz` en el reset parte de una configuración y `zaraz_no_publish` hace fallar la publicación con 403). Endpoints de control: `/__mock/reset`, `/__mock/state`, `/__mock/edit` (cambiar una regla «a mano») y `/__mock/fail` (forzar errores 500).
 
 La prueba del admin incluye Cloudflare si se define `ITB_CF_MOCK=http://127.0.0.1:8098`.
 
@@ -148,3 +148,11 @@ ITB_BASE_URL=http://127.0.0.1:8070 ITB_USER=admin ITB_PASS=... [ITB_LOGIN_PATH=/
 ```
 
 Abre cada pantalla del admin en una carga nueva y falla si alguna lanza un error de JavaScript, devuelve un 5xx o queda vacía. Correrla también en un WordPress limpio (sin LSCache ni WooCommerce): ahí aparecen los estados vacíos que el sitio de pruebas nunca tiene.
+
+## Turnstile y combinaciones de filtros (0.21.0)
+
+- **Turnstile** necesita salir a `challenges.cloudflare.com`. En un entorno con proxy: `WP_PROXY_HOST`/`WP_PROXY_PORT` en `wp-config.php` y, si el proxy intercepta TLS, un MU plugin de pruebas que pase su CA en `http_request_args` (`sslcertificates`). Claves de prueba de Cloudflare: sitio `1x00000000000000000000AA`, secreto `1x0000000000000000000000000000000AA` (cualquier token pasa) o `2x0000000000000000000000000000000AA` (todo falla).
+- Chromium no respeta la lista de exclusión del proxy para `127.0.0.1`: usar un PAC (`--proxy-pac-url=data:…`) que devuelva `DIRECT` para el sitio local.
+- Recorrido: `PUT /modules/turnstile`, guardar las claves, `POST /turnstile/test` con un token (con las claves de prueba vale `XXXX.DUMMY.TOKEN.XXXX`), activar los formularios y probar en el navegador el login de `/acceso/`, Mi cuenta (login, registro, contraseña), el pago por bloques y, cambiando la página de pago a `[woocommerce_checkout]`, el clásico. Por curl, sin token: todos rechazados con «Completa la verificación de seguridad». Para el fallo abierto, un MU plugin que haga fallar `siteverify` en `pre_http_request`.
+- **Filtros**: con `facets` activo, `curl -A 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'` a `/tienda/?filter_color=rojo&filter_talla=m` → 403 `X-ITB-Shield: facets`; con un solo filtro → 200. `curl /robots.txt` con `facets_robots`.
+

@@ -387,15 +387,23 @@ export interface CfSetting {
 	id: string;
 	label: string;
 	value: unknown;
-	recommended: unknown;
+	readable: boolean;
+	recommended: string | number;
+	default: string | number;
+	options: ( string | number )[];
+	managed: boolean;
+	risk: 'safe' | 'moderate' | 'invasive';
 	read_only: boolean;
 	note: string;
+	error: string;
 }
 
 export interface CfZone {
 	settings: CfSetting[];
 	alerts: { level: 'error' | 'warning' | 'info'; message: string }[];
 	phases: { phase: string; label: string; own: number; foreign: number; limit: number }[];
+	smart_shield: Record<string, { value: string; editable: boolean }> | null;
+	dashboard: { crawler_hints: string; ai_crawl: string };
 }
 
 export interface CfChange {
@@ -469,8 +477,9 @@ export interface WooInspect {
 
 export interface ShieldStatus {
 	enabled: boolean;
-	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
+	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; facets: boolean; facets_views: boolean; facets_robots: boolean; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
 	required: { xmlrpc: boolean; rest_users: boolean };
+	robots: { url: string; physical: boolean; rules: string[] };
 	cron: { disabled: boolean; command: string; wp_cli: string };
 }
 
@@ -525,7 +534,7 @@ export interface HtaccessResult {
 
 export interface FirewallStatus {
 	enabled: boolean;
-	settings: { rules: { exploits: boolean; surface: boolean; bots: boolean }; ratelimit: boolean };
+	settings: { rules: { exploits: boolean; surface: boolean; bots: boolean; facets: boolean }; ratelimit: boolean };
 	cloudflare: { connected: boolean; module_enabled: boolean; plan: string; waf_permission: boolean | null };
 	changes: CfChange[];
 	notes: string[];
@@ -963,3 +972,21 @@ export interface VerifierStatus {
 	new_key?: string;
 }
 
+
+export type TurnstileForm = 'login' | 'register' | 'lostpassword' | 'checkout';
+
+export interface TurnstileStatus {
+	enabled: boolean;
+	active: boolean;
+	site_key: string;
+	secret: { state: 'none' | 'ok' | 'rotated' | 'broken'; last4: string };
+	verified: boolean;
+	forms: Record<TurnstileForm, boolean>;
+	skip: string[];
+	gateways: { id: string; title: string }[];
+	woo: boolean;
+	conflicts: string[];
+	api_js: string;
+	dashboard: string;
+	test?: { ok: boolean; codes: string[] };
+}

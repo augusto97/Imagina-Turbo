@@ -637,3 +637,22 @@ Saber cuándo un sitio empeora sin mirarlo, y qué pasa con sus imágenes:
 - [x] La imagen Docker se construye y corre la batería y Lighthouse dentro del contenedor.
 - [ ] En el VPS de Hetzner: instalar, conectar La Tienda del Pintor y revisar la primera nocturna.
 
+## Versión 0.21.0
+
+Lo gratuito de Cloudflare que faltaba, cada cosa con su interruptor, y los crawlers fuera de las combinaciones de filtros:
+
+- **Combinaciones de filtros para crawlers** (docs/02, Escudo): guardia temprana que responde 403 a un crawler que pide dos filtros a la vez, varios valores de uno o el precio con otro (y, opcional, el orden o la vista); reglas en el robots.txt virtual; y la regla `itb-fw-facets` en Cloudflare. Cada filtro por separado sigue abierto. Las tres apagadas por defecto.
+- **Ajustes de la zona con valor elegido** (docs/03, 4.4): un selector por ajuste con sus opciones y «No tocar». Nuevos: 0-RTT y las políticas de bots de IA por comportamiento (entrenamiento: bloquear; búsqueda y agentes: sin gestionar). Smart Shield en solo lectura y enlaces al panel para Crawler Hints y AI Crawl Control. Permiso opcional nuevo del token: Bot Management.
+- **Turnstile** (docs/02, sección 17; docs/03, sección 11): módulo nuevo con interruptor para el inicio de sesión, el registro, la contraseña y el pago (clásico y por bloques). Prueba de claves obligatoria, falla abierto si Cloudflare no responde.
+- **Sin cambios de pago**: Argo Smart Routing, Cache Reserve y Regional Tiered Cache solo se muestran.
+
+**Criterios de aceptación** (probados en local):
+
+- [x] La guardia: 403 a Googlebot, Facebook y Meta con combinaciones; 200 con un filtro o el precio solo, para un móvil CUBOT y con sesión. El robots.txt lleva las reglas en cada grupo y cambia al desmarcar «orden y vista» (con la caché purgada: en el sitio de pruebas con puerto, LSCache calcula mal la etiqueta de la URL y la purga por URL no le llega; en un dominio sin puerto sí).
+- [x] La regla `itb-fw-facets` se propone solo al activarla, cabe en una regla y se aplica en el simulador.
+- [x] Preferencias de la zona: «No tocar» deja el ajuste fuera del plan; un valor inválido o un ajuste de solo lectura responden 400; las políticas de IA se aplican con un `PUT` parcial (Bot Fight Mode intacto) y el snapshot las devuelve; sin el permiso del token quedan bloqueadas con el motivo.
+- [x] Turnstile con las claves de prueba contra el `siteverify` real y Chromium: login (también enviado al instante), registro, contraseña, pago por bloques y pago clásico tras un error; sin token, todo rechazado; contraseña mala sin token no se delata; secreto que siempre falla, rechazado; Cloudflare caído, pasa con aviso; la portada no descarga api.js.
+- [x] La prueba de claves desde el admin con el widget real.
+- [ ] En La Tienda del Pintor: crear el widget de Turnstile, probar las claves y activar login y registro; activar la guardia de filtros y vigilar en Search Console que los filtros base sigan rastreándose.
+- [ ] En la zona real: añadir el permiso Bot Management al token, aplicar «entrenamiento: bloquear» y 0-RTT, y validar la regla `itb-fw-facets` con `dry_run`.
+

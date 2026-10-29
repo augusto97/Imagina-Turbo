@@ -13,6 +13,7 @@
   - Zone → Analytics: Read
   - Zone → Config Rules / Transform Rules: Edit (solo si se usan; ver 4.3 y 4.5)
   - Zone → Zaraz: Edit (opcional, solo para la sección 10)
+  - Zone → Bot Management: Edit (opcional, 0.21.0: políticas de bots de IA de la sección 4.4)
 - El admin muestra un enlace a la plantilla de creación de token con instrucciones paso a paso.
 - `TokenVault`: cifrar con `sodium_crypto_secretbox` usando una clave derivada de `AUTH_KEY` y `SECURE_AUTH_SALT`. Guardar en una opción autoload = no. Mostrar solo los últimos 4 caracteres. Nunca incluir en exportaciones.
   - **Rotación de salts**: si alguien cambia las claves de `wp-config.php` (plugins de seguridad, limpieza tras un hackeo), el token ya no se puede descifrar. Guardar junto al cifrado un identificador de la clave (`hash` corto de la clave derivada); si no coincide, marcar Cloudflare como "desconectado: reconectar el token", registrar el evento y no reintentar.
@@ -126,9 +127,22 @@ Objetivo: que `?fbclid=...` o `?utm_source=...` no generen copias nuevas. Estrat
 | SSL/TLS | **Solo lectura.** Alertar si está en Flexible; recomendar Full (strict) |
 | Always Use HTTPS, certificados, DNS | **Solo lectura** |
 | Bot Fight Mode | **No activar automáticamente**: en el plan Free no se puede excluir por ruta y bloquea webhooks de pasarelas de pago. Mostrar como recomendación con advertencia |
-| Bloqueo de crawlers de IA | Decisión del cliente; mostrar la opción gestionada de Cloudflare |
+| Bloqueo de crawlers de IA | Entrenamiento: bloquear (recomendado). Búsqueda y agentes: decide el cliente (0.21.0, ver abajo) |
 
 Endpoint general: `GET/PATCH /zones/{zone_id}/settings/{setting}` con cuerpo `{"value": …}`. *Verificado:* `http3`, `early_hints`, `rocket_loader` (`on`/`off`), `browser_cache_ttl` (0 = respetar cabeceras, todos los planes), `ssl` y `always_use_https` (solo lectura). El `GET`/`PATCH` masivo de `/settings` está obsoleto: se leen uno por uno. Smart Tiered Cache: `GET/PATCH /zones/{zone_id}/cache/tiered_cache_smart_topology_enable` `{"value":"on"}`, todos los planes. Rocket Loader se propone con riesgo moderado (apagarlo puede cambiar un sitio que lo usa a propósito).
+
+**Elegir el valor de cada ajuste (0.21.0)**: cada ajuste no de solo lectura tiene su selector en la tarjeta «Zona» con las opciones válidas y «No tocar». El valor elegido (`cf_zone_prefs`, solo lo que difiere de lo recomendado) es el que el plan propone; con «No tocar» el plan muestra el valor actual y nunca lo cambia. Nada cambia en Cloudflare hasta aplicar el plan (con snapshot, como siempre). `PUT /cloudflare/zone-prefs` rechaza un ajuste de solo lectura o un valor que no es una opción.
+
+| Ajuste (0.21.0) | Recomendado | Detalle |
+|---|---|---|
+| 0-RTT (`/settings/0rtt`, `on`/`off`, todos los planes) | Activar, riesgo moderado | Quien vuelve abre la conexión sin esperar el saludo TLS. Solo GET, HEAD y OPTIONS (nunca POST); esas peticiones se pueden repetir por diseño y llegan al origen con `Early-Data: 1`. |
+| Bots de IA, entrenamiento (`ai_training`: `block`, `disallow`, `only_on_ad_pages`, `disabled`) | Bloquear | Crawlers que copian el contenido para entrenar modelos, incluidos los de uso mixto. Consumen servidor y no traen visitas. `disallow` solo lo pide en el robots.txt gestionado por Cloudflare. |
+| Bots de IA, búsqueda (`ai_search`: `disabled`, `block`, `only_on_ad_pages`) | Sin gestionar | Pueden traer compradores (búsqueda de ChatGPT, Perplexity): decide el cliente. |
+| Bots de IA, agentes (`ai_user`, mismos valores) | Sin gestionar | Un asistente que consulta un producto por una persona; bloquearlo puede costar ventas. |
+| Smart Shield (`GET /zones/{id}/smart_shield`) | Solo lectura | Agrupa Smart Tiered Cache (ya gestionado arriba), Argo Smart Routing (de pago), Cache Reserve y Regional Tiered Cache (Enterprise). No hay un interruptor propio de la conexión optimizada con el origen. |
+| Crawler Hints | Enlace al panel | Avisa a los buscadores por IndexNow cuando cambia una página. No tiene API pública: se activa en Caché → Configuración. |
+
+Políticas de bots de IA, verificadas en la API (2026-10-27): viven en `GET/PUT /zones/{id}/bot_management` (permiso Bot Management), no en `/settings`. El `PUT` acepta un cuerpo parcial: se envía solo el campo que cambia (`{"ai_training":"block"}`), así no se toca Bot Fight Mode ni nada más. El ajuste antiguo `ai_bots_protection` («Block AI bots») se retira el 15 de septiembre de 2026 en favor de estas tres políticas por comportamiento. Se leen con una sola petición para las tres. Sin el permiso, el plan las marca como bloqueadas con el motivo.
 
 ### 4.5 Variantes por cookie en el edge (0.18.0, `cache_edge_variants`)
 
@@ -205,6 +219,8 @@ Notas:
 - El token necesita **Zone WAF: Edit**. Al conectar se comprueba la lectura de la fase del firewall (`waf_read`).
 - Eventos: `firewallEventsAdaptive` (24 h, hasta 1000), agrupados por descripción de regla y acción, con la ruta y el país más frecuentes. Se renuevan cada hora con las analíticas.
 - **Pendiente de la zona real**: que `url_decode()` coincide con `%2e%2e` y `+`, el comportamiento de `dry_run` en estas fases y que los eventos llegan con la descripción de la regla.
+- **Combinaciones de filtros para crawlers** (`itb-fw-facets`, 0.21.0, apagada por defecto, se activa en Firewall): `(cf.client.bot or lower(http.user_agent) contains "bot/" …) and (http.request.uri.query wildcard "*filter_*filter_*" or … "*filter_*,*" or … "*filter_*%2c*" or …)`. Misma definición que la guardia PHP (docs/02, Escudo). `wildcard` compara el query entero, no distingue mayúsculas y está en todos los planes (`matches` es de Business). Con «orden y vista» del escudo, también `contains "orderby="` y similares. Unos 1.850 caracteres. Mismo ciclo de desafío → bloqueo: a un crawler verificado el desafío ya lo frena.
+- **Pendiente de la zona real**: que Cloudflare acepta la expresión de `itb-fw-facets` (la valida `dry_run` al aplicarla).
 
 ### Rate limiting (`http_ratelimit`)
 
@@ -312,4 +328,13 @@ Las etiquetas de Google Analytics (Site Kit) y del píxel de Meta (Meta for WooC
 - **Google Tag Manager** no se reemplaza: un contenedor puede llevar cualquier cosa. Si el sitio usa GTM además de GA4, el admin lo avisa para que se revise a mano antes de mover GA4 (si el contenedor también envía a GA4, contaría dos veces).
 - Quitar el proxy de Cloudflare del dominio (nube gris) no se detecta (leer DNS no está en los permisos): hay que revertir Zaraz antes. La pantalla lo dice.
 - Más de 1 millón de eventos al mes en el plan gratuito deja Zaraz sin enviar hasta el ciclo siguiente: el panel de Cloudflare muestra el consumo.
+
+## 11. Turnstile (0.21.0)
+
+Detalle del módulo en docs/02, sección 17. Lo de la API, verificado en la documentación de Turnstile (2026-10-27):
+
+- `siteverify`: `POST https://challenges.cloudflare.com/turnstile/v0/siteverify` con `secret`, `response` y `remoteip` (CF-Connecting-IP si la petición llegó por Cloudflare). El token dura 300 s y vale una vez (`timeout-or-duplicate`). Errores: `missing-input-secret`, `invalid-input-secret`, `missing-input-response`, `invalid-input-response`, `bad-request`, `timeout-or-duplicate`, `internal-error`.
+- `api.js` se carga desde su URL exacta (sin copiarlo ni cachearlo), con `render=explicit` y `onload` porque se inserta después de cargar la página. Widget con `appearance: interaction-only` y `size: flexible`.
+- Claves de prueba (útiles en staging): sitio `1x00000000000000000000AA` (pasa) y `2x00000000000000000000AB` (falla); secreto `1x0000000000000000000000000000000AA` (pasa) y `2x0000000000000000000000000000000AA` (falla). Con el secreto de prueba que pasa, cualquier token vale.
+- Turnstile no necesita el token de la API ni que el dominio esté en Cloudflare: el widget se crea en el panel (Turnstile → Agregar widget) con el dominio del sitio.
 

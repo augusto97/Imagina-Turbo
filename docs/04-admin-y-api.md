@@ -59,7 +59,8 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/cache/inspect` | Pide una URL del sitio como anónimo y devuelve sus cabeceras de caché |
 | GET | `/cloudflare/status` | Token (estado y últimos 4 caracteres), zona, plan, permisos de lectura detectados, bloqueo por staging o zona ajena, enlace de creación del token |
 | POST / DELETE | `/cloudflare/connect` | Verificar y guardar el token (busca la zona del host) · desconectar (borra token, estado y analíticas; las reglas aplicadas se quedan) |
-| GET | `/cloudflare/zone` | Ajustes actuales vs. recomendados, alertas (SSL Flexible, TTL mínimo del plan), reglas propias y del cliente por fase con el máximo del plan |
+| GET | `/cloudflare/zone` | Ajustes actuales vs. lo que se aplicará (con su valor recomendado, opciones y si se gestiona), alertas (SSL Flexible, TTL mínimo del plan), reglas propias y del cliente por fase con el máximo del plan; desde 0.21.0 también Smart Shield (solo lectura) y los enlaces al panel (Crawler Hints, AI Crawl Control) |
+| PUT | `/cloudflare/zone-prefs` | `{prefs: {ajuste: valor \| "keep"}}` (0.21.0): valor elegido para cada ajuste de la zona; solo se guarda lo que difiere de lo recomendado. 400 con un ajuste de solo lectura o un valor que no es una opción. No toca Cloudflare: el cambio aparece en el plan |
 | GET | `/cloudflare/plan` | Cambios propuestos: crear, modificar, eliminar, sin cambios, modificada a mano (deriva) o bloqueado (con el motivo) |
 | POST | `/cloudflare/apply` | `{ids, confirm}`: valida con `dry_run`, guarda snapshot, aplica y restaura solo si algo falla. Exige módulo activo y dominio permitido (409) y `confirm` (428) |
 | GET / POST | `/cloudflare/snapshots` · `/cloudflare/snapshots/{id}/restore` | Historial (50 por zona) · restaurar (`confirm`), guardando antes un snapshot del estado actual |
@@ -70,11 +71,13 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/cloudflare/zaraz/revert` | `{confirm}`: devuelve primero las etiquetas del sitio y después quita las herramientas propias de Zaraz |
 | GET | `/cloudflare/analytics` | Peticiones de las últimas 24 h por estado de caché y rutas que más llegan al origen (se renueva cada hora) |
 | GET | `/firewall/status` | Reglas elegidas, cambios pendientes del firewall en la zona (fases WAF y rate limit), notas del plan, eventos guardados, origen cerrado (muestras de 7 días), IP real, estado del `.htaccess` y su bloque |
-| PUT | `/firewall/settings` | `{rules: {exploits, surface, bots}, ratelimit}` (recompila; se aplican desde `/cloudflare/apply`) |
+| PUT | `/firewall/settings` | `{rules: {exploits, surface, bots, facets}, ratelimit}` (recompila; se aplican desde `/cloudflare/apply`). `facets` (0.21.0) viene apagada |
 | GET | `/firewall/events` | Eventos del firewall de las últimas 24 h agrupados por regla y acción (`firewallEventsAdaptive`, se renueva cada hora) |
 | POST | `/firewall/htaccess` | `{action: apply\|remove, confirm}`: respaldo, escritura del bloque al principio, autoprueba (portada, un producto, `/wp-json/`) y restauración si alguna no responde 200. 428 sin `confirm`, 409 en nginx |
-| GET / PUT | `/shield/status` · `/shield/settings` | Escudo: interruptores, intervalos de Heartbeat, límite de filtros, qué requieren los plugins activos (XML-RPC, usuarios), guía de cron |
-| POST | `/shield/test` | Pide como anónimo un asset inexistente, `?author=1`, `xmlrpc.php` y `/wp/v2/users`: estado, cabecera `X-ITB-Shield` y tiempo |
+| GET / PUT | `/shield/status` · `/shield/settings` | Escudo: interruptores, intervalos de Heartbeat, límite de filtros, qué requieren los plugins activos (XML-RPC, usuarios), guía de cron. 0.21.0: `facets`, `facets_robots` y `facets_views` (combinaciones de filtros para crawlers) y el estado del robots.txt (si es físico y las reglas para copiarlas); cambiar sus reglas purga `/robots.txt` |
+| GET · PUT · DELETE | `/turnstile` | Turnstile (0.21.0): módulo, claves (la secreta solo con sus últimos 4 caracteres), si pasaron la prueba, formularios, pasarelas exentas y activas, otros plugins de captcha · guardar `{site_key?, secret?, forms?, skip?}` (cambiar una clave apaga los formularios hasta repetir la prueba) · quitar las claves y apagar todo |
+| POST | `/turnstile/test` | `{token}` del widget del admin: `siteverify` con la clave secreta guardada, sin fallar abierto. Si pasa, guarda la firma de las claves y recompila |
+| POST | `/shield/test` | Pide como anónimo un asset inexistente, `?author=1`, `xmlrpc.php` y `/wp/v2/users` (y, con la guardia de filtros activa, dos filtros de la tienda como crawler): estado, cabecera `X-ITB-Shield` y tiempo |
 | GET / PUT | `/tweaks/status` · `/tweaks/settings` | Ajustes rápidos con su riesgo · cambiarlos (encender uno no seguro exige `confirm`, 428), revisiones y autoguardado |
 | GET / POST | `/tweaks/perfmatters` · `/tweaks/perfmatters/import` | Equivalencias de `perfmatters_options` (lo que se mapea y lo que no, con dónde vive) · importarlas (`confirm`) |
 | GET / PUT | `/woo/status` · `/woo/settings` | Carrito por Store API: tema y selectores en uso (verificados o no), selectores propios, productos vistos, geolocalización · guardar selectores propios y productos vistos (recompila la config) |
@@ -130,6 +133,7 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_image_audit` | Auditoría de imágenes (0.19.0): escaneo en curso o terminado (cursor, contadores, listas de las más pesadas y las más grandes) |
 | `itb_verifier` | Verificador (0.20.0): URL, id del sitio y la última corrida nocturna ya avisada |
 | `itb_verifier_key` | Clave compartida con el verificador, cifrada como el token de Cloudflare (solo sus últimos 4 caracteres se muestran) |
+| `itb_turnstile_secret` | Clave secreta de Turnstile (0.21.0), cifrada como el token de Cloudflare. Los demás ajustes de Turnstile (`turnstile_site_key`, `turnstile_forms`, `turnstile_skip`, `turnstile_verified`) van en `itb_settings`, igual que `cf_zone_prefs` y `shield_facets*` |
 | `itb_cf_firewall` | Últimos eventos del firewall (24 h) |
 | `itb_cf_challenge` | Desde cuándo cada regla propia del firewall está en desafío (a los 7 días se propone bloqueo) |
 | `itb_origin_state` | Desde cuándo las muestras distinguen tráfico directo de local (`via_cf` 0 directo, 1 Cloudflare, 2 local, 3 Cloudflare sin IP real) |

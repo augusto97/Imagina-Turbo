@@ -105,6 +105,7 @@ function ShieldCard( { status }: { status: ShieldStatus } ) {
 					</label>
 				</div>
 				<p className="itb:m-0 itb:text-xs itb:text-zinc-500">{ __( 'Con más de N parámetros de filtro (filter_*, min_price…), la página lleva X-Robots-Tag: noindex, nofollow y los buscadores dejan de recorrer combinaciones infinitas. 0 = desactivado.' ) }</p>
+				<FacetsSection status={ status } values={ values } setValues={ setValues } />
 				<div className="itb:flex itb:flex-wrap itb:gap-2">
 					<Button size="sm" disabled={ save.isPending } onClick={ () => save.mutate( undefined, { onSuccess: ( s ) => client.setQueryData( [ 'shield' ], s ) } ) }>
 						{ save.isPending ? __( 'Guardando…' ) : __( 'Guardar' ) }
@@ -121,7 +122,7 @@ function ShieldCard( { status }: { status: ShieldStatus } ) {
 					<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-1 itb:p-0">
 						{ Object.entries( test.data ).map( ( [ key, c ] ) => (
 							<li key={ key } className="itb:flex itb:flex-wrap itb:items-center itb:gap-1.5">
-								<span className="itb:w-28 itb:font-medium">{ SHIELD.find( ( s ) => s.id === key )?.label ?? key }</span>
+								<span className="itb:w-28 itb:font-medium">{ SHIELD.find( ( s ) => s.id === key )?.label ?? FACETS.find( ( f ) => f.id === key )?.label ?? key }</span>
 								{ c.error ? (
 									<Badge tone="red">{ c.error }</Badge>
 								) : (
@@ -137,6 +138,40 @@ function ShieldCard( { status }: { status: ShieldStatus } ) {
 				) }
 			</CardContent>
 		</Card>
+	);
+}
+
+const FACETS: { id: 'facets' | 'facets_robots' | 'facets_views'; label: string; description: string }[] = [
+	{ id: 'facets', label: __( 'Cortar combinaciones a los crawlers' ), description: __( 'Google, Bing, Meta y cualquier otro crawler que pida dos filtros a la vez (color y talla), varios valores de un filtro (rojo,azul) o el precio con otro filtro recibe 403 antes de cargar plugins y tema. Cada filtro por separado sigue abierto, así que conocen la base de cada uno. Las personas navegan igual.' ) },
+	{ id: 'facets_robots', label: __( 'Reglas en robots.txt' ), description: __( 'Añade Disallow de esas combinaciones en cada grupo del robots.txt, como recomienda Google para la navegación por facetas: los crawlers que lo respetan ni siquiera las piden.' ) },
+	{ id: 'facets_views', label: __( 'Incluir orden y vista del listado' ), description: __( 'orderby, per_page, per_row y shop_view también cuentan: nunca cambian los productos, solo cómo se muestran.' ) },
+];
+
+function FacetsSection( { status, values, setValues }: { status: ShieldStatus; values: ShieldStatus[ 'settings' ]; setValues: ( v: ShieldStatus[ 'settings' ] ) => void } ) {
+	return (
+		<div className="itb:flex itb:flex-col itb:gap-3 itb:border-t itb:border-zinc-200 itb:pt-3">
+			<span className="itb:font-semibold">{ __( 'Combinaciones de filtros para crawlers' ) }</span>
+			{ FACETS.map( ( f ) => (
+				<label key={ f.id } className="itb:flex itb:items-center itb:justify-between itb:gap-3">
+					<span>
+						<span className="itb:font-medium">{ f.label }</span>
+						<span className="itb:block itb:text-xs itb:text-zinc-500">{ f.description }</span>
+					</span>
+					<Switch checked={ values[ f.id ] } onCheckedChange={ ( v ) => setValues( { ...values, [ f.id ]: v } ) } aria-label={ f.label } />
+				</label>
+			) ) }
+			{ values.facets_robots && status.robots.physical && (
+				<Notice level="warning">{ __( 'El sitio tiene un robots.txt físico: WordPress no lo genera y las reglas no se añaden solas. Cópialas en cada grupo User-agent del archivo.' ) }</Notice>
+			) }
+			<details className="itb:text-xs">
+				<summary className="itb:cursor-pointer itb:text-zinc-600">{ __( 'Ver las reglas de robots.txt' ) }</summary>
+				<CopyLine text={ status.robots.rules.join( '\n' ) } />
+				<p className="itb:m-0 itb:mt-1 itb:text-zinc-500">
+					<a href={ status.robots.url } target="_blank" rel="noreferrer">{ status.robots.url }</a>
+				</p>
+			</details>
+			<p className="itb:m-0 itb:text-xs itb:text-zinc-500">{ __( 'También hay una regla en Cloudflare (Firewall) que corta lo mismo en el edge, sin llegar al servidor.' ) }</p>
+		</div>
 	);
 }
 

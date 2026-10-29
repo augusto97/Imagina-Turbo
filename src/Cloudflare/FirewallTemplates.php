@@ -17,6 +17,9 @@
  *   persona pasa, un bot no) y a los 7 días el plan propone pasarlas a block.
  * - Patrones inspirados en el firewall 8G de Jeff Starr (Perishable Press), reescritos para el
  *   lenguaje de reglas de Cloudflare; no se copia su código.
+ * - Combinaciones de filtros para crawlers (0.21.0, apagada por defecto): misma definición que la
+ *   guardia PHP (EarlyGuard). Usa el operador wildcard, disponible en todos los planes (los regex con
+ *   matches son de Business en adelante), y cf.client.bot (bots verificados, todos los planes).
  *
  * @package ImaginaTurbo
  */
@@ -33,10 +36,22 @@ final class FirewallTemplates {
 	public const TEST_DAYS = 7;
 
 	/** Escáneres conocidos (user agent, en minúsculas). */
+	/** Reglas que solo existen si se activan a mano. */
+	public const OFF_BY_DEFAULT = [ 'facets' ];
+
+	/** Crawlers por user agent (en minúsculas), además de los verificados: igual que EarlyGuard::CRAWLER_UA. */
+	public const CRAWLER_TOKENS = [ 'bot/', 'bot;', 'bot-', 'spider', 'crawl', '+http', 'facebookexternalhit', 'meta-external', 'mediapartners', 'googleother', 'google-inspectiontool', 'slurp' ];
+
+	/** Señal de cada grupo de filtros en el query, como en robots.txt (ShieldModule). */
+	public const FACET_TOKENS = [ 'filter_', 'rating_filter=', '_price=', 'stock_status=' ];
+
+	/** Orden y vista del listado. */
+	public const VIEW_TOKENS = [ 'orderby=', 'per_page=', 'per_row=', 'shop_view=' ];
+
 	public const BAD_BOTS = [ 'sqlmap', 'nikto', 'nmap', 'masscan', 'zgrab', 'wpscan', 'acunetix', 'nessus', 'netsparker', 'openvas', 'w3af', 'dirbuster', 'gobuster', 'nuclei', 'jorgee', 'zmeu', 'fimap', 'havij' ];
 
 	/**
-	 * @param array<string, bool> $enabled   Reglas activadas (exploits, surface, bots).
+	 * @param array<string, bool> $enabled   Reglas activadas (exploits, surface, bots, facets).
 	 * @param array<string, int>  $challenge Desde cuándo cada ref está en desafío (para pasar a block).
 	 */
 	public function __construct(
@@ -46,6 +61,7 @@ final class FirewallTemplates {
 		private readonly bool $ratelimit,
 		private readonly array $challenge = [],
 		private readonly ?int $now = null,
+		private readonly bool $facetViews = true,
 	) {
 	}
 
@@ -59,9 +75,10 @@ final class FirewallTemplates {
 			'exploits' => [ __( 'Firewall: ataques en la URL', 'imagina-turbo' ), __( 'Recorridos de directorios, inyección SQL y XSS en el query, archivos sensibles (.git, .env, .sql, .bak, phpunit, phpinfo) y métodos TRACE/TRACK/DEBUG.', 'imagina-turbo' ), $this->exploitsExpression() ],
 			'surface'  => [ __( 'Firewall: superficie de WordPress', 'imagina-turbo' ), __( 'Enumeración de usuarios (/?author=), PHP dentro de uploads, readme.html, license.txt y copias de wp-config. XML-RPC también, salvo que un plugin activo lo necesite.', 'imagina-turbo' ), $this->surfaceExpression() ],
 			'bots'     => [ __( 'Firewall: escáneres conocidos', 'imagina-turbo' ), __( 'sqlmap, nikto, wpscan, nuclei y otros escáneres por su user agent.', 'imagina-turbo' ), $this->botsExpression() ],
+			'facets'   => [ __( 'Firewall: combinaciones de filtros para crawlers', 'imagina-turbo' ), __( 'Google, Bing, Meta y cualquier otro crawler que pida dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro (y el orden o la vista, si se incluyen en el escudo). Cada filtro por separado sigue abierto. Las personas no se ven afectadas.', 'imagina-turbo' ), $this->facetsExpression() ],
 		];
 		foreach ( $defs as $id => [ $title, $description, $expression ] ) {
-			if ( ! ( $this->enabled[ $id ] ?? true ) ) {
+			if ( ! ( $this->enabled[ $id ] ?? ! in_array( $id, self::OFF_BY_DEFAULT, true ) ) ) {
 				continue;
 			}
 			$ref    = $p . 'fw-' . $id;
@@ -140,6 +157,33 @@ final class FirewallTemplates {
 	public function botsExpression(): string {
 		$parts = array_map( static fn( string $bot ): string => 'lower(http.user_agent) contains ' . Templates::quote( $bot ), self::BAD_BOTS );
 		return $this->wrap( $parts );
+	}
+
+	/**
+	 * Crawler (verificado o por su user agent) y combinación de filtros en el query. El wildcard
+	 * compara el query entero y no distingue mayúsculas, así que %2C y %2c cuentan igual.
+	 */
+	public function facetsExpression(): string {
+		$q       = 'http.request.uri.query';
+		$crawler = array_merge( [ 'cf.client.bot' ], array_map( static fn( string $t ): string => 'lower(http.user_agent) contains ' . Templates::quote( $t ), self::CRAWLER_TOKENS ) );
+		$combo   = [];
+		foreach ( self::FACET_TOKENS as $a ) {
+			foreach ( self::FACET_TOKENS as $b ) {
+				if ( $a !== $b || 'filter_' === $a ) {
+					$combo[] = $q . ' wildcard ' . Templates::quote( '*' . $a . '*' . $b . '*' );
+				}
+			}
+			if ( '_price=' !== $a ) {
+				$combo[] = $q . ' wildcard ' . Templates::quote( '*' . $a . '*,*' );
+				$combo[] = $q . ' wildcard ' . Templates::quote( '*' . $a . '*%2c*' );
+			}
+		}
+		if ( $this->facetViews ) {
+			foreach ( self::VIEW_TOKENS as $token ) {
+				$combo[] = $q . ' contains ' . Templates::quote( $token );
+			}
+		}
+		return $this->wrap( [ '(' . implode( ' or ', $crawler ) . ') and (' . implode( ' or ', $combo ) . ')' ] );
 	}
 
 	/**

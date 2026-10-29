@@ -25,7 +25,7 @@ final class Planner {
 	/**
 	 * @param list<array{rule: Rule, risk: string, title: string, description: string, blocked: string}> $rules    Reglas deseadas.
 	 * @param list<string>                                                                               $phases   Fases cuyas reglas propias gestiona este plan.
-	 * @param list<array{id: string, label: string, recommended: mixed, risk: string, read_only: bool, note: string}> $settings Ajustes recomendados.
+	 * @param list<array{id: string, label: string, recommended: mixed, risk: string, read_only: bool, note: string, managed?: bool}> $settings Ajustes recomendados.
 	 */
 	public function __construct(
 		private readonly array $rules,
@@ -164,6 +164,19 @@ final class Planner {
 				'ref'         => '',
 				'setting'     => $setting['id'],
 			];
+			// Sin gestionar (0.21.0): se muestra, pero el plan nunca lo cambia.
+			if ( false === ( $setting['managed'] ?? true ) ) {
+				$changes[] = array_merge(
+					$base,
+					[
+						'action'  => 'none',
+						'reason'  => __( 'Sin gestionar: Imagina Turbo no lo cambia.', 'imagina-turbo' ),
+						'current' => null !== $current && $current['readable'] ? $current['value'] : null,
+						'desired' => null,
+					]
+				);
+				continue;
+			}
 			if ( null === $current || ! $current['readable'] ) {
 				$changes[] = $base + [
 					'action'  => 'blocked',

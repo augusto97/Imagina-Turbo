@@ -315,4 +315,83 @@ final class ShieldFirewallTest extends TestCase {
 		$this->assertStringContainsString( 'Speed Brain', implode( ' ', $notes ) );
 		$this->assertStringContainsString( '503', implode( ' ', $notes ) );
 	}
+
+	public function test_facet_combinations_for_crawlers(): void {
+		$shield  = [ 'facets' => true, 'facets_views' => true ] + self::ALL;
+		$google  = [ 'HTTP_USER_AGENT' => 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' ];
+		$person  = [ 'HTTP_USER_AGENT' => 'Mozilla/5.0 (Linux; Android 11; CUBOT KINGKONG 5 Pro) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36' ];
+		$decide  = static fn( array $get, array $server, array $s = [] ): ?array => EarlyGuard::decide( RequestType::FrontendHtml, '/tiendas/', 'wp-json', $s ?: $shield, $get, [], $server );
+		$combo   = [
+			'filter_color' => 'rojo',
+			'filter_talla' => 'm',
+		];
+
+		$r = $decide( $combo, $google );
+		$this->assertSame( 403, $r['status'] ?? 0 );
+		$this->assertSame( 'facets', $r['reason'] ?? '' );
+		$this->assertContains( 'Cache-Control: no-store', $r['headers'] ?? [] );
+		$this->assertSame( 'facets', $decide( [ 'filter_color' => 'rojo,azul' ], $google )['reason'] ?? null, 'varios valores de un filtro' );
+		$this->assertSame( 'facets', $decide( [ 'filter_color' => [ 'rojo' ] ], $google )['reason'] ?? null );
+		$this->assertSame( 'facets', $decide( [ 'filter_color' => 'rojo', 'min_price' => '1' ], $google )['reason'] ?? null, 'precio con otro filtro' );
+		$this->assertSame( 'facets', $decide( [ 'rating_filter' => '4', 'stock_status' => 'instock' ], [ 'HTTP_USER_AGENT' => 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)' ] )['reason'] ?? null );
+		$this->assertSame( 'facets', $decide( [ 'orderby' => 'price' ], [ 'HTTP_USER_AGENT' => 'meta-externalagent/1.1' ] )['reason'] ?? null, 'orden del listado' );
+
+		// La base de cada filtro, las personas, la sesión y los ajustes apagados siguen.
+		$this->assertNull( $decide( [ 'filter_color' => 'rojo' ], $google ) );
+		$this->assertNull( $decide( [ 'filter_color' => 'rojo', 'query_type_color' => 'or' ], $google ), 'query_type_ no es otro filtro' );
+		$this->assertNull( $decide( [ 'min_price' => '1', 'max_price' => '9' ], $google ), 'el precio es un solo filtro' );
+		$this->assertNull( $decide( $combo, $person ), 'CUBOT no es un bot' );
+		$this->assertNull( $decide( $combo, [] ) );
+		$this->assertNull( $decide( [ 'orderby' => 'price' ], $google, [ 'facets_views' => false ] + $shield ) );
+		$this->assertNull( $decide( $combo, $google, [ 'facets' => false ] + self::ALL ) );
+		$this->assertNull( EarlyGuard::decide( RequestType::FrontendHtml, '/tiendas/', 'wp-json', $shield, $combo, [ 'wordpress_logged_in_x' => '1' ], $google ) );
+		$this->assertNull( EarlyGuard::decide( RequestType::WcAjax, '/', 'wp-json', $shield, $combo, [], $google ) );
+		foreach ( [ 'Storebot-Google/1.0', 'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)', 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)', 'Sogou web spider/4.0', 'Mozilla/5.0 (compatible; GoogleOther)' ] as $ua ) {
+			$this->assertTrue( EarlyGuard::isCrawler( [ 'HTTP_USER_AGENT' => $ua ] ), $ua );
+		}
+		$this->assertFalse( EarlyGuard::isCrawler( [ 'HTTP_USER_AGENT' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36' ] ) );
+
+		// robots.txt: dentro de cada grupo, una sola vez, y con las mismas decisiones que la guardia.
+		$robots = (string) ShieldModule::robotsTxt( "User-agent: *\nDisallow: /wp-admin/\nAllow: /wp-admin/admin-ajax.php\n\nUser-agent: GPTBot\nUser-agent: CCBot\nDisallow: /privado/\n\nSitemap: https://tienda.example.com/sitemap.xml\n" );
+		$this->assertSame( 2, substr_count( $robots, ShieldModule::ROBOTS_MARKER ) );
+		$this->assertStringContainsString( "User-agent: CCBot\n# " . ShieldModule::ROBOTS_MARKER, $robots, 'tras la última línea User-agent del grupo' );
+		$this->assertSame( $robots, ShieldModule::robotsTxt( $robots ), 'idempotente' );
+		$this->assertStringContainsString( "User-agent: *\n# " . ShieldModule::ROBOTS_MARKER, (string) ShieldModule::robotsTxt( "Sitemap: https://x/s.xml\n" ), 'sin grupos, uno para todos' );
+
+		$rules   = ShieldModule::robotsRules( true );
+		$blocked = static function ( string $url ) use ( $rules ): bool {
+			foreach ( $rules as $rule ) {
+				$pattern = '#^' . str_replace( '\*', '.*', preg_quote( substr( $rule, strlen( 'Disallow: ' ) ), '#' ) ) . '#';
+				if ( 1 === preg_match( $pattern, $url ) ) {
+					return true;
+				}
+			}
+			return false;
+		};
+		foreach ( [ '/tiendas/?filter_color=rojo&filter_talla=m', '/tiendas/?filter_color=rojo,azul', '/tiendas/?filter_color=rojo%2Cazul', '/c/?rating_filter=4&filter_color=rojo', '/c/?min_price=1&max_price=9&filter_color=rojo', '/c/?stock_status=instock&rating_filter=5', '/c/?orderby=price' ] as $url ) {
+			$this->assertTrue( $blocked( $url ), $url );
+		}
+		foreach ( [ '/tiendas/?filter_color=rojo', '/tiendas/?filter_color=rojo&query_type_color=or', '/c/?min_price=1&max_price=9', '/c/?rating_filter=4', '/c/page/2/?filter_color=rojo', '/producto/x/' ] as $url ) {
+			$this->assertFalse( $blocked( $url ), $url );
+		}
+		$this->assertNotContains( 'Disallow: /*?*orderby=', ShieldModule::robotsRules( false ) );
+
+		// Cloudflare: apagada por defecto; activa, misma definición con wildcard (todos los planes).
+		$limits = PlanLimits::fromFile( 'free', self::pluginDir() . '/data/cloudflare-limits.json' );
+		$refs   = static fn( FirewallTemplates $fw ): array => array_map( static fn( array $r ): string => $r['rule']->ref, $fw->rules() );
+		$this->assertNotContains( 'itb-k7-fw-facets', $refs( new FirewallTemplates( self::site(), $limits, [], false ) ) );
+		$fw = new FirewallTemplates( self::site(), $limits, [ 'facets' => true ], false );
+		$this->assertContains( 'itb-k7-fw-facets', $refs( $fw ) );
+		$expr = $fw->facetsExpression();
+		$this->assertLessThanOrEqual( Templates::MAX_EXPRESSION, strlen( $expr ) );
+		$this->assertStringContainsString( 'cf.client.bot or lower(http.user_agent) contains "bot/"', $expr );
+		$this->assertStringContainsString( 'http.request.uri.query wildcard "*filter_*filter_*"', $expr );
+		$this->assertStringContainsString( 'http.request.uri.query wildcard "*filter_*%2c*"', $expr );
+		$this->assertStringContainsString( 'http.request.uri.query contains "orderby="', $expr );
+		$this->assertStringNotContainsString( 'matches', $expr );
+		$this->assertStringNotContainsString( '**', $expr, 'dos asteriscos seguidos no son válidos en wildcard' );
+		$bare = (string) preg_replace( '/"(?:[^"\\\\]|\\\\.)*"/', '""', $expr );
+		$this->assertSame( substr_count( $bare, '(' ), substr_count( $bare, ')' ) );
+		$this->assertStringNotContainsString( 'orderby', ( new FirewallTemplates( self::site(), $limits, [ 'facets' => true ], false, [], null, false ) )->facetsExpression() );
+	}
 }

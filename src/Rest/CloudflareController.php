@@ -3,7 +3,7 @@
  * Cloudflare: GET /cloudflare/status, POST|DELETE /cloudflare/connect, GET /cloudflare/zone,
  * GET /cloudflare/plan, POST /cloudflare/apply, GET /cloudflare/snapshots,
  * POST /cloudflare/snapshots/{id}/restore, GET /cloudflare/analytics, GET /cloudflare/zaraz,
- * POST /cloudflare/zaraz/scan|apply|revert.
+ * POST /cloudflare/zaraz/scan|apply|revert, PUT /cloudflare/zone-prefs.
  *
  * Aplicar y restaurar exigen el módulo activo, un dominio permitido y confirmación explícita.
  *
@@ -15,7 +15,9 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Cloudflare\CloudflareService;
+use ImaginaTurbo\Cloudflare\Templates;
 use ImaginaTurbo\Core\Config\Settings;
+use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Integrations\AnalyticsTags;
 use ImaginaTurbo\Integrations\ZarazBridge;
@@ -82,6 +84,17 @@ final class CloudflareController extends Controller {
 				'confirm' => [
 					'type'    => 'boolean',
 					'default' => false,
+				],
+			]
+		);
+		$this->route(
+			'/cloudflare/zone-prefs',
+			'PUT',
+			[ $this, 'zonePrefs' ],
+			[
+				'prefs' => [
+					'type'     => 'object',
+					'required' => true,
 				],
 			]
 		);
@@ -256,6 +269,43 @@ final class CloudflareController extends Controller {
 			return $this->error( 'itb_confirm', __( 'Confirma: se borran las reglas de Imagina Turbo y los ajustes vuelven a su valor anterior (con snapshot previo).', 'imagina-turbo' ), 428 );
 		}
 		return $this->ok( $this->service()->removeAll() );
+	}
+
+	/**
+	 * Valor elegido para cada ajuste de la zona (0.21.0): una de sus opciones o "keep" (no tocarlo). Solo
+	 * se guarda lo que difiere de lo recomendado. No toca Cloudflare: el cambio aparece en el plan.
+	 */
+	public function zonePrefs( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$input    = (array) $request->get_param( 'prefs' );
+		$settings = $this->container->get( Settings::class );
+		$prefs    = Settings::zonePrefs( (array) $settings->get( 'cf_zone_prefs', [] ) );
+		$defs     = array_column( Templates::settings(), null, 'id' );
+		foreach ( $input as $id => $value ) {
+			$def = is_string( $id ) ? ( $defs[ $id ] ?? null ) : null;
+			if ( null === $def || $def['read_only'] ) {
+				return $this->error( 'itb_cf_pref', __( 'Ajuste de Cloudflare desconocido o de solo lectura.', 'imagina-turbo' ), 400 );
+			}
+			if ( Templates::KEEP !== $value && ! in_array( $value, $def['options'], true ) ) {
+				/* translators: %s: ajuste. */
+				return $this->error( 'itb_cf_pref', sprintf( __( 'Valor no válido para %s.', 'imagina-turbo' ), $def['label'] ), 400 );
+			}
+			if ( $value === $def['default'] ) {
+				unset( $prefs[ $id ] );
+			} else {
+				$prefs[ $id ] = $value;
+			}
+		}
+		$settings->update( [ 'cf_zone_prefs' => $prefs ] );
+		$this->container->get( EventLog::class )->info(
+			'cloudflare',
+			'zone_prefs',
+			__( 'Preferencias de ajustes de Cloudflare guardadas. Revisa el plan para aplicarlas.', 'imagina-turbo' ),
+			[
+				'user'  => get_current_user_id(),
+				'prefs' => $prefs,
+			]
+		);
+		return $this->ok( [ 'prefs' => $prefs ] );
 	}
 
 	public function zone(): \WP_REST_Response|\WP_Error {

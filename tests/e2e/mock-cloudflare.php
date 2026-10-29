@@ -10,7 +10,9 @@
  * y position, ?dry_run=true con cupos por plan), ajustes de zona, Smart Tiered Cache, purga (con el
  * límite de Free: 5 por minuto, 429 y código 1134), GraphQL con datos fijos y, desde la 0.18.0, la fase
  * de cabeceras (http_request_late_transform) y la configuración de Zaraz (config, workflow, publish,
- * export).
+ * export). Desde la 0.21.0: 0-RTT, las políticas de bots de IA (GET y PUT parcial de
+ * /bot_management, con no_bot_permission en el reset para simular un token sin ese permiso) y Smart
+ * Shield (solo lectura).
  *
  * Control (sin autenticación, solo para la prueba):
  * - POST /__mock/reset   {token, zone_name, plan, rules?: {phase: [regla...]}, settings?: {...}}
@@ -180,8 +182,19 @@ if ( '/__mock/reset' === $uri ) {
 				'ssl'                                => 'flexible',
 				'always_use_https'                   => 'off',
 				'tiered_cache_smart_topology_enable' => 'off',
+				'0rtt'                               => 'off',
 			],
 			$body['settings'] ?? []
+		),
+		'bots'     => array_merge(
+			[
+				'ai_training'        => 'disabled',
+				'ai_search'          => 'disabled',
+				'ai_user'            => 'only_on_ad_pages',
+				'fight_mode'         => false,
+				'crawler_protection' => 'disabled',
+			],
+			$body['bots'] ?? []
 		),
 		'rulesets' => [],
 		'purges'   => [],
@@ -192,7 +205,8 @@ if ( '/__mock/reset' === $uri ) {
 	if ( is_array( $body['zaraz'] ?? null ) ) {
 		$state['zaraz'] = $body['zaraz'] + [ 'published' => 0 ];
 	}
-	$state['zaraz_no_publish'] = ! empty( $body['zaraz_no_publish'] );
+	$state['zaraz_no_publish']  = ! empty( $body['zaraz_no_publish'] );
+	$state['no_bot_permission'] = ! empty( $body['no_bot_permission'] );
 	foreach ( $body['rules'] ?? [] as $phase => $rules ) {
 		$state['rulesets'][ $phase ] = [
 			'id'    => new_id(),
@@ -325,6 +339,42 @@ if ( preg_match( '#^/settings/zaraz/(config|workflow|publish|export)$#', $rest, 
 		reply( 200, 'Config has been published successfully' );
 	}
 	fail( 405, 10000, 'Method not allowed' );
+}
+
+// Políticas de bots de IA (bot_management): PUT parcial, solo cambia los campos enviados.
+if ( '/bot_management' === $rest ) {
+	if ( ! empty( $state['no_bot_permission'] ) ) {
+		fail( 403, 10000, 'Authentication error' );
+	}
+	if ( 'PUT' === $method ) {
+		$enums = [
+			'ai_training' => [ 'disabled', 'disallow', 'block', 'only_on_ad_pages' ],
+			'ai_search'   => [ 'disabled', 'block', 'only_on_ad_pages' ],
+			'ai_user'     => [ 'disabled', 'block', 'only_on_ad_pages' ],
+		];
+		foreach ( (array) $body as $key => $value ) {
+			if ( isset( $enums[ $key ] ) && ! in_array( $value, $enums[ $key ], true ) ) {
+				fail( 400, 1004, "Invalid value for $key" );
+			}
+			$state['bots'][ $key ] = $value;
+		}
+		save_state( $file, $state );
+	}
+	reply( 200, $state['bots'] + [ 'using_latest_model' => true ] );
+}
+
+// Smart Shield (solo lectura en el plugin).
+if ( '/smart_shield' === $rest && 'GET' === $method ) {
+	reply(
+		200,
+		[
+			'smart_tiered_cache'    => [ 'id' => 'smart_tiered_cache', 'value' => $state['settings']['tiered_cache_smart_topology_enable'] ?? 'off', 'editable' => true, 'modified_on' => now() ],
+			'smart_routing'         => [ 'id' => 'smart_routing', 'value' => 'off', 'editable' => false ],
+			'cache_reserve'         => [ 'id' => 'cache_reserve', 'value' => 'off', 'editable' => false ],
+			'regional_tiered_cache' => [ 'id' => 'regional_tiered_cache', 'value' => 'off', 'editable' => false ],
+			'healthchecks_count'    => 0,
+		]
+	);
 }
 
 // Ajustes.

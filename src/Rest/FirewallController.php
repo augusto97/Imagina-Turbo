@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Cloudflare\CloudflareService;
+use ImaginaTurbo\Cloudflare\FirewallTemplates;
 use ImaginaTurbo\Cloudflare\Phases;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
@@ -30,7 +31,7 @@ use ImaginaTurbo\Repository\SampleRepository;
  */
 final class FirewallController extends Controller {
 
-	public const RULES = [ 'exploits', 'surface', 'bots' ];
+	public const RULES = [ 'exploits', 'surface', 'bots', 'facets' ];
 
 	/** Rangos oficiales de Cloudflare (para cerrar el origen). */
 	public const CF_IPS_URL = 'https://www.cloudflare.com/ips/';
@@ -82,7 +83,7 @@ final class FirewallController extends Controller {
 		$stored   = is_array( $stored ) ? $stored : [];
 		$rules    = [];
 		foreach ( self::RULES as $id ) {
-			$rules[ $id ] = false !== ( $stored[ $id ] ?? true );
+			$rules[ $id ] = (bool) ( $stored[ $id ] ?? ! in_array( $id, FirewallTemplates::OFF_BY_DEFAULT, true ) );
 		}
 		$service = $this->service();
 		$cf      = $service->status();

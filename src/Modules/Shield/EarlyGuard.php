@@ -14,6 +14,10 @@
  *   enlaces con nonce, carrito, pago y cuenta. El navegador descarta la precarga y hace la petición
  *   normal si el visitante sí abre el enlace. Las reglas de Imagina Turbo ya excluyen estas URL; esto
  *   cubre las de otros (0.11.0).
+ * - Crawler que pide una combinación de filtros de la tienda (dos filtros a la vez, varios valores de
+ *   un filtro, precio con otro filtro y, si se activa, orden o vista del listado) → 403 sin ejecutar
+ *   nada (0.21.0). Cada filtro por separado sigue abierto: el crawler conoce la base de cada uno, no
+ *   los miles de cruces. Las personas no se ven afectadas.
  *
  * "Sin sesión" se decide por la presencia de la cookie wordpress_logged_in_: la sesión real todavía no
  * se puede validar aquí, así que un visitante con esa cookie conserva el comportamiento del core.
@@ -61,6 +65,16 @@ final class EarlyGuard {
 				'headers' => [ 'Content-Type: text/plain; charset=utf-8', 'Cache-Control: no-store', 'X-Robots-Tag: noindex' ],
 				'body'    => '',
 				'reason'  => 'author',
+			];
+		}
+
+		$views = true === ( $shield['facets_views'] ?? false );
+		if ( RequestType::FrontendHtml === $type && true === ( $shield['facets'] ?? false ) && ! $loggedIn && self::isCrawler( $server ) && self::isFacetCombination( $get, $views ) ) {
+			return [
+				'status'  => 403,
+				'headers' => [ 'Content-Type: text/plain; charset=utf-8', 'Cache-Control: no-store', 'X-Robots-Tag: noindex, nofollow' ],
+				'body'    => '',
+				'reason'  => 'facets',
 			];
 		}
 
@@ -149,6 +163,61 @@ final class EarlyGuard {
 		}
 		$route = $get['rest_route'] ?? null;
 		return is_string( $route ) && str_starts_with( strtolower( '/' . ltrim( $route, '/' ) ), '/wp/v2/users' );
+	}
+
+	/** Filtros que no empiezan por filter_ (WooCommerce y WoodMart), con el grupo al que pertenecen. */
+	public const FACET_PARAMS = [
+		'rating_filter' => 'rating',
+		'min_price'     => 'price',
+		'max_price'     => 'price',
+		'stock_status'  => 'stock',
+	];
+
+	/** Orden y vista del listado (WooCommerce, WoodMart y otros temas): nunca cambian el contenido. */
+	public const VIEW_PARAMS = [ 'orderby', 'per_page', 'per_row', 'shop_view' ];
+
+	/**
+	 * Crawlers por user agent: Googlebot/2.1, bingbot/2.0, Storebot-Google, AhrefsBot; …, los que
+	 * enlazan su ficha (+http://…), las arañas, la vista previa de Facebook y Meta, y los de Google sin
+	 * "bot". Sin "bot" a secas: los móviles CUBOT lo llevan en el nombre.
+	 */
+	public const CRAWLER_UA = '/bot[\/;\-]|spider|crawl|\+https?:|facebookexternalhit|meta-external|mediapartners|googleother|google-inspectiontool|slurp/i';
+
+	/**
+	 * @param array<mixed> $server $_SERVER.
+	 */
+	public static function isCrawler( array $server ): bool {
+		$ua = $server['HTTP_USER_AGENT'] ?? '';
+		return is_string( $ua ) && '' !== $ua && 1 === preg_match( self::CRAWLER_UA, $ua );
+	}
+
+	/**
+	 * Combinación de filtros: dos grupos a la vez (color y talla, precio y color), varios valores de un
+	 * mismo filtro (filter_color=rojo,azul o filter_color[]=…) o, con $views, cualquier orden o vista.
+	 * Un solo filtro con un valor es la base y sigue abierto. query_type_* solo dice cómo se combinan
+	 * los valores, así que no cuenta.
+	 *
+	 * @param array<mixed> $get $_GET.
+	 */
+	public static function isFacetCombination( array $get, bool $views ): bool {
+		$groups = [];
+		foreach ( $get as $name => $value ) {
+			$name = (string) $name;
+			if ( str_starts_with( $name, 'filter_' ) ) {
+				$group = $name;
+			} elseif ( isset( self::FACET_PARAMS[ $name ] ) ) {
+				$group = self::FACET_PARAMS[ $name ];
+			} elseif ( $views && in_array( $name, self::VIEW_PARAMS, true ) ) {
+				return true;
+			} else {
+				continue;
+			}
+			if ( ! is_scalar( $value ) || str_contains( (string) $value, ',' ) ) {
+				return true;
+			}
+			$groups[ $group ] = true;
+		}
+		return count( $groups ) >= 2;
 	}
 
 	/** Parámetros que cambian algo al abrir la URL (WooCommerce, core y plugins comunes). */

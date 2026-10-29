@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Input } from '@/components/ui/input';
+import { Input, Select } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { CfAction, CfAnalytics, CfApplyResult, CfChange, CfPlan, CfSnapshot, CfStatus, CfZone, ZarazStatus } from '@/lib/types';
+import type { CfAction, CfAnalytics, CfApplyResult, CfChange, CfPlan, CfSetting, CfSnapshot, CfStatus, CfZone, ZarazStatus } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 export const ACTIONS: Record<CfAction, { label: string; tone: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }> = {
@@ -192,13 +192,47 @@ function ConnectionCard( { status }: { status: CfStatus } ) {
 	);
 }
 
+/** Nombres legibles de los valores de los ajustes (los demás se muestran tal cual). */
+const VALUE_LABELS: Record<string, string> = {
+	on: __( 'Activado' ),
+	off: __( 'Desactivado' ),
+	keep: __( 'No tocar' ),
+	block: __( 'Bloquear' ),
+	disallow: __( 'Solo pedirlo en robots.txt' ),
+	only_on_ad_pages: __( 'Bloquear en páginas con anuncios' ),
+	disabled: __( 'Permitir' ),
+	strict: 'Full (strict)',
+};
+
+function valueLabel( id: string, value: unknown ): string {
+	if ( id === 'browser_cache_ttl' && typeof value === 'number' ) {
+		return value === 0 ? __( 'Respetar las cabeceras del sitio' ) : TTL_LABELS[ value ] ?? `${ value } s`;
+	}
+	return typeof value === 'string' && VALUE_LABELS[ value ] ? VALUE_LABELS[ value ] : show( value );
+}
+
+const TTL_LABELS: Record<number, string> = { 1800: '30 min', 14400: '4 h', 86400: '1 día', 2678400: '1 mes', 31536000: '1 año' };
+
+/** Smart Shield: lo que agrupa y en qué plan está. */
+const SHIELD_PARTS: Record<string, string> = {
+	smart_tiered_cache: __( 'Smart Tiered Cache (se gestiona arriba)' ),
+	smart_routing: __( 'Argo Smart Routing (de pago)' ),
+	cache_reserve: __( 'Cache Reserve (Enterprise)' ),
+	regional_tiered_cache: __( 'Regional Tiered Cache (Enterprise)' ),
+};
+
 function ZoneCard( { status }: { status: CfStatus } ) {
+	const client = useQueryClient();
 	const { data, error, isLoading } = useQuery( { queryKey: [ 'cf-zone' ], queryFn: () => api<CfZone>( 'cloudflare/zone' ), enabled: status.token.state === 'ok' } );
+	const [ prefs, setPrefs ] = useState<Record<string, string | number>>( {} );
+	const save = useAction( () => api<{ prefs: Record<string, string | number> }>( 'cloudflare/zone-prefs', 'PUT', { prefs } ) );
+	const choice = ( s: CfSetting ) => prefs[ s.id ] ?? s.recommended;
+	const dirty = Object.keys( prefs ).length > 0;
 	return (
 		<Card>
 			<CardHeader>
 				<CardTitle>{ __( 'Zona' ) }</CardTitle>
-				<CardDescription>{ __( 'Estado actual leído de Cloudflare. SSL, DNS y certificados solo se leen.' ) }</CardDescription>
+				<CardDescription>{ __( 'Estado actual leído de Cloudflare y lo que Imagina Turbo aplicará en cada ajuste. Elige otro valor o «No tocar» y el plan se ajusta; nada cambia en Cloudflare hasta aplicarlo. SSL, DNS y certificados solo se leen.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
 				{ isLoading && <Skeleton className="itb:h-40" /> }
@@ -210,16 +244,70 @@ function ZoneCard( { status }: { status: CfStatus } ) {
 				) ) }
 				{ data && (
 					<>
-						<dl className="itb:m-0">
+						<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-3 itb:p-0">
 							{ data.settings.map( ( s ) => (
-								<KeyValue key={ s.id } label={ s.label }>
-									<span className="itb:inline-flex itb:flex-wrap itb:items-center itb:justify-end itb:gap-1.5">
-										<code className="itb:text-xs">{ show( s.value ) }</code>
-										{ s.read_only ? <Badge>{ __( 'Solo lectura' ) }</Badge> : show( s.value ) !== show( s.recommended ) && <Badge tone="amber">{ `→ ${ show( s.recommended ) }` }</Badge> }
-									</span>
-								</KeyValue>
+								<li key={ s.id } className="itb:flex itb:flex-col itb:gap-1.5 itb:border-b itb:border-zinc-100 itb:pb-3 itb:last:border-0">
+									<div className="itb:flex itb:flex-wrap itb:items-center itb:justify-between itb:gap-2">
+										<span className="itb:font-medium">{ s.label }</span>
+										<span className="itb:inline-flex itb:flex-wrap itb:items-center itb:gap-1.5">
+											<span className="itb:text-xs itb:text-zinc-500">{ __( 'Ahora:' ) }</span>
+											<code className="itb:text-xs">{ s.readable ? valueLabel( s.id, s.value ) : '—' }</code>
+											{ s.read_only && <Badge>{ __( 'Solo lectura' ) }</Badge> }
+											{ ! s.read_only && s.managed && s.readable && show( s.value ) !== show( s.recommended ) && <Badge tone="amber">{ `→ ${ valueLabel( s.id, s.recommended ) }` }</Badge> }
+											{ ! s.read_only && ! s.managed && <Badge>{ __( 'Sin gestionar' ) }</Badge> }
+										</span>
+									</div>
+									<span className="itb:text-xs itb:text-zinc-500">{ s.note }</span>
+									{ s.error && <span className="itb:text-xs itb:text-amber-700">{ s.error }</span> }
+									{ ! s.read_only && (
+										<label className="itb:flex itb:items-center itb:gap-2">
+											<span className="itb:text-xs itb:text-zinc-600">{ __( 'Imagina Turbo:' ) }</span>
+											<Select
+												className="itb:h-8 itb:max-w-72 itb:text-xs"
+												value={ String( choice( s ) ) }
+												aria-label={ s.label }
+												onChange={ ( e ) => {
+													const raw = e.target.value;
+													const value = typeof s.options[ 0 ] === 'number' && raw !== 'keep' ? Number( raw ) : raw;
+													setPrefs( { ...prefs, [ s.id ]: value } );
+												} }
+											>
+												<option value="keep">{ VALUE_LABELS.keep }</option>
+												{ s.options.map( ( o ) => (
+													<option key={ String( o ) } value={ String( o ) }>
+														{ valueLabel( s.id, o ) }
+														{ o === s.default ? ` (${ __( 'recomendado' ) })` : '' }
+													</option>
+												) ) }
+											</Select>
+										</label>
+									) }
+								</li>
 							) ) }
-						</dl>
+						</ul>
+						{ dirty && (
+							<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+								<Button
+									size="sm"
+									disabled={ save.isPending }
+									onClick={ () =>
+										save.mutate( undefined, {
+											onSuccess: () => {
+												setPrefs( {} );
+												void client.invalidateQueries( { queryKey: [ 'cf-zone' ] } );
+												void client.invalidateQueries( { queryKey: [ 'cf-plan' ] } );
+											},
+										} )
+									}
+								>
+									{ save.isPending ? __( 'Guardando…' ) : __( 'Guardar y revisar el plan' ) }
+								</Button>
+								<Button size="sm" variant="outline" onClick={ () => setPrefs( {} ) }>
+									{ __( 'Descartar' ) }
+								</Button>
+							</div>
+						) }
+						{ save.error && <Notice level="error">{ save.error.message }</Notice> }
 						<dl className="itb:m-0">
 							{ data.phases.map( ( p ) => (
 								<KeyValue key={ p.phase } label={ p.label }>
@@ -227,6 +315,37 @@ function ZoneCard( { status }: { status: CfStatus } ) {
 								</KeyValue>
 							) ) }
 						</dl>
+						<div className="itb:flex itb:flex-col itb:gap-1.5">
+							<span className="itb:font-medium">Smart Shield</span>
+							{ data.smart_shield ? (
+								<dl className="itb:m-0">
+									{ Object.entries( data.smart_shield ).map( ( [ key, part ] ) => (
+										<KeyValue key={ key } label={ SHIELD_PARTS[ key ] ?? key }>
+											<code className="itb:text-xs">{ valueLabel( key, part.value ) }</code>
+										</KeyValue>
+									) ) }
+								</dl>
+							) : (
+								<span className="itb:text-xs itb:text-zinc-500">{ __( 'No se pudo leer (permiso Zone Settings del token).' ) }</span>
+							) }
+							<span className="itb:text-xs itb:text-zinc-500">{ __( 'Agrupa la conexión optimizada con el servidor. En el plan gratuito, lo que se puede activar es Smart Tiered Cache, que ya aparece arriba.' ) }</span>
+						</div>
+						<div className="itb:flex itb:flex-col itb:gap-1.5">
+							<span className="itb:font-medium">{ __( 'Solo desde el panel de Cloudflare' ) }</span>
+							<span className="itb:text-xs itb:text-zinc-500">
+								{ __( 'Crawler Hints avisa a Bing y Yandex (IndexNow) cuando cambia una página para que no la recorran a ciegas: menos visitas de bots al servidor. No tiene API, se activa en Caché → Configuración.' ) }
+							</span>
+							<span className="itb:flex itb:flex-wrap itb:gap-2">
+								<a className="itb:inline-flex itb:items-center itb:gap-1 itb:text-xs" href={ data.dashboard.crawler_hints } target="_blank" rel="noreferrer">
+									<ExternalLink className="itb:size-3.5" aria-hidden />
+									Crawler Hints
+								</a>
+								<a className="itb:inline-flex itb:items-center itb:gap-1 itb:text-xs" href={ data.dashboard.ai_crawl } target="_blank" rel="noreferrer">
+									<ExternalLink className="itb:size-3.5" aria-hidden />
+									AI Crawl Control
+								</a>
+							</span>
+						</div>
 					</>
 				) }
 			</CardContent>

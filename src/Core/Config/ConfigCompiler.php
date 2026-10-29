@@ -25,6 +25,7 @@ use ImaginaTurbo\Integrations\ImaginaSearch;
 use ImaginaTurbo\Modules\AssetManager\AssetRules;
 use ImaginaTurbo\Modules\CacheCoordinator\AjaxFragments;
 use ImaginaTurbo\Modules\Rum\RumService;
+use ImaginaTurbo\Modules\Turnstile\Turnstile;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
 use ImaginaTurbo\Support\Filesystem;
 
@@ -258,6 +259,8 @@ final class ConfigCompiler {
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
+			// Turnstile (0.21.0): solo con el módulo activo y las claves probadas.
+			'turnstile'                   => $this->turnstileConfig( true === ( $modules['turnstile'] ?? false ) ),
 			// Lo que Zaraz reemplaza en el sitio (0.18.0), solo con el módulo Cloudflare activo.
 			'zaraz'                       => $this->zarazConfig( true === ( $modules['cloudflare'] ?? false ) ),
 			// Caché de fragmentos (0.17.0): menús y respuestas AJAX de solo render, con el coordinador activo.
@@ -309,6 +312,36 @@ final class ConfigCompiler {
 
 		$data['hash'] = self::hash( $data );
 		return $data;
+	}
+
+	/**
+	 * Clave del sitio, formularios activos y pasarelas exentas. Vacío si el módulo está apagado, si la
+	 * clave secreta ya no se puede leer o si las claves cambiaron después de la prueba.
+	 *
+	 * @return array{key: string, forms: array<string, bool>, skip: list<string>}|array{}
+	 */
+	private function turnstileConfig( bool $moduleOn ): array {
+		$key = (string) $this->settings->get( 'turnstile_site_key', '' );
+		if ( ! $moduleOn || ! Turnstile::validSiteKey( $key ) ) {
+			return [];
+		}
+		$secret = Turnstile::vault()->status();
+		if ( 'ok' !== $secret['state'] || (string) $this->settings->get( 'turnstile_verified', '' ) !== Turnstile::fingerprint( $key, $secret ) ) {
+			return [];
+		}
+		$forms = (array) $this->settings->get( 'turnstile_forms', [] );
+		$on    = [];
+		foreach ( Turnstile::FORMS as $form ) {
+			$on[ $form ] = true === ( $forms[ $form ] ?? false );
+		}
+		if ( ! in_array( true, $on, true ) ) {
+			return [];
+		}
+		return [
+			'key'   => $key,
+			'forms' => $on,
+			'skip'  => array_values( array_filter( (array) $this->settings->get( 'turnstile_skip', [] ), 'is_string' ) ),
+		];
 	}
 
 	/**
@@ -489,6 +522,10 @@ final class ConfigCompiler {
 			'heartbeat_editor' => (int) $this->settings->get( 'shield_heartbeat_editor', 15 ),
 			'filter_limit'     => (int) $this->settings->get( 'shield_filter_limit', 3 ),
 			'prefetch'         => $on( 'shield_prefetch' ),
+			// Combinaciones de filtros para crawlers (0.21.0): bloqueo y robots.txt apagados por defecto.
+			'facets'           => true === $this->settings->get( 'shield_facets', false ),
+			'facets_views'     => $on( 'shield_facets_views' ),
+			'facets_robots'    => true === $this->settings->get( 'shield_facets_robots', false ),
 			'prefetch_paths'   => $this->prefetchPaths(),
 			'required'         => [
 				'xmlrpc'     => $xmlrpcRequired,

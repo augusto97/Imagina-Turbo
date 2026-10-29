@@ -32,10 +32,11 @@ final class CloudflareService {
 		'Zone → Analytics → Read',
 		'Zone → Zone WAF → Edit (firewall, fase 4)',
 		'Zone → Zaraz → Edit (opcional: Google Analytics y Meta desde Cloudflare)',
+		'Zone → Bot Management → Edit (opcional: políticas de bots de IA)',
 	];
 
 	/**
-	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool} $firewall Ajustes del firewall.
+	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool, views?: bool} $firewall Ajustes del firewall.
 	 */
 	public function __construct(
 		private readonly TokenVault $vault,
@@ -206,15 +207,21 @@ final class CloudflareService {
 
 		$settings = [];
 		$alerts   = [];
-		foreach ( Templates::settings( $this->site->edgeHeaders ) as $def ) {
+		foreach ( Templates::settings( $this->site->edgeHeaders, $this->site->zonePrefs ) as $def ) {
 			$current    = $zone['settings'][ $def['id'] ];
 			$settings[] = [
 				'id'          => $def['id'],
 				'label'       => $def['label'],
 				'value'       => $current['readable'] ? $current['value'] : null,
+				'readable'    => $current['readable'],
 				'recommended' => $def['recommended'],
+				'default'     => $def['default'],
+				'options'     => $def['options'],
+				'managed'     => $def['managed'],
+				'risk'        => $def['risk'],
 				'read_only'   => $def['read_only'],
-				'note'        => $current['readable'] ? $def['note'] : $current['error'],
+				'note'        => $def['note'],
+				'error'       => $current['readable'] ? '' : $current['error'],
 			];
 		}
 		$ssl = $zone['settings']['ssl']['value'] ?? null;
@@ -268,9 +275,17 @@ final class CloudflareService {
 			}
 		}
 		return [
-			'settings' => $settings,
-			'alerts'   => $alerts,
-			'phases'   => $phases,
+			'settings'     => $settings,
+			'alerts'       => $alerts,
+			'phases'       => $phases,
+			// Smart Shield (0.21.0): solo lectura. Smart Tiered Cache se gestiona arriba; Argo es de pago y
+			// Cache Reserve y Regional Tiered Cache, de Enterprise.
+			'smart_shield' => $this->inspector()->smartShield(),
+			// Crawler Hints no tiene API pública: se activa en el panel (Caché → Configuración).
+			'dashboard'    => [
+				'crawler_hints' => 'https://dash.cloudflare.com/?to=/:account/:zone/caching/configuration',
+				'ai_crawl'      => 'https://dash.cloudflare.com/?to=/:account/:zone/ai',
+			],
 		];
 	}
 
@@ -292,7 +307,9 @@ final class CloudflareService {
 				$limits,
 				is_array( $this->firewall['rules'] ?? null ) ? $this->firewall['rules'] : [],
 				false !== ( $this->firewall['ratelimit'] ?? true ),
-				$this->challengeSince( $zone )
+				$this->challengeSince( $zone ),
+				null,
+				false !== ( $this->firewall['views'] ?? true )
 			);
 			$rules    = array_merge( $rules, $firewall->rules() );
 			if ( 'free' === $limits->plan() ) {
@@ -300,7 +317,7 @@ final class CloudflareService {
 			}
 		}
 		// Las fases del firewall siempre se revisan: si el módulo se apaga, sus reglas se proponen para eliminar.
-		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::HEADERS, Phases::WAF, Phases::RATELIMIT ], Templates::settings( $this->site->edgeHeaders ), $this->site->refPrefix, $limits, $this->state );
+		$planner = new Planner( $rules, [ Phases::CACHE, Phases::TRANSFORM, Phases::HEADERS, Phases::WAF, Phases::RATELIMIT ], Templates::settings( $this->site->edgeHeaders, $this->site->zonePrefs ), $this->site->refPrefix, $limits, $this->state );
 		if ( ! $this->site->edgeHeaders ) {
 			$notes[] = __( 'La caché del HTML en el edge necesita el coordinador de caché en modo «Emitir cabeceras para el edge» (pantalla Caché).', 'imagina-turbo' );
 		}

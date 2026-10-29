@@ -15,11 +15,13 @@ import { useAction } from '@/lib/queries';
 import type { CfApplyResult, FirewallEvents, FirewallStatus, HtaccessResult } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 import { ChangeRow } from './Cloudflare';
+import { TurnstileCard } from './TurnstileCard';
 
-const RULES: { id: 'exploits' | 'surface' | 'bots'; label: string; description: string }[] = [
+const RULES: { id: 'exploits' | 'surface' | 'bots' | 'facets'; label: string; description: string }[] = [
 	{ id: 'exploits', label: __( 'Ataques en la URL' ), description: __( 'Recorrido de directorios, inyección SQL y XSS en el query, archivos sensibles (.git, .env, .sql, .bak, phpunit) y métodos TRACE/TRACK/DEBUG.' ) },
 	{ id: 'surface', label: __( 'Superficie de WordPress' ), description: __( 'Enumeración de usuarios, PHP dentro de uploads, readme.html, license.txt, copias de wp-config y XML-RPC (salvo que un plugin lo necesite).' ) },
 	{ id: 'bots', label: __( 'Escáneres conocidos' ), description: __( 'sqlmap, nikto, wpscan, nuclei y otros, por su user agent.' ) },
+	{ id: 'facets', label: __( 'Combinaciones de filtros para crawlers' ), description: __( 'Google, Bing, Meta y otros crawlers que piden dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro se cortan en Cloudflare, sin llegar al servidor. Cada filtro por separado sigue abierto. Apagada por defecto; ocupa una de las 5 reglas del plan Free.' ) },
 ];
 
 export function Firewall() {
@@ -46,6 +48,7 @@ export function Firewall() {
 						<OriginCard status={ data } />
 					</div>
 					<EdgeChangesCard status={ data } />
+					<TurnstileCard />
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 						<EventsCard initial={ data.events } connected={ data.cloudflare.connected } />
 						<HtaccessCard status={ data } />

@@ -462,7 +462,10 @@ final class Applier {
 	 * @return true|string
 	 */
 	private function applySetting( string $id, mixed $value ): bool|string {
-		$response = $this->client->patch( Inspector::settingPath( $this->zoneId, $id ), [ 'value' => $value ] );
+		// Las políticas de bots de IA se cambian con un PUT parcial de bot_management (solo ese campo).
+		$response = in_array( $id, Templates::BOT_FIELDS, true )
+			? $this->client->put( Inspector::settingPath( $this->zoneId, $id ), [ $id => $value ] )
+			: $this->client->patch( Inspector::settingPath( $this->zoneId, $id ), [ 'value' => $value ] );
 		return $response->ok() ? true : $response->message();
 	}
 

@@ -37,6 +37,7 @@ final class ModuleCatalog {
 			'asset_manager'     => \ImaginaTurbo\Modules\AssetManager\AssetManagerModule::class,
 			'database'          => \ImaginaTurbo\Modules\Database\DatabaseModule::class,
 			'script_loading'    => \ImaginaTurbo\Modules\ScriptLoading\ScriptLoadingModule::class,
+			'turnstile'         => \ImaginaTurbo\Modules\Turnstile\TurnstileModule::class,
 		];
 	}
 
@@ -89,6 +90,7 @@ final class ModuleCatalog {
 			$m( 'asset_manager', __( 'Gestor de assets', 'imagina-turbo' ), __( 'Desencola CSS/JS que una ruta no usa.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
 			$m( 'database', __( 'Base de datos', 'imagina-turbo' ), __( 'Auditoría y limpieza con respaldo.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
 			$m( 'script_loading', __( 'Carga de scripts', 'imagina-turbo' ), __( 'Diferido nativo de WordPress y retraso solo de los scripts de terceros indicados.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
+			$m( 'turnstile', __( 'Turnstile', 'imagina-turbo' ), __( 'Verificación invisible de Cloudflare en el inicio de sesión, el registro, la contraseña y el pago, cada uno con su interruptor.', 'imagina-turbo' ), RiskLevel::Moderate, false, 4 ),
 		];
 	}
 }

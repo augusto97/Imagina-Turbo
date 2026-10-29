@@ -28,6 +28,7 @@ final class SiteContext {
 	 * @param list<string>               $webhookPaths   Rutas de webhooks de pasarelas (fase 4).
 	 * @param list<string>               $varyCookies    Cookies de variación con nombre exacto (moneda, idioma, consentimiento).
 	 * @param bool                       $edgeVariants   Variantes por cookie en el edge (0.18.0): esas cookies ya no impiden la caché.
+	 * @param array<string, string|int>  $zonePrefs      Valor elegido para cada ajuste de la zona, o "keep" para no tocarlo (0.21.0).
 	 */
 	public function __construct(
 		public readonly string $host,
@@ -45,6 +46,7 @@ final class SiteContext {
 		public readonly bool $deviceCache = false,
 		public readonly array $varyCookies = [],
 		public readonly bool $edgeVariants = false,
+		public readonly array $zonePrefs = [],
 	) {
 	}
 
@@ -111,6 +113,7 @@ final class SiteContext {
 			$cache['mobile_split'],
 			$exact,
 			$variants,
+			Settings::zonePrefs( (array) $settings->get( 'cf_zone_prefs', [] ) ),
 		);
 	}
 

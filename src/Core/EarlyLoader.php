@@ -211,6 +211,7 @@ final class EarlyLoader {
 		$candidate = RequestType::StaticMiss === $type
 			|| RequestType::XmlRpc === $type
 			|| ( RequestType::FrontendHtml === $type && isset( $_GET['author'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+			|| ( RequestType::FrontendHtml === $type && self::facetCandidate( $config ) )
 			|| ( RequestType::Rest === $type && ( str_contains( $request->path, '/users' ) || isset( $_GET['rest_route'] ) ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
 			|| isset( $_SERVER['HTTP_SEC_PURPOSE'] ) || isset( $_SERVER['HTTP_PURPOSE'] );
 		if ( ! $candidate ) {
@@ -226,6 +227,18 @@ final class EarlyLoader {
 		if ( null !== $response ) {
 			\ImaginaTurbo\Modules\Shield\EarlyGuard::respond( $response );
 		}
+	}
+
+	/**
+	 * Crawler con algo de filtros, orden o vista en el query (0.21.0): solo entonces se carga la guardia.
+	 */
+	private static function facetCandidate( CompiledConfig $config ): bool {
+		$query = $_SERVER['QUERY_STRING'] ?? '';
+		if ( ! is_string( $query ) || '' === $query || ! isset( $_SERVER['HTTP_USER_AGENT'] ) ) {
+			return false;
+		}
+		$shield = $config->get( 'shield' );
+		return is_array( $shield ) && true === ( $shield['facets'] ?? false ) && 1 === preg_match( '/filter|_price=|stock_status=|orderby=|per_page=|per_row=|shop_view=/', $query );
 	}
 
 	/**

@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Tests\Unit;
 
+use Brain\Monkey\Functions;
 use ImaginaTurbo\Cloudflare\FirewallTemplates;
 use ImaginaTurbo\Cloudflare\Phases;
 use ImaginaTurbo\Cloudflare\PlanLimits;
@@ -394,4 +395,73 @@ final class ShieldFirewallTest extends TestCase {
 		$this->assertSame( substr_count( $bare, '(' ), substr_count( $bare, ')' ) );
 		$this->assertStringNotContainsString( 'orderby', ( new FirewallTemplates( self::site(), $limits, [ 'facets' => true ], false, [], null, false ) )->facetsExpression() );
 	}
+
+	public function test_all_filters_scope_and_empty_filters_404(): void {
+		$google = [ 'HTTP_USER_AGENT' => 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' ];
+		$all    = [
+			'facets'       => true,
+			'facets_views' => false,
+			'facets_scope' => 'all',
+		] + self::ALL;
+		$decide = static fn( array $get, array $s ): ?string => EarlyGuard::decide( RequestType::FrontendHtml, '/tienda/', 'wp-json', $s, $get, [], $google )['reason'] ?? null;
+		$this->assertSame( 'facets', $decide( [ 'filter_color' => 'rojo' ], $all ), 'todos: un solo filtro también' );
+		$this->assertSame( 'facets', $decide( [ 'min_price' => '1' ], $all ) );
+		$this->assertNull( $decide( [ 'orderby' => 'price' ], $all ), 'el orden solo cuenta con «orden y vista»' );
+		$this->assertNull( $decide( [ 'utm_source' => 'x' ], $all ) );
+		$this->assertNull( $decide( [ 'filter_color' => 'rojo' ], [ 'facets_scope' => 'combos' ] + $all ) );
+		$this->assertNull( EarlyGuard::decide( RequestType::FrontendHtml, '/tienda/', 'wp-json', $all, [ 'filter_color' => 'rojo' ], [], [ 'HTTP_USER_AGENT' => 'Mozilla/5.0 (Windows NT 10.0) Chrome/130' ] ), 'personas: igual' );
+
+		$rules = ShieldModule::robotsRules( false, true );
+		$this->assertSame( [ 'Disallow: /*?*filter_', 'Disallow: /*?*rating_filter=', 'Disallow: /*?*_price=', 'Disallow: /*?*stock_status=', 'Disallow: /*?*query_type_' ], $rules );
+
+		$limits = PlanLimits::fromFile( 'free', self::pluginDir() . '/data/cloudflare-limits.json' );
+		$expr   = ( new FirewallTemplates( self::site(), $limits, [ 'facets' => true ], false, [], null, false, true ) )->facetsExpression();
+		$this->assertStringContainsString( 'http.request.uri.query contains "filter_"', $expr );
+		$this->assertStringNotContainsString( 'wildcard', $expr );
+		$bare = (string) preg_replace( '/"(?:[^"\\\\]|\\\\.)*"/', '""', $expr );
+		$this->assertSame( substr_count( $bare, '(' ), substr_count( $bare, ')' ) );
+
+		// Peticiones de scripts (PJAX de WoodMart, fetch): sin 404.
+		$this->assertTrue( ShieldModule::scriptRequest( [ 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest' ] ) );
+		$this->assertTrue( ShieldModule::scriptRequest( [ 'HTTP_X_PJAX' => 'true' ] ) );
+		$this->assertTrue( ShieldModule::scriptRequest( [ 'HTTP_SEC_FETCH_MODE' => 'cors' ] ) );
+		$this->assertFalse( ShieldModule::scriptRequest( [ 'HTTP_SEC_FETCH_MODE' => 'navigate' ] ) );
+		$this->assertFalse( ShieldModule::scriptRequest( [] ), 'los crawlers no mandan Sec-Fetch' );
+
+		// Tienda filtrada sin productos: 404 y TTL corto en LSCache; con productos o fuera de la tienda, nada.
+		$status = [];
+		$ttl    = [];
+		Functions\when( 'is_shop' )->justReturn( true );
+		Functions\when( 'is_product_taxonomy' )->justReturn( false );
+		Functions\when( 'status_header' )->alias(
+			static function ( int $code ) use ( &$status ): void {
+				$status[] = $code;
+			}
+		);
+		Functions\when( 'do_action' )->alias(
+			static function ( string $hook, $value = null ) use ( &$ttl ): void {
+				if ( 'litespeed_control_set_ttl' === $hook ) {
+					$ttl[] = $value;
+				}
+			}
+		);
+		$query                = \Mockery::mock( \WP_Query::class );
+		$query->found_posts   = 0;
+		$query->shouldReceive( 'is_404' )->andReturn( false );
+		$query->shouldReceive( 'have_posts' )->andReturn( false );
+		$GLOBALS['wp_query'] = $query;
+		ShieldModule::emptyFilters404();
+		$this->assertSame( [ 404 ], $status );
+		$this->assertSame( [ 600 ], $ttl );
+
+		$query->found_posts = 3;
+		ShieldModule::emptyFilters404();
+		$this->assertSame( [ 404 ], $status, 'con productos, 200 como siempre' );
+		Functions\when( 'is_shop' )->justReturn( false );
+		$query->found_posts = 0;
+		ShieldModule::emptyFilters404();
+		$this->assertSame( [ 404 ], $status, 'fuera de la tienda no se toca' );
+		unset( $GLOBALS['wp_query'] );
+	}
 }
+

@@ -656,3 +656,16 @@ Lo gratuito de Cloudflare que faltaba, cada cosa con su interruptor, y los crawl
 - [ ] En La Tienda del Pintor: crear el widget de Turnstile, probar las claves y activar login y registro; activar la guardia de filtros y vigilar en Search Console que los filtros base sigan rastreándose.
 - [ ] En la zona real: añadir el permiso Bot Management al token, aplicar «entrenamiento: bloquear» y 0-RTT, y validar la regla `itb-fw-facets` con `dry_run`.
 
+## Versión 0.21.1
+
+- **Bloquear todos los filtros para crawlers** (opción «Qué cortar» del escudo): además de «solo las combinaciones», «todos los filtros», para que solo se indexen las URL reales (tienda, categorías, etiquetas y productos). Aplica a la guardia, al robots.txt y a la regla de Cloudflare.
+- **404 cuando un filtro no tiene productos** (recomendación de Google), con la misma página para el visitante y sin tocar los filtros AJAX del tema.
+- Las personas siguen navegando y filtrando igual: lo que corta solo mira el user agent de los crawlers.
+
+**Criterios de aceptación** (probados en local):
+
+- [x] Con «todos los filtros», Googlebot con un solo filtro → 403; sin filtros → 200; una persona con filtros → 200. El robots.txt lista los cinco parámetros más orden y vista.
+- [x] Precio sin productos en la tienda y en una categoría → 404 con la plantilla de la tienda; la segunda visita sale de LSCache igual (404) y con 10 minutos en el edge; por AJAX o `fetch` → 200; con productos → 200.
+- [x] La prueba del escudo incluye el caso del filtro vacío.
+- [ ] En La Tienda del Pintor: probar el 404 con los filtros AJAX de WoodMart (PJAX) en el navegador y revisar en Search Console las URL con filtros antes de activar el robots.txt.
+

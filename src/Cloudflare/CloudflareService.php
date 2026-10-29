@@ -36,7 +36,7 @@ final class CloudflareService {
 	];
 
 	/**
-	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool, views?: bool} $firewall Ajustes del firewall.
+	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool, views?: bool, all?: bool} $firewall Ajustes del firewall.
 	 */
 	public function __construct(
 		private readonly TokenVault $vault,
@@ -309,7 +309,8 @@ final class CloudflareService {
 				false !== ( $this->firewall['ratelimit'] ?? true ),
 				$this->challengeSince( $zone ),
 				null,
-				false !== ( $this->firewall['views'] ?? true )
+				false !== ( $this->firewall['views'] ?? true ),
+				true === ( $this->firewall['all'] ?? false )
 			);
 			$rules    = array_merge( $rules, $firewall->rules() );
 			if ( 'free' === $limits->plan() ) {

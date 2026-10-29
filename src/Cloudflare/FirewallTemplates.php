@@ -62,6 +62,7 @@ final class FirewallTemplates {
 		private readonly array $challenge = [],
 		private readonly ?int $now = null,
 		private readonly bool $facetViews = true,
+		private readonly bool $facetAll = false,
 	) {
 	}
 
@@ -75,7 +76,7 @@ final class FirewallTemplates {
 			'exploits' => [ __( 'Firewall: ataques en la URL', 'imagina-turbo' ), __( 'Recorridos de directorios, inyección SQL y XSS en el query, archivos sensibles (.git, .env, .sql, .bak, phpunit, phpinfo) y métodos TRACE/TRACK/DEBUG.', 'imagina-turbo' ), $this->exploitsExpression() ],
 			'surface'  => [ __( 'Firewall: superficie de WordPress', 'imagina-turbo' ), __( 'Enumeración de usuarios (/?author=), PHP dentro de uploads, readme.html, license.txt y copias de wp-config. XML-RPC también, salvo que un plugin activo lo necesite.', 'imagina-turbo' ), $this->surfaceExpression() ],
 			'bots'     => [ __( 'Firewall: escáneres conocidos', 'imagina-turbo' ), __( 'sqlmap, nikto, wpscan, nuclei y otros escáneres por su user agent.', 'imagina-turbo' ), $this->botsExpression() ],
-			'facets'   => [ __( 'Firewall: combinaciones de filtros para crawlers', 'imagina-turbo' ), __( 'Google, Bing, Meta y cualquier otro crawler que pida dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro (y el orden o la vista, si se incluyen en el escudo). Cada filtro por separado sigue abierto. Las personas no se ven afectadas.', 'imagina-turbo' ), $this->facetsExpression() ],
+			'facets'   => [ __( 'Firewall: combinaciones de filtros para crawlers', 'imagina-turbo' ), $this->facetAll ? __( 'Google, Bing, Meta y cualquier otro crawler que pida una URL con filtros de la tienda (el escudo está en «todos los filtros»): solo ven las URL reales. Las personas no se ven afectadas.', 'imagina-turbo' ) : __( 'Google, Bing, Meta y cualquier otro crawler que pida dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro (y el orden o la vista, si se incluyen en el escudo). Cada filtro por separado sigue abierto. Las personas no se ven afectadas.', 'imagina-turbo' ), $this->facetsExpression() ],
 		];
 		foreach ( $defs as $id => [ $title, $description, $expression ] ) {
 			if ( ! ( $this->enabled[ $id ] ?? ! in_array( $id, self::OFF_BY_DEFAULT, true ) ) ) {
@@ -160,14 +161,20 @@ final class FirewallTemplates {
 	}
 
 	/**
-	 * Crawler (verificado o por su user agent) y combinación de filtros en el query. El wildcard
-	 * compara el query entero y no distingue mayúsculas, así que %2C y %2c cuentan igual.
+	 * Crawler (verificado o por su user agent) y combinación de filtros en el query (o cualquier filtro,
+	 * con el alcance "todos"). El wildcard compara el query entero y no distingue mayúsculas, así que
+	 * %2C y %2c cuentan igual.
 	 */
 	public function facetsExpression(): string {
 		$q       = 'http.request.uri.query';
 		$crawler = array_merge( [ 'cf.client.bot' ], array_map( static fn( string $t ): string => 'lower(http.user_agent) contains ' . Templates::quote( $t ), self::CRAWLER_TOKENS ) );
 		$combo   = [];
 		foreach ( self::FACET_TOKENS as $a ) {
+			// Todos los filtros (0.21.1): basta con que aparezca uno.
+			if ( $this->facetAll ) {
+				$combo[] = $q . ' contains ' . Templates::quote( $a );
+				continue;
+			}
 			foreach ( self::FACET_TOKENS as $b ) {
 				if ( $a !== $b || 'filter_' === $a ) {
 					$combo[] = $q . ' wildcard ' . Templates::quote( '*' . $a . '*' . $b . '*' );

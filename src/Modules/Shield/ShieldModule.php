@@ -9,7 +9,12 @@
  *   N parámetros, X-Robots-Tag noindex, nofollow (los crawlers dejan de recorrer combinaciones infinitas).
  * - robots.txt (0.21.0, opcional): Disallow de las combinaciones de filtros en cada grupo de
  *   user-agent, como recomienda Google para la navegación por facetas. Cada filtro por separado
- *   sigue permitido. Solo con el robots.txt virtual de WordPress; uno físico no pasa por PHP.
+ *   sigue permitido, salvo con el alcance "todos los filtros" (0.21.1). Solo con el robots.txt
+ *   virtual de WordPress; uno físico no pasa por PHP.
+ * - 404 cuando un filtro no tiene productos (0.21.1, opcional): lo que recomienda Google para las
+ *   combinaciones sin resultados. Solo cambia el código de estado: el visitante ve la misma página
+ *   («No se encontraron productos» con los filtros para cambiarlos). No se aplica a las peticiones de
+ *   los filtros AJAX del tema (WoodMart usa PJAX), que esperan un 200.
  *
  * @package ImaginaTurbo
  */
@@ -23,6 +28,7 @@ use ImaginaTurbo\Core\ModuleInterface;
 use ImaginaTurbo\Core\Request\RequestContext;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Modules\CacheCoordinator\Cacheability;
 
 /**
  * Registro del módulo.
@@ -34,6 +40,9 @@ final class ShieldModule implements ModuleInterface {
 		if ( RequestType::FrontendHtml === $request->type ) {
 			if ( $shield['heartbeat'] ) {
 				add_action( 'wp_enqueue_scripts', [ self::class, 'removeFrontendHeartbeat' ], 100 );
+			}
+			if ( $shield['facets_empty404'] && [] !== array_diff_key( EarlyGuard::facetGroups( $_GET ), [ 'view' => true ] ) && ! self::scriptRequest( $_SERVER ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se leen nombres.
+				add_action( 'template_redirect', [ self::class, 'emptyFilters404' ], 20 );
 			}
 			if ( $shield['filter_limit'] > 0 && self::filterParams( $_GET ) > $shield['filter_limit'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se cuentan nombres.
 				add_action( 'send_headers', [ self::class, 'noindex' ] );
@@ -48,7 +57,7 @@ final class ShieldModule implements ModuleInterface {
 	}
 
 	/**
-	 * @return array{heartbeat: bool, heartbeat_admin: int, heartbeat_editor: int, filter_limit: int, facets_robots: bool, facets_views: bool}
+	 * @return array{heartbeat: bool, heartbeat_admin: int, heartbeat_editor: int, filter_limit: int, facets_robots: bool, facets_views: bool, facets_all: bool, facets_empty404: bool}
 	 */
 	public static function settings(): array {
 		$s = Runtime::$config?->get( 'shield', [] );
@@ -60,6 +69,8 @@ final class ShieldModule implements ModuleInterface {
 			'filter_limit'     => is_int( $s['filter_limit'] ?? null ) ? $s['filter_limit'] : 3,
 			'facets_robots'    => true === ( $s['facets_robots'] ?? false ),
 			'facets_views'     => false !== ( $s['facets_views'] ?? true ),
+			'facets_all'       => 'all' === ( $s['facets_scope'] ?? 'combos' ),
+			'facets_empty404'  => true === ( $s['facets_empty404'] ?? false ),
 		];
 	}
 
@@ -89,6 +100,37 @@ final class ShieldModule implements ModuleInterface {
 		return $settings;
 	}
 
+	/**
+	 * La tienda o una categoría filtrada sin productos responde 404 (la plantilla es la misma). El
+	 * coordinador de caché lo ve después (prioridad 99999) y limita su TTL en el edge a 10 minutos; a
+	 * LSCache se le pide lo mismo, así un producto que vuelve a tener stock aparece pronto.
+	 */
+	public static function emptyFilters404(): void {
+		global $wp_query;
+		if ( ! function_exists( 'is_shop' ) || ! ( is_shop() || is_product_taxonomy() ) || ! $wp_query instanceof \WP_Query || $wp_query->is_404() ) {
+			return;
+		}
+		if ( (int) $wp_query->found_posts > 0 || $wp_query->have_posts() ) {
+			return;
+		}
+		status_header( 404 );
+		if ( ! headers_sent() ) {
+			header( 'X-ITB-Shield: empty_filters', true );
+		}
+		do_action( 'litespeed_control_set_ttl', Cacheability::TTL_404 ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- acción pública de LiteSpeed Cache.
+	}
+
+	/**
+	 * Petición de un script (filtros AJAX/PJAX del tema, fetch), no una navegación: espera un 200.
+	 *
+	 * @param array<mixed> $server $_SERVER.
+	 */
+	public static function scriptRequest( array $server ): bool {
+		$with = $server['HTTP_X_REQUESTED_WITH'] ?? '';
+		$mode = $server['HTTP_SEC_FETCH_MODE'] ?? '';
+		return ( is_string( $with ) && '' !== $with ) || isset( $server['HTTP_X_PJAX'] ) || ( is_string( $mode ) && '' !== $mode && 'navigate' !== $mode );
+	}
+
 	public static function noindex(): void {
 		if ( ! headers_sent() ) {
 			header( 'X-Robots-Tag: noindex, nofollow', true );
@@ -111,30 +153,37 @@ final class ShieldModule implements ModuleInterface {
 		return $n;
 	}
 
-	public const ROBOTS_MARKER = 'Imagina Turbo: combinaciones de filtros';
+	public const ROBOTS_MARKER = 'Imagina Turbo: filtros de la tienda';
 
 	/** Señal de cada grupo de filtros en el query (min_price y max_price son el mismo: _price=). */
 	private const ROBOTS_TOKENS = [ 'filter_', 'rating_filter=', '_price=', 'stock_status=' ];
 
 	/**
 	 * Reglas Disallow de las combinaciones: dos grupos a la vez y varios valores de un filtro (con la
-	 * coma tal cual y codificada). Con $views, también el orden y la vista del listado.
+	 * coma tal cual y codificada). Con $all (0.21.1), cualquier filtro. Con $views, también el orden y
+	 * la vista del listado.
 	 *
 	 * @return list<string>
 	 */
-	public static function robotsRules( bool $views ): array {
+	public static function robotsRules( bool $views, bool $all = false ): array {
 		$rules = [];
-		foreach ( self::ROBOTS_TOKENS as $a ) {
-			foreach ( self::ROBOTS_TOKENS as $b ) {
-				if ( $a !== $b || 'filter_' === $a ) {
-					$rules[] = 'Disallow: /*?*' . $a . '*' . $b;
+		if ( $all ) {
+			foreach ( array_merge( self::ROBOTS_TOKENS, [ 'query_type_' ] ) as $a ) {
+				$rules[] = 'Disallow: /*?*' . $a;
+			}
+		} else {
+			foreach ( self::ROBOTS_TOKENS as $a ) {
+				foreach ( self::ROBOTS_TOKENS as $b ) {
+					if ( $a !== $b || 'filter_' === $a ) {
+						$rules[] = 'Disallow: /*?*' . $a . '*' . $b;
+					}
 				}
 			}
-		}
-		foreach ( self::ROBOTS_TOKENS as $a ) {
-			if ( '_price=' !== $a ) {
-				$rules[] = 'Disallow: /*?*' . $a . '*,';
-				$rules[] = 'Disallow: /*?*' . $a . '*%2C';
+			foreach ( self::ROBOTS_TOKENS as $a ) {
+				if ( '_price=' !== $a ) {
+					$rules[] = 'Disallow: /*?*' . $a . '*,';
+					$rules[] = 'Disallow: /*?*' . $a . '*%2C';
+				}
 			}
 		}
 		if ( $views ) {
@@ -155,7 +204,8 @@ final class ShieldModule implements ModuleInterface {
 		if ( ! is_string( $output ) || str_contains( $output, self::ROBOTS_MARKER ) ) {
 			return $output;
 		}
-		$block    = array_merge( [ '# ' . self::ROBOTS_MARKER ], self::robotsRules( self::settings()['facets_views'] ) );
+		$s        = self::settings();
+		$block    = array_merge( [ '# ' . self::ROBOTS_MARKER ], self::robotsRules( $s['facets_views'], $s['facets_all'] ) );
 		$lines    = preg_split( '/\r\n|\n|\r/', $output );
 		$lines    = false === $lines ? [] : $lines;
 		$out      = [];

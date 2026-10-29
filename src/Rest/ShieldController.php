@@ -25,7 +25,10 @@ use ImaginaTurbo\Support\CloudflareAccess;
  */
 final class ShieldController extends Controller {
 
-	private const BOOLS = [ 'static', 'author', 'xmlrpc', 'rest_users', 'heartbeat', 'prefetch', 'facets', 'facets_views', 'facets_robots' ];
+	private const BOOLS = [ 'static', 'author', 'xmlrpc', 'rest_users', 'heartbeat', 'prefetch', 'facets', 'facets_views', 'facets_robots', 'facets_empty404' ];
+
+	/** Interruptores que vienen apagados. */
+	private const OFF = [ 'facets', 'facets_robots', 'facets_empty404' ];
 
 	/** User agent de la prueba de combinaciones: se identifica como crawler por su enlace, sin suplantar a nadie. */
 	private const CRAWLER_TEST_UA = 'ImaginaTurbo-ShieldTest/1.0 (+https://imaginawp.com)';
@@ -51,6 +54,10 @@ final class ShieldController extends Controller {
 			'minimum' => 0,
 			'maximum' => 20,
 		];
+		$args['facets_scope']     = [
+			'type' => 'string',
+			'enum' => [ 'combos', 'all' ],
+		];
 		$this->route( '/shield/settings', 'PUT', [ $this, 'update' ], $args );
 		$this->route( '/shield/test', \WP_REST_Server::CREATABLE, [ $this, 'test' ] );
 	}
@@ -70,11 +77,12 @@ final class ShieldController extends Controller {
 		}
 		$values = [];
 		foreach ( self::BOOLS as $key ) {
-			$values[ $key ] = (bool) $settings->get( 'shield_' . $key, ! in_array( $key, [ 'facets', 'facets_robots' ], true ) );
+			$values[ $key ] = (bool) $settings->get( 'shield_' . $key, ! in_array( $key, self::OFF, true ) );
 		}
 		$values['heartbeat_admin']  = (int) $settings->get( 'shield_heartbeat_admin', 60 );
 		$values['heartbeat_editor'] = (int) $settings->get( 'shield_heartbeat_editor', 15 );
 		$values['filter_limit']     = (int) $settings->get( 'shield_filter_limit', 3 );
+		$values['facets_scope']     = 'all' === $settings->get( 'shield_facets_scope', 'combos' ) ? 'all' : 'combos';
 		$required                   = is_array( $compiled['required'] ?? null ) ? $compiled['required'] : [];
 		return [
 			'enabled'  => $enabled,
@@ -87,7 +95,7 @@ final class ShieldController extends Controller {
 			'robots'   => [
 				'url'      => home_url( '/robots.txt' ),
 				'physical' => file_exists( ABSPATH . 'robots.txt' ),
-				'rules'    => ShieldModule::robotsRules( $values['facets_views'] ),
+				'rules'    => ShieldModule::robotsRules( $values['facets_views'], 'all' === $values['facets_scope'] ),
 			],
 			'cron'     => [
 				'disabled' => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
@@ -99,7 +107,7 @@ final class ShieldController extends Controller {
 
 	public function update( \WP_REST_Request $request ): \WP_REST_Response {
 		$changes = [];
-		foreach ( array_merge( self::BOOLS, [ 'heartbeat_admin', 'heartbeat_editor', 'filter_limit' ] ) as $key ) {
+		foreach ( array_merge( self::BOOLS, [ 'heartbeat_admin', 'heartbeat_editor', 'filter_limit', 'facets_scope' ] ) as $key ) {
 			if ( null !== $request->get_param( $key ) ) {
 				$changes[ 'shield_' . $key ] = $request->get_param( $key );
 			}
@@ -107,7 +115,7 @@ final class ShieldController extends Controller {
 		$this->container->get( Settings::class )->update( $changes );
 		$this->container->get( ConfigCompiler::class )->compile();
 		// El robots.txt queda en la caché del origen y de Cloudflare: se purga si cambian sus reglas.
-		if ( isset( $changes['shield_facets_robots'] ) || isset( $changes['shield_facets_views'] ) ) {
+		if ( isset( $changes['shield_facets_robots'] ) || isset( $changes['shield_facets_views'] ) || isset( $changes['shield_facets_scope'] ) ) {
 			$this->container->get( Purger::class )->purge( new PurgeRequest( [], [ home_url( '/robots.txt' ) ], false, 'robots' ) );
 		}
 		$this->container->get( EventLog::class )->info(
@@ -124,7 +132,8 @@ final class ShieldController extends Controller {
 
 	/**
 	 * Pide como anónimo un asset inexistente, ?author=1, xmlrpc.php, /wp/v2/users y, con la guardia de
-	 * filtros activa, una combinación como crawler: muestra qué responde
+	 * filtros activa, una combinación como crawler y, con el 404 de filtros vacíos, un precio imposible:
+	 * muestra qué responde
 	 * el escudo y cuánto tarda (un 404 de imagen debe resolverse sin cargar plugins).
 	 */
 	public function test(): \WP_REST_Response {
@@ -142,6 +151,17 @@ final class ShieldController extends Controller {
 				[
 					'filter_itb_a' => 'x',
 					'filter_itb_b' => 'y',
+				],
+				$shop
+			);
+		}
+		// Filtro sin productos (precio imposible) como visitante: con el 404 activo, 404 con la página normal.
+		if ( true === $this->container->get( Settings::class )->get( 'shield_facets_empty404', false ) ) {
+			$shop              = function_exists( 'wc_get_page_permalink' ) ? (string) wc_get_page_permalink( 'shop' ) : home_url( '/' );
+			$cases['empty404'] = add_query_arg(
+				[
+					'min_price' => '999999998',
+					'max_price' => '999999999',
 				],
 				$shop
 			);

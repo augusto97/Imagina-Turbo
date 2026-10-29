@@ -17,7 +17,8 @@
  * - Crawler que pide una combinación de filtros de la tienda (dos filtros a la vez, varios valores de
  *   un filtro, precio con otro filtro y, si se activa, orden o vista del listado) → 403 sin ejecutar
  *   nada (0.21.0). Cada filtro por separado sigue abierto: el crawler conoce la base de cada uno, no
- *   los miles de cruces. Las personas no se ven afectadas.
+ *   los miles de cruces. Con el alcance "all" (0.21.1), cualquier filtro. Las personas no se ven
+ *   afectadas.
  *
  * "Sin sesión" se decide por la presencia de la cookie wordpress_logged_in_: la sesión real todavía no
  * se puede validar aquí, así que un visitante con esa cookie conserva el comportamiento del core.
@@ -69,7 +70,8 @@ final class EarlyGuard {
 		}
 
 		$views = true === ( $shield['facets_views'] ?? false );
-		if ( RequestType::FrontendHtml === $type && true === ( $shield['facets'] ?? false ) && ! $loggedIn && self::isCrawler( $server ) && self::isFacetCombination( $get, $views ) ) {
+		$all   = 'all' === ( $shield['facets_scope'] ?? 'combos' );
+		if ( RequestType::FrontendHtml === $type && true === ( $shield['facets'] ?? false ) && ! $loggedIn && self::isCrawler( $server ) && self::isFacetCombination( $get, $views, $all ) ) {
 			return [
 				'status'  => 403,
 				'headers' => [ 'Content-Type: text/plain; charset=utf-8', 'Cache-Control: no-store', 'X-Robots-Tag: noindex, nofollow' ],
@@ -194,12 +196,34 @@ final class EarlyGuard {
 	/**
 	 * Combinación de filtros: dos grupos a la vez (color y talla, precio y color), varios valores de un
 	 * mismo filtro (filter_color=rojo,azul o filter_color[]=…) o, con $views, cualquier orden o vista.
-	 * Un solo filtro con un valor es la base y sigue abierto. query_type_* solo dice cómo se combinan
-	 * los valores, así que no cuenta.
+	 * Un solo filtro con un valor es la base y sigue abierto, salvo con $all (0.21.1): entonces cualquier
+	 * filtro cuenta y el crawler solo ve las URL reales (categorías, etiquetas, productos).
+	 * query_type_* solo dice cómo se combinan los valores, así que no cuenta.
 	 *
 	 * @param array<mixed> $get $_GET.
 	 */
-	public static function isFacetCombination( array $get, bool $views ): bool {
+	public static function isFacetCombination( array $get, bool $views, bool $all = false ): bool {
+		$groups = 0;
+		$multi  = false;
+		$view   = false;
+		foreach ( self::facetGroups( $get ) as $group => $value ) {
+			if ( 'view' === $group ) {
+				$view = true;
+				continue;
+			}
+			++$groups;
+			$multi = $multi || ! is_scalar( $value ) || str_contains( (string) $value, ',' );
+		}
+		return ( $views && $view ) || $multi || $groups >= ( $all ? 1 : 2 );
+	}
+
+	/**
+	 * Grupos de filtros del query (filter_*, precio, valoración y stock), más "view" si hay orden o vista.
+	 *
+	 * @param array<mixed> $get $_GET.
+	 * @return array<string, mixed> Grupo => valor (el primero de cada grupo).
+	 */
+	public static function facetGroups( array $get ): array {
 		$groups = [];
 		foreach ( $get as $name => $value ) {
 			$name = (string) $name;
@@ -207,17 +231,17 @@ final class EarlyGuard {
 				$group = $name;
 			} elseif ( isset( self::FACET_PARAMS[ $name ] ) ) {
 				$group = self::FACET_PARAMS[ $name ];
-			} elseif ( $views && in_array( $name, self::VIEW_PARAMS, true ) ) {
-				return true;
+			} elseif ( in_array( $name, self::VIEW_PARAMS, true ) ) {
+				$group = 'view';
 			} else {
 				continue;
 			}
-			if ( ! is_scalar( $value ) || str_contains( (string) $value, ',' ) ) {
-				return true;
+			// Varios valores de un grupo (o un valor que no es texto): se conserva el que lo delata.
+			if ( ! isset( $groups[ $group ] ) || ! is_scalar( $value ) || str_contains( (string) $value, ',' ) ) {
+				$groups[ $group ] = $value;
 			}
-			$groups[ $group ] = true;
 		}
-		return count( $groups ) >= 2;
+		return $groups;
 	}
 
 	/** Parámetros que cambian algo al abrir la URL (WooCommerce, core y plugins comunes). */

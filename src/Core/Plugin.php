@@ -556,6 +556,7 @@ final class Plugin {
 					'rules'     => (array) $c->get( Settings::class )->get( 'firewall_rules', [] ),
 					'ratelimit' => (bool) $c->get( Settings::class )->get( 'firewall_ratelimit', true ),
 					'views'     => (bool) $c->get( Settings::class )->get( 'shield_facets_views', true ),
+					'all'       => 'all' === $c->get( Settings::class )->get( 'shield_facets_scope', 'combos' ),
 				]
 			);
 		};

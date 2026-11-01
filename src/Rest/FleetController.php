@@ -15,6 +15,7 @@ use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Installer;
 use ImaginaTurbo\Fleet\FleetService;
 use ImaginaTurbo\Hub\HubClient;
+use ImaginaTurbo\Modules\Rum\RumCollector;
 
 /**
  * Plantilla de flota en el admin y lotes del hub.
@@ -145,11 +146,13 @@ final class FleetController extends Controller {
 	 * Permiso del endpoint del hub: límite de tasa y firma.
 	 */
 	public function remoteAllowed( \WP_REST_Request $request ): bool|\WP_Error {
-		$count = (int) get_transient( self::RATE_TRANSIENT );
-		if ( $count >= self::REMOTE_LIMIT ) {
+		// Primero la firma; el límite cuenta solo los fallos y por IP (0.21.2). Antes contaba cualquier
+		// petición en un solo contador del sitio: 60 POST anónimos por hora dejaban fuera al hub.
+		$failKey = self::RATE_TRANSIENT . '_' . md5( RumCollector::clientIp( $_SERVER ) );
+		$fails   = (int) get_transient( $failKey );
+		if ( $fails >= self::REMOTE_LIMIT ) {
 			return new \WP_Error( 'itb_rate', __( 'Demasiadas peticiones.', 'imagina-turbo' ), [ 'status' => 429 ] );
 		}
-		set_transient( self::RATE_TRANSIENT, $count + 1, HOUR_IN_SECONDS );
 
 		$headers = [];
 		foreach ( [ 'x-itb-site', 'x-itb-timestamp', 'x-itb-nonce', 'x-itb-signature' ] as $name ) {
@@ -158,7 +161,11 @@ final class FleetController extends Controller {
 		$path   = (string) wp_parse_url( isset( $_SERVER['REQUEST_URI'] ) ? sanitize_url( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '', PHP_URL_PATH );
 		$reason = $this->container->get( HubClient::class )->verifyIncoming( 'POST', $path, $request->get_body(), $headers );
 		if ( null !== $reason ) {
-			$this->container->get( EventLog::class )->warning( 'fleet', 'remote_rejected', __( 'Petición de flota rechazada.', 'imagina-turbo' ), [ 'reason' => $reason ] );
+			set_transient( $failKey, $fails + 1, HOUR_IN_SECONDS );
+			// Un aviso por IP y hora, no uno por petición.
+			if ( 0 === $fails ) {
+				$this->container->get( EventLog::class )->warning( 'fleet', 'remote_rejected', __( 'Petición de flota rechazada.', 'imagina-turbo' ), [ 'reason' => $reason ] );
+			}
 			return new \WP_Error( 'itb_signature', __( 'Firma no válida.', 'imagina-turbo' ), [ 'status' => 401 ] );
 		}
 		return true;

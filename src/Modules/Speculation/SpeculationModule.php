@@ -187,8 +187,8 @@ final class SpeculationModule implements ModuleInterface {
 		];
 		$js     = sprintf(
 			'if(!(window.HTMLScriptElement&&HTMLScriptElement.supports&&HTMLScriptElement.supports("speculationrules"))){window.itbPf=%s;var s=document.createElement("script");s.src=%s;s.async=true;document.head.appendChild(s)}',
-			wp_json_encode( $config, JSON_UNESCAPED_SLASHES ),
-			wp_json_encode( $src, JSON_UNESCAPED_SLASHES )
+			wp_json_encode( $config, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES ),
+			wp_json_encode( $src, JSON_HEX_TAG | JSON_UNESCAPED_SLASHES )
 		);
 		wp_print_inline_script_tag( $js, [ 'id' => 'itb-prefetch-loader' ] );
 	}

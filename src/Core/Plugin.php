@@ -295,6 +295,7 @@ final class Plugin {
 		}
 		Installer::maybeUpgrade();
 		Installer::addCapability();
+		Installer::migrateDataFiles( Runtime::$dataDir, $this->container->get( SafeMode::class ) );
 
 		$loader = $this->container->get( MuLoaderInstaller::class );
 		if ( ! $loader->isCurrent() ) {

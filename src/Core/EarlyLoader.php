@@ -16,6 +16,7 @@ use ImaginaTurbo\Core\Config\CompiledConfig;
 use ImaginaTurbo\Core\Request\RequestClassifier;
 use ImaginaTurbo\Core\Request\RequestType;
 use ImaginaTurbo\Core\Safety\AdminBypassCookie;
+use ImaginaTurbo\Core\Safety\DataFile;
 use ImaginaTurbo\Modules\Profiler\Collector;
 use ImaginaTurbo\Core\Safety\KillSwitch;
 use ImaginaTurbo\Core\Safety\SafeMode;
@@ -29,7 +30,7 @@ final class EarlyLoader {
 	public const DIAG_COOKIE = 'itb_diag';
 
 	/** Debe coincidir con SafeMode::FLAG (se repite para no cargar la clase en cada request). */
-	public const SAFE_MODE_FLAG = 'safe-mode.flag';
+	public const SAFE_MODE_FLAG = 'safe-mode.php';
 
 	/** Tipos fatales (igual que SafeMode::FATAL_TYPES). */
 	private const FATAL_TYPES = E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR;
@@ -43,8 +44,11 @@ final class EarlyLoader {
 	/** Igual que ExperimentCookie::NAME. */
 	public const EXPERIMENT_COOKIE = 'itb_exp';
 
-	/** Registro de fatales en requests filtrados (lo lee la vigilancia de reglas). */
-	public const FILTER_FAULTS = 'filter-faults.log';
+	/** Registro de fatales en requests filtrados (lo lee la vigilancia de reglas). Con guarda (DataFile). */
+	public const FILTER_FAULTS = 'filter-faults.php';
+
+	/** Nombre hasta la 0.21.1. */
+	public const FILTER_FAULTS_LEGACY = 'filter-faults.log';
 
 	private static bool $shutdownRegistered = false;
 
@@ -187,6 +191,12 @@ final class EarlyLoader {
 			if ( ! $methods && ! in_array( $request->method, [ 'GET', 'HEAD' ], true ) ) {
 				return;
 			}
+			// Un login, registro, cambio de contraseña, pedido o comentario nunca va con plugins quitados
+			// (0.21.2), aunque la regla valga para todos los métodos: WooCommerce y el core procesan esos
+			// formularios en cualquier petición.
+			if ( ! in_array( $request->method, [ 'GET', 'HEAD' ], true ) && self::sensitivePost( $_POST ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- solo se miran los nombres.
+				return;
+			}
 			$remove             = $rule['p'];
 			Runtime::$filterKey = $key;
 		}
@@ -210,9 +220,9 @@ final class EarlyLoader {
 		$type      = $request->type;
 		$candidate = RequestType::StaticMiss === $type
 			|| RequestType::XmlRpc === $type
-			|| ( RequestType::FrontendHtml === $type && isset( $_GET['author'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+			|| ( ( RequestType::FrontendHtml === $type || RequestType::WcAjax === $type ) && isset( $_GET['author'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
 			|| ( RequestType::FrontendHtml === $type && self::facetCandidate( $config ) )
-			|| ( RequestType::Rest === $type && ( str_contains( $request->path, '/users' ) || isset( $_GET['rest_route'] ) ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
+			|| ( in_array( $type, [ RequestType::Rest, RequestType::WcAjax, RequestType::FrontendHtml ], true ) && ( str_contains( $request->path, '/users' ) || isset( $_GET['rest_route'] ) ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se comprueba si existe.
 			|| isset( $_SERVER['HTTP_SEC_PURPOSE'] ) || isset( $_SERVER['HTTP_PURPOSE'] );
 		if ( ! $candidate ) {
 			return;
@@ -227,6 +237,23 @@ final class EarlyLoader {
 		if ( null !== $response ) {
 			\ImaginaTurbo\Modules\Shield\EarlyGuard::respond( $response );
 		}
+	}
+
+	/** Campos de formularios sensibles: copia de RulePolicy::SENSITIVE_POST (aquí no hay autoloader). */
+	public const SENSITIVE_POST = [ 'log', 'pwd', 'username', 'password', 'user_login', 'user_email', 'pass1', 'login', 'register', 'woocommerce-login-nonce', 'woocommerce-register-nonce', 'woocommerce-lost-password-nonce', 'woocommerce-reset-password-nonce', 'woocommerce-process-checkout-nonce', 'woocommerce_checkout_place_order', 'comment_post_ID' ];
+
+	/**
+	 * El POST lleva campos de login, registro, contraseña, pedido o comentario.
+	 *
+	 * @param array<mixed> $post $_POST.
+	 */
+	public static function sensitivePost( array $post ): bool {
+		foreach ( self::SENSITIVE_POST as $field ) {
+			if ( isset( $post[ $field ] ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -300,19 +327,17 @@ final class EarlyLoader {
 				require_once Runtime::$pluginDir . '/src/Core/Safety/SafeMode.php';
 			}
 			( new SafeMode( Runtime::$dataDir, Runtime::$pluginDir ) )->handleShutdown( Runtime::$pluginsFiltered );
-			// La regla que estaba activa se desactiva en el siguiente request de admin o cron.
-			if ( '' !== Runtime::$filterKey && Runtime::$pluginsFiltered && '' !== Runtime::$dataDir ) {
+			// La regla que estaba activa se desactiva en el siguiente request de admin o cron. Solo por el
+			// error de un plugin que falta: otro fatal provocado a propósito no debe apagar reglas.
+			if ( '' !== Runtime::$filterKey && Runtime::$pluginsFiltered && '' !== Runtime::$dataDir && SafeMode::missingSymbol( $error ) ) {
 				$message = strtok( (string) $error['message'], "\n" );
-				file_put_contents( // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- shutdown del loader MU.
+				DataFile::append(
 					Runtime::$dataDir . '/' . self::FILTER_FAULTS,
-					json_encode( // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- shutdown del loader MU.
-						[
-							'k' => Runtime::$filterKey,
-							't' => time(),
-							'm' => substr( str_replace( defined( 'ABSPATH' ) ? (string) ABSPATH : "\0", '', false === $message ? '' : $message ), 0, 200 ),
-						]
-					) . "\n",
-					FILE_APPEND | LOCK_EX
+					[
+						'k' => Runtime::$filterKey,
+						't' => time(),
+						'm' => substr( str_replace( defined( 'ABSPATH' ) ? (string) ABSPATH : "\0", '', false === $message ? '' : $message ), 0, 200 ),
+					]
 				);
 			}
 		}

@@ -584,7 +584,9 @@ final class FrontendHintsModule implements ModuleInterface {
 	}
 
 	/**
-	 * CSS y JS de las fachadas, solo si la página tiene alguna.
+	 * CSS y JS de las fachadas, solo si la página tiene alguna. El script solo abre URL de YouTube o
+	 * Vimeo (0.21.2): un autor sin unfiltered_html puede escribir un div.itb-facade con data-src a
+	 * javascript: y el clic lo ejecutaría en el sitio.
 	 */
 	public static function printFacadeAssets(): void {
 		if ( ! self::$facadeUsed ) {
@@ -592,7 +594,7 @@ final class FrontendHintsModule implements ModuleInterface {
 		}
 		echo '<style id="itb-facade-css">.itb-facade{position:relative;width:100%;max-width:100%;background:#000 center/cover no-repeat;cursor:pointer;overflow:hidden}.itb-facade-play{position:absolute;top:50%;left:50%;width:68px;height:48px;margin:-24px 0 0 -34px;border-radius:12px;background:rgba(0,0,0,.75)}.itb-facade-play:after{content:"";position:absolute;left:27px;top:14px;border-style:solid;border-width:10px 0 10px 18px;border-color:transparent transparent transparent #fff}.itb-facade:hover .itb-facade-play,.itb-facade:focus .itb-facade-play{background:#f00}.itb-facade-title{position:absolute;left:0;right:0;top:0;padding:12px 16px;color:#fff;font:14px/1.3 sans-serif;background:linear-gradient(rgba(0,0,0,.6),transparent)}.itb-facade iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style>' . "\n";
 		wp_print_inline_script_tag(
-			'document.addEventListener("click",f);document.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" ")f(e)});function f(e){var d=e.target.closest&&e.target.closest(".itb-facade");if(!d||d.querySelector("iframe"))return;e.preventDefault();var i=document.createElement("iframe");i.src=d.dataset.src;i.title=d.dataset.title||"";i.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen";i.allowFullscreen=true;d.innerHTML="";d.appendChild(i)}',
+			'document.addEventListener("click",f);document.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" ")f(e)});function f(e){var d=e.target.closest&&e.target.closest(".itb-facade");if(!d||d.querySelector("iframe"))return;e.preventDefault();var u=d.dataset.src||"";if(!/^https:\/\/(www\.youtube(-nocookie)?\.com\/embed\/|player\.vimeo\.com\/video\/)/.test(u))return;var i=document.createElement("iframe");i.src=u;i.title=d.dataset.title||"";i.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen";i.allowFullscreen=true;d.innerHTML="";d.appendChild(i)}',
 			[ 'id' => 'itb-facade-js' ]
 		);
 	}

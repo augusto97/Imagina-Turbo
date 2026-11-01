@@ -184,13 +184,22 @@ final class Settings {
 	}
 
 	/**
+	 * Ajustes que una importación nunca cambia (0.21.2): dan acceso a terceros (asistentes de IA, el hub,
+	 * el control remoto de la flota) o son estado propio de este sitio. Un archivo de otro sitio, o uno
+	 * preparado por alguien, no debe abrir esas puertas: se cambian a mano, cada uno en su pantalla.
+	 */
+	public const IMPORT_KEEP = [ 'tag_prefix', 'profiler_intensive_until', 'ai_write', 'fleet_remote', 'hub_url', 'turnstile_verified' ];
+
+	/**
 	 * Importa ajustes exportados. Lanza si el formato no es válido.
 	 *
-	 * @param mixed $payload Datos importados.
-	 * @return array<string, mixed>
+	 * @param mixed                       $payload Datos importados.
+	 * @param \Closure(string): bool|null $risky   Módulo que no es seguro: la importación no lo enciende
+	 *                                             (regla 3, se activa a mano con su confirmación).
+	 * @return array{settings: array<string, mixed>, skipped: list<string>} Ajustes y módulos que no se encendieron.
 	 * @throws \InvalidArgumentException Si el formato no es válido.
 	 */
-	public function import( mixed $payload ): array {
+	public function import( mixed $payload, ?\Closure $risky = null ): array {
 		if ( ! is_array( $payload ) || 'imagina-turbo' !== ( $payload['plugin'] ?? null ) || ! is_array( $payload['settings'] ?? null ) ) {
 			throw new \InvalidArgumentException( 'Formato de exportación no válido.' );
 		}
@@ -198,8 +207,23 @@ final class Settings {
 			throw new \InvalidArgumentException( 'La exportación es de una versión más nueva del plugin.' );
 		}
 		$settings = $payload['settings'];
-		unset( $settings['tag_prefix'], $settings['profiler_intensive_until'] );
-		return $this->update( $settings );
+		foreach ( self::IMPORT_KEEP as $key ) {
+			unset( $settings[ $key ] );
+		}
+		$skipped = [];
+		if ( null !== $risky && is_array( $settings['modules'] ?? null ) ) {
+			$current = $this->modules();
+			foreach ( $settings['modules'] as $id => $enabled ) {
+				if ( true === $enabled && is_string( $id ) && true !== ( $current[ $id ] ?? false ) && $risky( $id ) ) {
+					unset( $settings['modules'][ $id ] );
+					$skipped[] = $id;
+				}
+			}
+		}
+		return [
+			'settings' => $this->update( $settings ),
+			'skipped'  => $skipped,
+		];
 	}
 
 	/**

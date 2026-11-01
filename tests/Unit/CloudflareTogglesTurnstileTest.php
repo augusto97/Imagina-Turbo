@@ -351,16 +351,29 @@ final class CloudflareTogglesTurnstileTest extends TestCase {
 		$this->assertSame( '1x0000000000000000000000000000000AA', $sent['body']['secret'] );
 		$this->assertSame( '203.0.113.9', $sent['body']['remoteip'] );
 
+		// Otro paso del mismo envío (PayPal Payments valida y después envía): hasta tres usos sin volver
+		// a Cloudflare, que lo rechazaría como duplicado. El cuarto, no.
+		$this->assertTrue( $ts->verify( 'tok', 'login', '' )['ok'] );
+		$this->assertTrue( $ts->verify( 'tok', 'login', '' )['ok'] );
+		$this->assertCount( 1, $this->requests );
+		$this->assertSame( 'expired', $ts->verify( 'tok', 'login', '' )['code'] );
+		$this->assertCount( 1, $this->requests );
+
 		$this->responses[] = new \WP_Error( 'http_request_failed', 'timeout' );
 		$this->assertSame(
 			[
 				'ok'   => true,
 				'code' => 'failopen',
 			],
-			$ts->verify( 'tok', 'login', '' )
+			$ts->verify( 'tok', 'register', '' ),
+			'el mismo token para otra acción vuelve a Cloudflare'
 		);
+		$this->assertCount( 2, $this->requests );
 		$this->responses[] = [ 502, [] ];
-		$this->assertTrue( $ts->verify( 'tok', 'login', '' )['ok'] );
+		$this->assertTrue( $ts->verify( 'tok3', 'login', '' )['ok'] );
+		$this->responses[] = new \WP_Error( 'http_request_failed', 'timeout' );
+		$this->assertTrue( $ts->verify( 'tok3', 'login', '' )['ok'], 'lo que pasó por fallar abierto no se guarda como aprobado' );
+		$this->assertCount( 4, $this->requests );
 		$this->assertCount( 1, $this->events, 'un solo aviso por hora' );
 
 		$this->responses[] = [
@@ -462,10 +475,26 @@ final class CloudflareTogglesTurnstileTest extends TestCase {
 
 	public function test_checkout_only_on_the_form_submit(): void {
 		$this->boot( [ 'checkout' => true ] );
-		// Sin wc-ajax=checkout ni el nonce del formulario (por ejemplo, el endpoint de un botón exprés).
-		$errors = new \WP_Error();
+		// Endpoint de un botón exprés conocido y el envío que solo recalcula totales: no crean un pedido
+		// por el formulario.
+		$errors          = new \WP_Error();
+		$_GET['wc-ajax'] = 'wc_stripe_create_order';
 		TurnstileModule::checkClassicCheckout( [ 'payment_method' => 'stripe' ], $errors );
 		$this->assertFalse( $errors->has_errors() );
+		$_GET  = [];
+		$_POST = [ 'woocommerce_checkout_update_totals' => '1' ];
+		TurnstileModule::checkClassicCheckout( [ 'payment_method' => 'bacs' ], $errors );
+		$this->assertFalse( $errors->has_errors() );
+		$_POST = [];
+		// Cualquier otra vía (0.21.2): ?wc-ajax= con otra acción, admin-ajax.php o un POST a una página.
+		foreach ( [ [ 'wc-ajax' => 'x' ], [] ] as $get ) {
+			TurnstileModule::reset();
+			$_GET   = $get;
+			$bypass = new \WP_Error();
+			TurnstileModule::checkClassicCheckout( [ 'payment_method' => 'bacs' ], $bypass );
+			$this->assertSame( [ 'itb_turnstile' ], $bypass->get_error_codes(), (string) wp_json_encode( $get ) );
+		}
+		TurnstileModule::reset();
 
 		Functions\when( 'wp_doing_ajax' )->justReturn( true );
 		$_GET['wc-ajax'] = 'checkout';
@@ -479,6 +508,12 @@ final class CloudflareTogglesTurnstileTest extends TestCase {
 		TurnstileModule::checkClassicCheckout( [ 'payment_method' => 'bacs' ], $errors );
 		$this->assertSame( [ 'itb_turnstile' ], $errors->get_error_codes() );
 		$this->assertCount( 0, $this->requests );
+		// Otra validación en el mismo request recibe el mismo fallo (antes pasaba), sin repetir el mensaje.
+		$again = new \WP_Error();
+		TurnstileModule::checkClassicCheckout( [ 'payment_method' => 'bacs' ], $again );
+		$this->assertSame( [ 'itb_turnstile' ], $again->get_error_codes() );
+		TurnstileModule::checkClassicCheckout( [ 'payment_method' => 'bacs' ], $again );
+		$this->assertCount( 1, $again->errors['itb_turnstile'] ?? [] );
 
 		// Por bloques: solo el POST, con el token en los datos de extensión.
 		TurnstileModule::reset();
@@ -514,7 +549,7 @@ final class CloudflareTogglesTurnstileTest extends TestCase {
 		$this->assertStringContainsString( 'class="itb-ts"', $html );
 		$this->assertStringContainsString( 'data-k="1x00000000000000000000AA"', $html );
 		$this->assertStringContainsString( 'data-action="checkout"', $html );
-		$this->assertStringContainsString( 'data-u="https://challenges.cloudflare.com/turnstile/v0/api.js"', $html );
+		$this->assertStringNotContainsString( 'data-u=', $html, 'la URL de api.js está fija en el script' );
 		$this->assertStringContainsString( 'data-now="1" data-block="1"', $html );
 
 		$s = Settings::sanitize(

@@ -75,4 +75,15 @@ abstract class Controller {
 	protected function error( string $code, string $message, int $status, array $data = [] ): \WP_Error {
 		return new \WP_Error( $code, $message, array_merge( [ 'status' => $status ], $data ) );
 	}
+
+	/**
+	 * En multisitio, lo que afecta a toda la red (kill switch, modo seguro, .htaccess) es del súper
+	 * administrador (0.21.2): el directorio de datos y el .htaccess son de la red, no de cada sitio.
+	 */
+	protected function networkOnly(): ?\WP_Error {
+		if ( is_multisite() && ! current_user_can( 'manage_network_options' ) ) {
+			return $this->error( 'itb_network', __( 'En una red multisitio, solo el súper administrador puede cambiar esto.', 'imagina-turbo' ), 403 );
+		}
+		return null;
+	}
 }

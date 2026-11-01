@@ -83,7 +83,9 @@ final class CloudflareService {
 		];
 		$guard = null === $zone ? '' : $this->guard();
 		return [
-			'available'         => TokenVault::available(),
+			// Sin sodium o sin claves únicas en wp-config.php no se guarda el token (0.21.2).
+			'available'         => '' === $this->vault->problem(),
+			'vault_problem'     => $this->vault->problem(),
 			'enabled'           => $this->moduleEnabled,
 			'token'             => $this->vault->status(),
 			'zone'              => $zone,
@@ -108,10 +110,10 @@ final class CloudflareService {
 	 */
 	public function connect( string $token ): array {
 		$token = trim( $token );
-		if ( ! TokenVault::available() ) {
+		if ( '' !== $this->vault->problem() ) {
 			return [
 				'ok'    => false,
-				'error' => __( 'El servidor no tiene la extensión sodium de PHP.', 'imagina-turbo' ),
+				'error' => $this->vault->problem(),
 			];
 		}
 		if ( ! TokenVault::valid( $token ) ) {

@@ -147,8 +147,12 @@ final class TurnstileController extends Controller {
 		}
 		$secret = $request->get_param( 'secret' );
 		if ( is_string( $secret ) && '' !== trim( $secret ) ) {
+			$problem = Turnstile::vault()->problem();
+			if ( '' !== $problem ) {
+				return $this->error( 'itb_turnstile_secret', $problem, 409 );
+			}
 			if ( ! Turnstile::vault()->store( $secret ) ) {
-				return $this->error( 'itb_turnstile_secret', __( 'No se pudo guardar la clave secreta: revisa que esté completa (o que el servidor tenga sodium).', 'imagina-turbo' ), 400 );
+				return $this->error( 'itb_turnstile_secret', __( 'No se pudo guardar la clave secreta: revisa que esté completa.', 'imagina-turbo' ), 400 );
 			}
 			$rekey = true;
 		}

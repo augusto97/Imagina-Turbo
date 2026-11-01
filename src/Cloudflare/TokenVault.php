@@ -7,6 +7,12 @@
  * no se puede descifrar y Cloudflare queda "desconectado: reconectar el token" en lugar de fallar en
  * cada llamada. El token nunca se exporta ni se devuelve al admin (solo sus últimos 4 caracteres).
  *
+ * Desde la 0.21.2 no se guarda nada si esas dos constantes faltan, son la frase de ejemplo de
+ * wp-config-sample.php o son iguales: la clave saldría de un valor conocido y el cifrado no protegería
+ * nada frente a quien lea la base de datos (que es justo para lo que existe). Lo ya guardado se sigue
+ * leyendo. La misma clave sirve para las tres opciones (token, secreto de Turnstile, clave del
+ * verificador): separarlas por opción solo protegería de quien ya puede escribir en la base de datos.
+ *
  * @package ImaginaTurbo
  */
 
@@ -35,6 +41,35 @@ final class TokenVault {
 		return function_exists( 'sodium_crypto_secretbox' );
 	}
 
+	/**
+	 * AUTH_KEY y SECURE_AUTH_SALT existen en wp-config.php, no son la frase de ejemplo y no son iguales.
+	 * Si faltan, WordPress usa copias guardadas en la base de datos (wp_salt): no sirven de clave aquí.
+	 */
+	public static function saltsReady(): bool {
+		$values = [];
+		foreach ( [ 'AUTH_KEY', 'SECURE_AUTH_SALT' ] as $name ) {
+			$value = defined( $name ) ? (string) constant( $name ) : '';
+			if ( strlen( $value ) < 20 || str_contains( $value, 'put your unique phrase here' ) ) {
+				return false;
+			}
+			$values[] = $value;
+		}
+		return $values[0] !== $values[1];
+	}
+
+	/**
+	 * Por qué no se puede guardar un secreto, o cadena vacía si se puede.
+	 */
+	public function problem(): string {
+		if ( ! self::available() ) {
+			return __( 'El servidor no tiene la extensión sodium de PHP.', 'imagina-turbo' );
+		}
+		if ( null === $this->keyMaterial && ! self::saltsReady() ) {
+			return __( 'Faltan AUTH_KEY y SECURE_AUTH_SALT únicos en wp-config.php: sin ellos el secreto quedaría cifrado con una clave conocida. Genera unos en https://api.wordpress.org/secret-key/1.1/salt/ (cerrará las sesiones abiertas) y vuelve a intentarlo.', 'imagina-turbo' );
+		}
+		return '';
+	}
+
 	public static function valid( string $token ): bool {
 		return 1 === preg_match( self::PATTERN, $token );
 	}
@@ -44,7 +79,7 @@ final class TokenVault {
 	 */
 	public function store( string $token ): bool {
 		$token = trim( $token );
-		if ( ! self::available() || ! self::valid( $token ) ) {
+		if ( ! self::available() || ( null === $this->keyMaterial && ! self::saltsReady() ) || ! self::valid( $token ) ) {
 			return false;
 		}
 		$key   = $this->key();

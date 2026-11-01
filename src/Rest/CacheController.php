@@ -279,7 +279,8 @@ final class CacheController extends Controller {
 			$purge = PurgeRequest::all( 'manual' );
 		} elseif ( 'url' === $type ) {
 			$url = esc_url_raw( $value );
-			if ( '' === $url || (string) wp_parse_url( $url, PHP_URL_HOST ) !== (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) {
+			// Mismo host y mismo puerto que el sitio (0.21.2: con otro puerto se podía consultar un servicio local).
+			if ( '' === $url || (string) wp_parse_url( $url, PHP_URL_HOST ) !== (string) wp_parse_url( home_url(), PHP_URL_HOST ) || wp_parse_url( $url, PHP_URL_PORT ) !== wp_parse_url( home_url(), PHP_URL_PORT ) ) {
 				return $this->error( 'itb_url', __( 'La URL debe ser de este sitio.', 'imagina-turbo' ), 400 );
 			}
 			$purge = new PurgeRequest( [], [ $url ], false, 'manual' );
@@ -324,7 +325,8 @@ final class CacheController extends Controller {
 	 */
 	public function inspect( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
 		$url = esc_url_raw( trim( (string) $request->get_param( 'url' ) ) );
-		if ( '' === $url || (string) wp_parse_url( $url, PHP_URL_HOST ) !== (string) wp_parse_url( home_url(), PHP_URL_HOST ) ) {
+		// Mismo host y mismo puerto que el sitio (0.21.2: con otro puerto se podía consultar un servicio local).
+		if ( '' === $url || (string) wp_parse_url( $url, PHP_URL_HOST ) !== (string) wp_parse_url( home_url(), PHP_URL_HOST ) || wp_parse_url( $url, PHP_URL_PORT ) !== wp_parse_url( home_url(), PHP_URL_PORT ) ) {
 			return $this->error( 'itb_url', __( 'La URL debe ser de este sitio.', 'imagina-turbo' ), 400 );
 		}
 		$response = wp_remote_get(

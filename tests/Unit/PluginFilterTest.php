@@ -135,8 +135,8 @@ final class PluginFilterTest extends TestCase {
 		$this->assertSame( ResponseComparer::STRUCTURAL, ResponseComparer::calibrate( $json( '{"r":1}' ), $json( '{"r":2}' ) ) );
 		$this->assertSame( ResponseComparer::EXACT, ResponseComparer::calibrate( $json( '{"r":1}' ), $json( '{"r":1}' ) ) );
 		// Cookies por nombre.
-		$a = $json( '{}' );
-		$b = $json( '{}' );
+		$a                          = $json( '{}' );
+		$b                          = $json( '{}' );
 		$b['headers']['set-cookie'] = "wp_woocommerce_session_x=1; path=/\nother=2";
 		$this->assertSame( 'set-cookie', ResponseComparer::diff( $a, $b, ResponseComparer::EXACT )['field'] ?? '' );
 		// HTML estructural: etiquetas.
@@ -151,9 +151,15 @@ final class PluginFilterTest extends TestCase {
 			$this->assertNotSame( '', RulePolicy::blockedReason( $key ), $key );
 		}
 		$self = 'imagina-turbo/imagina-turbo.php';
-		$this->assertSame( [ $self, 'woocommerce/woocommerce.php' ], RulePolicy::protectedPlugins( 'WcAjax:add_to_cart', self::ACTIVE, $self ) );
-		$this->assertSame( [ $self ], RulePolicy::protectedPlugins( 'AdminAjax:x', self::ACTIVE, $self ) );
-		$this->assertSame( [ $self, 'woo-smart-search/woo-smart-search.php', 'woocommerce/woocommerce.php' ], RulePolicy::protectedPlugins( 'Rest:wss/v1', self::ACTIVE, $self ) );
+		// Seguridad, antispam y membresías siempre protegidos (0.21.2).
+		$security = [ 'akismet/akismet.php', 'woocommerce-memberships/woocommerce-memberships.php' ];
+		$this->assertSame( array_merge( [ $self ], $security, [ 'woocommerce/woocommerce.php' ] ), RulePolicy::protectedPlugins( 'WcAjax:add_to_cart', self::ACTIVE, $self ) );
+		$this->assertSame( array_merge( [ $self ], $security ), RulePolicy::protectedPlugins( 'AdminAjax:x', self::ACTIVE, $self ) );
+		$this->assertSame( array_merge( [ $self ], $security, [ 'woo-smart-search/woo-smart-search.php', 'woocommerce/woocommerce.php' ] ), RulePolicy::protectedPlugins( 'Rest:wss/v1', self::ACTIVE, $self ) );
+		$this->assertTrue( \ImaginaTurbo\Core\EarlyLoader::sensitivePost( [ 'log' => 'admin' ] ) );
+		$this->assertTrue( \ImaginaTurbo\Core\EarlyLoader::sensitivePost( [ 'woocommerce_checkout_place_order' => '1' ] ) );
+		$this->assertFalse( \ImaginaTurbo\Core\EarlyLoader::sensitivePost( [ 'action' => 'woodmart_load_html_dropdowns' ] ) );
+		$this->assertSame( RulePolicy::SENSITIVE_POST, \ImaginaTurbo\Core\EarlyLoader::SENSITIVE_POST, 'la copia del loader coincide' );
 		$this->assertTrue( RulePolicy::defaultAllMethods( 'WcAjax:add_to_cart' ) );
 		$this->assertFalse( RulePolicy::defaultAllMethods( 'Rest:wss/v1' ) );
 		$this->assertSame( 'POST', RulePolicy::defaultProbes( 'WcAjax:get_refreshed_fragments', 'wp-json' )[0]['method'] );
@@ -208,7 +214,7 @@ final class PluginFilterTest extends TestCase {
 		$testing = RuleStore::normalize(
 			[
 				'key'     => 'Rest:wss/v1',
-				'plugins' => [ 'akismet/akismet.php' ],
+				'plugins' => [ 'akismet/akismet.php', 'hello.php' ],
 				'probes'  => [ RulePolicy::probe( 'GET', '/wp-json/wss/v1/popular' ) ],
 				'status'  => 'testing',
 			]
@@ -232,7 +238,7 @@ final class PluginFilterTest extends TestCase {
 	}
 
 	public function test_candidates_from_profiler_samples(): void {
-		$row  = static fn( string $type, string $route, array $costs ): array => [
+		$row   = static fn( string $type, string $route, array $costs ): array => [
 			'request_type' => $type,
 			'route_key'    => $route,
 			'ms'           => 120,
@@ -243,7 +249,7 @@ final class PluginFilterTest extends TestCase {
 			'via_cf'       => 1,
 			'plugins_cost' => json_encode( $costs ),
 		];
-		$rows = [
+		$rows  = [
 			$row(
 				'WcAjax',
 				'get_refreshed_fragments',

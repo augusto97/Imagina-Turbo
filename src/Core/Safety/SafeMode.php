@@ -13,15 +13,17 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Core\Safety;
 
-// phpcs:disable WordPress.WP.AlternativeFunctions.json_encode_json_encode -- corre sin WordPress (shutdown).
-
 /**
  * Contador de fatales con ventana y bandera de modo seguro.
  */
 final class SafeMode {
 
-	public const FLAG    = 'safe-mode.flag';
-	public const COUNTER = 'fatals.json';
+	/** Archivos .php con guarda (DataFile): no se pueden leer por URL aunque el servidor ignore el .htaccess. */
+	public const FLAG    = 'safe-mode.php';
+	public const COUNTER = 'fatals.php';
+
+	/** Nombres hasta la 0.21.1 (se migran en el siguiente request de admin). */
+	public const LEGACY = [ 'safe-mode.flag', 'fatals.json' ];
 
 	public const DEFAULT_WINDOW    = 300;
 	public const DEFAULT_THRESHOLD = 3;
@@ -40,6 +42,10 @@ final class SafeMode {
 		private readonly int $window = self::DEFAULT_WINDOW,
 		private readonly int $threshold = self::DEFAULT_THRESHOLD,
 	) {
+		// Desde el loader MU no hay autoloader.
+		if ( ! class_exists( DataFile::class, false ) ) {
+			require_once __DIR__ . '/DataFile.php';
+		}
 	}
 
 	/**
@@ -63,8 +69,7 @@ final class SafeMode {
 		if ( ! is_file( $file ) ) {
 			return null;
 		}
-		$raw  = (string) file_get_contents( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
-		$data = json_decode( $raw, true );
+		$data = DataFile::decode( $file );
 		return is_array( $data ) ? $data : [
 			'reason'   => 'unknown',
 			'at'       => (int) filemtime( $file ),
@@ -88,20 +93,48 @@ final class SafeMode {
 			'context'  => $context,
 			'notified' => false,
 		];
-		return self::atomicWrite( $this->dataDir . '/' . self::FLAG, (string) json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+		return self::atomicWrite( $this->dataDir . '/' . self::FLAG, DataFile::encode( $data ) );
 	}
 
 	/**
 	 * Sale del modo seguro y limpia el contador.
 	 */
 	public function leave(): bool {
-		foreach ( [ self::FLAG, self::COUNTER ] as $name ) {
+		foreach ( [ self::FLAG, self::COUNTER, ...self::LEGACY ] as $name ) {
 			$file = $this->dataDir . '/' . $name;
 			if ( is_file( $file ) ) {
 				unlink( $file ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
 			}
 		}
 		return ! $this->isActive();
+	}
+
+	/**
+	 * Pasa la bandera de la 0.21.1 o anterior (JSON legible por URL en OpenLiteSpeed y nginx) al archivo
+	 * con guarda, y borra el contador antiguo. Barato si no hay nada que migrar.
+	 */
+	public function migrateLegacy(): void {
+		$old = $this->dataDir . '/' . self::LEGACY[0];
+		if ( is_file( $old ) ) {
+			if ( ! $this->isActive() ) {
+				$data = json_decode( (string) file_get_contents( $old ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+				self::atomicWrite(
+					$this->dataDir . '/' . self::FLAG,
+					DataFile::encode(
+						is_array( $data ) ? $data : [
+							'reason'   => 'unknown',
+							'at'       => (int) filemtime( $old ),
+							'context'  => [],
+							'notified' => false,
+						]
+					)
+				);
+			}
+			unlink( $old ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		}
+		if ( is_file( $this->dataDir . '/' . self::LEGACY[1] ) ) {
+			unlink( $this->dataDir . '/' . self::LEGACY[1] ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+		}
 	}
 
 	/**
@@ -113,7 +146,7 @@ final class SafeMode {
 			return false;
 		}
 		$details['notified'] = true;
-		return self::atomicWrite( $this->dataDir . '/' . self::FLAG, (string) json_encode( $details, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) );
+		return self::atomicWrite( $this->dataDir . '/' . self::FLAG, DataFile::encode( $details ) );
 	}
 
 	/**
@@ -126,12 +159,15 @@ final class SafeMode {
 	}
 
 	/**
-	 * El fatal cuenta para el modo seguro: se filtraron plugins o el archivo es del propio plugin.
+	 * El fatal cuenta para el modo seguro: es del propio plugin, o el request filtró plugins y el error es
+	 * el de un plugin que falta. Desde la 0.21.2 no cuenta cualquier fatal de un request filtrado: los
+	 * endpoints con reglas los puede llamar cualquiera, y un fatal ajeno (memoria, un error del tema)
+	 * provocado a propósito tres veces apagaba el plugin entero, escudo incluido.
 	 *
 	 * @param array<string, mixed> $error Resultado de error_get_last().
 	 */
 	public function isAttributable( array $error, bool $pluginsFiltered ): bool {
-		if ( $pluginsFiltered ) {
+		if ( $pluginsFiltered && self::missingSymbol( $error ) ) {
 			return true;
 		}
 		$file = isset( $error['file'] ) && is_string( $error['file'] ) ? $error['file'] : '';
@@ -149,6 +185,16 @@ final class SafeMode {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * El error es el de un símbolo que no existe: lo que provoca un plugin que no se cargó.
+	 *
+	 * @param array<string, mixed> $error Resultado de error_get_last().
+	 */
+	public static function missingSymbol( array $error ): bool {
+		$message = isset( $error['message'] ) && is_string( $error['message'] ) ? $error['message'] : '';
+		return 1 === preg_match( '/call to undefined (function|method)|(class|interface|trait|enum) "[^"]*" not found|undefined constant|must be a valid callback/i', $message );
 	}
 
 	/**
@@ -173,7 +219,7 @@ final class SafeMode {
 				return 0;
 			}
 			$raw   = stream_get_contents( $handle );
-			$times = json_decode( false === $raw ? '' : $raw, true );
+			$times = json_decode( DataFile::strip( false === $raw ? '' : $raw ), true );
 			$times = is_array( $times ) ? array_values( array_filter( $times, 'is_int' ) ) : [];
 			$times = array_values( array_filter( $times, fn( int $t ): bool => $t > $now - $this->window ) );
 
@@ -182,7 +228,7 @@ final class SafeMode {
 
 			ftruncate( $handle, 0 );
 			rewind( $handle );
-			fwrite( $handle, (string) json_encode( $times ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+			fwrite( $handle, DataFile::encode( $times ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 			fflush( $handle );
 			flock( $handle, LOCK_UN );
 		} finally {

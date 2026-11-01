@@ -201,7 +201,7 @@ final class FragmentCache {
 	 * @return mixed
 	 */
 	public function pre( mixed $output, mixed $args ): mixed {
-		if ( null !== $output || ! is_object( $args ) || ! self::eligible() ) {
+		if ( null !== $output || ! is_object( $args ) || ! self::eligible() || $this->extraQuery() ) {
 			return $output;
 		}
 		$key = $this->key( $args );
@@ -249,7 +249,7 @@ final class FragmentCache {
 		if ( null === $frame ) {
 			return $navMenu;
 		}
-		if ( strlen( $navMenu ) > self::MAX_BYTES || 1 === preg_match( '/nonce/i', $navMenu ) ) {
+		if ( strlen( $navMenu ) > self::MAX_BYTES || 1 === preg_match( '/nonce/i', $navMenu ) || ! AjaxFragments::storeBudget() ) {
 			++self::$stats['skipped'];
 			return $navMenu;
 		}
@@ -271,7 +271,18 @@ final class FragmentCache {
 	 */
 	public static function eligible(): bool {
 		$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_key( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : 'GET';
-		return in_array( $method, [ 'GET', 'HEAD' ], true ) && ! is_admin() && ! is_customize_preview() && ! is_preview() && ! wp_doing_ajax();
+		// Sin copias para un invitado con carrito o sesión de WooCommerce (0.21.2): un menú con el total
+		// del carrito (Menu Cart, un mini-carrito en un megamenú) se le serviría a otros invitados.
+		return in_array( $method, [ 'GET', 'HEAD' ], true ) && ! is_admin() && ! is_customize_preview() && ! is_preview() && ! wp_doing_ajax() && ! AjaxFragments::hasCartCookie( $_COOKIE );
+	}
+
+	/**
+	 * La URL lleva parámetros que no son de campañas (0.21.2): cada valor distinto sería una copia
+	 * nueva, y un bucle con ?r=<azar> llenaba la caché de objetos. Esas páginas se renderizan siempre.
+	 */
+	private function extraQuery(): bool {
+		$uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- solo se compara.
+		return str_contains( self::keyUri( $uri, $this->ignore ), '?' );
 	}
 
 	/**

@@ -134,14 +134,23 @@ final class RequestClassifier {
 		if ( '/wp-login.php' === $siteRel || $this->matchesAny( $homeRel, $this->paths['login'] ?? [], false ) ) {
 			return new RequestContext( RequestType::Login, '', $homeRel, $method );
 		}
-		if ( isset( $get['wc-ajax'] ) && is_string( $get['wc-ajax'] ) && '' !== $get['wc-ajax'] ) {
+		// Solo en la raíz (o la de un idioma), que es donde WooCommerce arma sus URL (WC_AJAX::get_endpoint).
+		// Un ?wc-ajax= añadido a otra ruta (/mi-cuenta/?wc-ajax=…, /wp-json/…?wc-ajax=…) no la convierte en
+		// WcAjax (0.21.2): si no, cualquiera elegía qué reglas de carga condicional se aplican a un login o
+		// a la REST, y el escudo no veía /wp/v2/users.
+		if ( isset( $get['wc-ajax'] ) && is_string( $get['wc-ajax'] ) && '' !== $get['wc-ajax'] && $this->isRoot( $homeRel ) ) {
 			return new RequestContext( RequestType::WcAjax, self::endpoint( $get['wc-ajax'] ), $homeRel, $method );
 		}
 
 		$restRoute = $this->restRoute( $homeRel, $get );
 		if ( null !== $restRoute ) {
 			$namespace = self::restNamespace( $restRoute );
-			$type      = str_starts_with( $namespace, 'wc/store' ) ? RequestType::StoreApi : RequestType::Rest;
+			// La Store API sin versión (/wc/store/…) sigue registrada en WooCommerce: también es Store API.
+			$store = 1 === preg_match( '#^/?wc/store(/|$)#', $restRoute );
+			if ( $store && ! str_starts_with( $namespace, 'wc/store' ) ) {
+				$namespace = 'wc/store';
+			}
+			$type = $store ? RequestType::StoreApi : RequestType::Rest;
 			return new RequestContext( $type, $namespace, $homeRel, $method );
 		}
 
@@ -177,6 +186,14 @@ final class RequestClassifier {
 		}
 
 		return new RequestContext( RequestType::FrontendHtml, '', $homeRel, $method );
+	}
+
+	/**
+	 * La portada o la portada de un idioma (/en/).
+	 */
+	private function isRoot( string $homeRel ): bool {
+		$path = trim( $homeRel, '/' );
+		return '' === $path || in_array( $path, $this->langPrefixes, true );
 	}
 
 	/**

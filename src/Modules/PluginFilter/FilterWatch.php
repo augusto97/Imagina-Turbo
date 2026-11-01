@@ -2,7 +2,7 @@
 /**
  * Vigilancia de las reglas activas (docs/02 módulo 4, punto 4).
  *
- * - Un fatal en un request filtrado queda en wp-content/imagina-turbo/filter-faults.log (lo escribe el
+ * - Un fatal en un request filtrado queda en wp-content/imagina-turbo/filter-faults.php (lo escribe el
  *   loader en shutdown). En el siguiente request de admin o en la tarea horaria, la regla se desactiva.
  * - Cada regla activa se revisa una vez al día con 5 pares; si aparece una diferencia, se desactiva.
  *
@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Modules\PluginFilter;
 
 use ImaginaTurbo\Core\EarlyLoader;
+use ImaginaTurbo\Core\Safety\DataFile;
 use ImaginaTurbo\Core\Events\EventLog;
 
 /**
@@ -38,17 +39,22 @@ final class FilterWatch {
 	 * @return list<string> Claves desactivadas.
 	 */
 	public function processFaults(): array {
-		$file = $this->dataDir . '/' . EarlyLoader::FILTER_FAULTS;
-		if ( '' === $this->dataDir || ! is_file( $file ) ) {
+		if ( '' === $this->dataDir ) {
 			return [];
 		}
-		$lines = file( $file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
-		wp_delete_file( $file );
 		$faults = [];
-		foreach ( is_array( $lines ) ? $lines : [] as $line ) {
-			$row = json_decode( $line, true );
-			if ( is_array( $row ) && is_string( $row['k'] ?? null ) ) {
-				$faults[ $row['k'] ] = is_string( $row['m'] ?? null ) ? $row['m'] : '';
+		// También el nombre de la 0.21.1 y anteriores, que se borra al leerlo.
+		foreach ( [ EarlyLoader::FILTER_FAULTS, EarlyLoader::FILTER_FAULTS_LEGACY ] as $name ) {
+			$file = $this->dataDir . '/' . $name;
+			if ( ! is_file( $file ) ) {
+				continue;
+			}
+			$rows = DataFile::lines( $file );
+			wp_delete_file( $file );
+			foreach ( $rows as $row ) {
+				if ( is_string( $row['k'] ?? null ) ) {
+					$faults[ $row['k'] ] = is_string( $row['m'] ?? null ) ? $row['m'] : '';
+				}
 			}
 		}
 		$disabled = [];

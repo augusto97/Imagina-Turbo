@@ -21,7 +21,7 @@ App React montada en `admin.php?page=imagina-turbo`, con navegación lateral. Es
 | **Flota** | Plantilla del hub (nombre, versión, lo ignorado), desviaciones con su riesgo, aplicar con confirmación, autorización para los lotes del hub con su endpoint, snapshots con revertir. |
 | **Compatibilidad** | Plugins/tema detectados, reglas de la matriz aplicadas, conflictos y solapamientos, versión de la matriz y firma. |
 | **Registro** | Todos los eventos: cambios, aplicaciones, reversiones, modo seguro, errores de API. Filtros y exportación. |
-| **Avanzado** | Kill switch, cookie de bypass para el admin actual, exportar/importar ajustes (sin token), conexión con el hub, licencia (Imagina Updater), modo depuración, asistentes de IA (habilidades registradas y «Permitir cambios», `ai_write`). |
+| **Avanzado** | Kill switch, cookie de bypass para el admin actual, exportar/importar ajustes (sin token; desde la 0.21.2 la importación no cambia `ai_write`, `fleet_remote`, `hub_url` ni `turnstile_verified`, y no enciende módulos que no son seguros: responde cuáles quedaron en `skipped`), conexión con el hub, licencia (Imagina Updater), modo depuración, asistentes de IA (habilidades registradas y «Permitir cambios», `ai_write`). |
 
 Reglas de UX:
 - Ningún cambio sensible se aplica sin mostrar antes qué va a cambiar.
@@ -102,10 +102,12 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | GET | `/events` | Registro |
 | POST | `/safety/kill-switch` · `/safety/bypass-cookie` · `/safety/diag-cookie` · `/safety/safe-mode/exit` | Seguridad operativa |
 
-Endpoint del hub (sin sesión): `POST /imagina-turbo/v1/fleet/remote` con `{action: "status"|"apply", policy_version}`, firmado como las peticiones del sitio al hub (cadena canónica con la ruta que pide el hub, ventana de 5 minutos, nonce no repetido, 60 peticiones por hora). Antes de responder, el sitio descarga la plantilla del propio hub: el cuerpo nunca trae configuración. `apply` exige que la versión coincida (409) y que el sitio lo haya autorizado (403).
+**Multisitio (0.21.2)**: lo que afecta a toda la red (el kill switch, salir del modo seguro, que usan un archivo común, y escribir el `.htaccess` del firewall) exige `manage_network_options`: el administrador de un sitio responde 403 (`itb_network`).
+
+Endpoint del hub (sin sesión): `POST /imagina-turbo/v1/fleet/remote` con `{action: "status"|"apply", policy_version}`, firmado como las peticiones del sitio al hub (cadena canónica con la ruta que pide el hub, ventana de 5 minutos, nonce no repetido, 60 peticiones por hora). Desde la 0.21.2 la firma se comprueba antes de contar, y solo cuentan los intentos fallidos por IP: antes, cualquiera podía gastar las 60 peticiones de la hora con firmas falsas y dejar al hub sin acceso. Antes de responder, el sitio descarga la plantilla del propio hub: el cuerpo nunca trae configuración. `apply` exige que la versión coincida (409) y que el sitio lo haya autorizado (403).
 
 Endpoints públicos (frontend), con límite de tasa y sin datos sensibles:
-- `POST /?itb-rum=1` — beacon del RUM (fase 6), atendido en el loader MU sin cargar plugins. Valida el origen; 2 KB como máximo; 30 por minuto e IP con APCu. Responde 204, 400, 403 o 429.
+- `POST /?itb-rum=1` — beacon del RUM (fase 6), atendido en el loader MU sin cargar plugins. Valida el origen; 2 KB como máximo; 30 por minuto e IP con APCu. Responde 204, 400, 403 o 429. Desde la 0.21.2: `CF-Connecting-IP` solo se cree si la conexión viene de un rango de Cloudflare (si no, cualquiera inventaba una IP por envío y se saltaba el límite); un tope global de 120 envíos por minuto (APCu, caché de objetos o un contador en archivo) y de 50.000 eventos por día; y solo plantillas conocidas (las de WordPress más `single:`/`archivo:`/`tax:` de los tipos públicos), para que no se puedan llenar las tablas con filas inventadas.
 - `GET /imagina-turbo/v1/nonce?a[]=...&t=...&s=...` — refresco de nonces para formularios en páginas cacheadas (implementado en la fase 2a). Solo las acciones que la página imprimió firmadas con HMAC (`a` = acciones, `t` = momento de la página, `s` = firma; máximo 20 acciones y 8 días). 30 peticiones por minuto e IP (con APCu o caché de objetos persistente). Respuesta `Cache-Control: private, no-store` y `Cloudflare-CDN-Cache-Control: no-store`; LSCache recibe `no-cache`. Con sesión de WooCommerce, el nonce del visitante anónimo depende del id de sesión de Woo (`nonce_user_logged_out`), así que el endpoint inicializa la sesión de Woo para las acciones `woocommerce*`. Solo se registra con el módulo de caché activo y el refresco encendido.
 
 Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con sus valores por defecto, guardaría en caché privada sus GET) y aseguran el esquema de la base antes de responder.
@@ -243,7 +245,7 @@ Jobs de limpieza diarios por Action Scheduler (grupo `imagina-turbo`).
 
 El hub es un servicio aparte (puede extender el servidor de Imagina Updater). El plugin funciona completo sin él.
 
-- **Autenticación**: cabeceras `X-ITB-Site` (id del sitio), `X-ITB-License` (clave de licencia de Imagina Updater), `X-ITB-Timestamp`, `X-ITB-Nonce` (16 bytes aleatorios en hex) y `X-ITB-Signature` = HMAC-SHA256 sobre la cadena canónica `MÉTODO\nRUTA\nTIMESTAMP\nNONCE\nsha256_hex(cuerpo)` con `itb_site_key`.
+- **Autenticación**: cabeceras `X-ITB-Site` (id del sitio), `X-ITB-License` (clave de licencia de Imagina Updater; desde la 0.21.2 solo si el hub está en el mismo host que el servidor de licencias o en el de la constante `ITB_HUB_URL`: un administrador engañado para poner otra URL no entrega la licencia a un tercero), `X-ITB-Timestamp`, `X-ITB-Nonce` (16 bytes aleatorios en hex) y `X-ITB-Signature` = HMAC-SHA256 sobre la cadena canónica `MÉTODO\nRUTA\nTIMESTAMP\nNONCE\nsha256_hex(cuerpo)` con `itb_site_key`.
   - Concatenar `cuerpo + timestamp` sin separador es ambiguo y no cubre método ni ruta; la cadena canónica evita que una firma válida sirva para otro endpoint.
   - Rechazar timestamps con más de 5 minutos de diferencia y nonces ya vistos en esa ventana (anti-replay). Comparar firmas con `hash_equals`.
 - **Endpoints del hub** (versionados):

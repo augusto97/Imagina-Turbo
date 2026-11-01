@@ -12,7 +12,9 @@ namespace ImaginaTurbo\Tests\Unit;
 use ImaginaTurbo\Core\EarlyLoader;
 use ImaginaTurbo\Core\Safety\AdminBypassCookie;
 use ImaginaTurbo\Core\Safety\KillSwitch;
+use ImaginaTurbo\Core\Safety\DataFile;
 use ImaginaTurbo\Core\Safety\SafeMode;
+use ImaginaTurbo\Support\Filesystem;
 
 final class SafetyTest extends TestCase {
 
@@ -103,7 +105,77 @@ final class SafetyTest extends TestCase {
 		$this->assertTrue( $safe->isAttributable( [ 'file' => '/var/www/wp-content/plugins/imagina-turbo/src/a.php' ], false ) );
 		$this->assertFalse( $safe->isAttributable( [ 'file' => '/var/www/wp-content/plugins/imagina-turbo-extra/a.php' ], false ), 'prefijo no basta' );
 		$this->assertFalse( $safe->isAttributable( [ 'file' => '/var/www/wp-content/plugins/otro/a.php' ], false ) );
-		$this->assertTrue( $safe->isAttributable( [ 'file' => '/var/www/wp-content/plugins/otro/a.php' ], true ), 'con plugins filtrados cuenta todo' );
+		$this->assertTrue(
+			$safe->isAttributable(
+				[
+					'file'    => '/var/www/wp-content/plugins/otro/a.php',
+					'message' => 'Uncaught Error: Call to undefined function wc_get_product()',
+				],
+				true
+			),
+			'con plugins filtrados, el error de un plugin que falta'
+		);
+		$this->assertTrue( $safe->isAttributable( [ 'message' => 'Uncaught Error: Class "WooCommerce" not found' ], true ) );
+		$this->assertTrue( $safe->isAttributable( [ 'message' => 'Uncaught TypeError: call_user_func_array(): Argument #1 ($callback) must be a valid callback, class "X" not found' ], true ) );
+		$this->assertFalse(
+			$safe->isAttributable(
+				[
+					'file'    => '/var/www/wp-content/plugins/otro/a.php',
+					'message' => 'Allowed memory size of 134217728 bytes exhausted',
+				],
+				true
+			),
+			'otro fatal provocado a propósito no apaga el plugin'
+		);
+		$this->assertFalse( $safe->isAttributable( [ 'message' => 'Maximum execution time of 30 seconds exceeded' ], true ) );
+	}
+
+	public function test_data_files_cannot_be_read_by_url(): void {
+		$safe = new SafeMode( $this->tmp, '/plugin' );
+		$safe->enter( 'fatal_errors', [ 'message' => '<?php echo "x"; ?> en <b>a.php</b>' ], 5 );
+		$safe->recordFatal( [ 'type' => E_ERROR ], 10 );
+		foreach ( [ SafeMode::FLAG, SafeMode::COUNTER ] as $name ) {
+			$this->assertStringEndsWith( '.php', $name );
+			$raw = (string) file_get_contents( $this->tmp . '/' . $name );
+			$this->assertStringStartsWith( DataFile::GUARD, $raw );
+			$this->assertStringNotContainsString( '<', substr( $raw, strlen( DataFile::GUARD ) ), 'sin etiquetas después de la guarda' );
+			// Pedido por URL: PHP termina sin mostrar nada.
+			$this->assertSame( '', (string) shell_exec( 'php ' . escapeshellarg( $this->tmp . '/' . $name ) . ' 2>&1' ) );
+		}
+		$this->assertSame( '<?php echo "x"; ?> en <b>a.php</b>', ( $safe->details() ?? [] )['context']['message'] ?? null, 'y se lee igual' );
+
+		$file = $this->tmp . '/lines.php';
+		$this->assertTrue( DataFile::append( $file, [ 'k' => 'a' ] ) );
+		$this->assertTrue( DataFile::append( $file, [ 'k' => '?><?php phpinfo();' ] ) );
+		$this->assertSame( [ [ 'k' => 'a' ], [ 'k' => '?><?php phpinfo();' ] ], DataFile::lines( $file ) );
+		$this->assertSame( 1, substr_count( (string) file_get_contents( $file ), '<?php' ), 'solo la guarda' );
+		$this->assertSame( '', (string) shell_exec( 'php ' . escapeshellarg( $file ) . ' 2>&1' ) );
+	}
+
+	public function test_legacy_flag_migrates(): void {
+		file_put_contents( $this->tmp . '/safe-mode.flag', '{"reason":"fatal_errors","at":7,"context":[],"notified":true}' );
+		file_put_contents( $this->tmp . '/fatals.json', '[1,2]' );
+		$safe = new SafeMode( $this->tmp, '/plugin' );
+		$this->assertFalse( $safe->isActive(), 'la 0.21.2 solo mira el nombre nuevo' );
+		$safe->migrateLegacy();
+		$this->assertTrue( $safe->isActive() );
+		$this->assertSame( 7, ( $safe->details() ?? [] )['at'] ?? null );
+		$this->assertFileDoesNotExist( $this->tmp . '/safe-mode.flag' );
+		$this->assertFileDoesNotExist( $this->tmp . '/fatals.json' );
+		$this->assertTrue( $safe->leave() );
+	}
+
+	public function test_data_dir_htaccess_blocks_openlitespeed(): void {
+		$dir = $this->tmp . '/datos';
+		mkdir( $dir );
+		file_put_contents( $dir . '/.htaccess', "# Imagina Turbo: datos internos, sin acceso web.\n<IfModule mod_authz_core.c>\n\tRequire all denied\n</IfModule>\n" );
+		$this->assertTrue( Filesystem::ensureDataDir( $dir ) );
+		$this->assertSame( Filesystem::DATA_HTACCESS, file_get_contents( $dir . '/.htaccess' ), 'el .htaccess propio de antes se actualiza' );
+		$this->assertStringContainsString( 'RewriteRule .* - [F,L]', Filesystem::DATA_HTACCESS );
+
+		file_put_contents( $dir . '/.htaccess', "# Reglas del administrador\nDeny from all\n" );
+		Filesystem::ensureDataDir( $dir );
+		$this->assertSame( "# Reglas del administrador\nDeny from all\n", file_get_contents( $dir . '/.htaccess' ), 'uno ajeno no se toca' );
 	}
 
 	public function test_fatal_types(): void {

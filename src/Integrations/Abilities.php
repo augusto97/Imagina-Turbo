@@ -17,6 +17,11 @@
  *   defecto. Sin él no se registran.
  * - Todo pasa por las mismas rutas REST del admin (rest_do_request): las mismas validaciones, la misma
  *   confirmación de riesgo. Un asistente solo puede encender módulos seguros, porque no envía `confirm`.
+ * - Desde la 0.21.2 tampoco puede apagar los demás: solo toca los módulos de AI_MODULES, que son
+ *   seguros y no protegen el sitio. Un asistente puede leer texto de terceros (una reseña, un correo)
+ *   con instrucciones escondidas, y "apaga el firewall y Turnstile" no debe funcionar nunca.
+ * - Purgar todo va marcado como destructivo (los clientes piden confirmación) y como mucho una vez
+ *   cada 10 minutos: varias purgas totales seguidas dejan el origen atendiendo todo sin caché.
  * - Cada escritura queda en el registro de eventos.
  *
  * @package ImaginaTurbo
@@ -60,6 +65,12 @@ final class Abilities {
 		);
 	}
 
+	/** Módulos que un asistente puede encender o apagar: seguros y sin función de protección. */
+	public const AI_MODULES = [ 'profiler', 'tweaks', 'speculation', 'rum', 'frontend_hints' ];
+
+	/** Una purga total pedida por un asistente cada tantos segundos como mucho. */
+	public const PURGE_ALL_GAP = 600;
+
 	public function registerAbilities(): void {
 		foreach ( self::definitions( $this->write ) as $name => $def ) {
 			wp_register_ability(
@@ -83,7 +94,7 @@ final class Abilities {
 					'meta'                => [
 						'annotations' => [
 							'readonly'    => $def['readonly'],
-							'destructive' => false,
+							'destructive' => $def['destructive'] ?? false,
 							'idempotent'  => $def['readonly'],
 						],
 						'public'      => true,
@@ -97,7 +108,7 @@ final class Abilities {
 	/**
 	 * Habilidades disponibles. Las de escritura solo con $write.
 	 *
-	 * @return array<lowercase-string&non-falsy-string, array{label: string, description: string, readonly: bool, input: array<string, mixed>}>
+	 * @return array<lowercase-string&non-falsy-string, array{label: string, description: string, readonly: bool, destructive?: bool, input: array<string, mixed>}>
 	 */
 	public static function definitions( bool $write ): array {
 		$none = [
@@ -153,8 +164,9 @@ final class Abilities {
 		}
 		$out['imagina-turbo/purge-cache'] = [
 			'label'       => __( 'Purgar la caché', 'imagina-turbo' ),
-			'description' => __( 'Purga la caché de páginas: todo el sitio, una URL o un tag. Purgar todo deja el sitio sin copias hasta que se regeneren; úsalo solo si hace falta.', 'imagina-turbo' ),
+			'description' => __( 'Purga la caché de páginas: todo el sitio, una URL o un tag. Purgar todo deja el sitio sin copias hasta que se regeneren; úsalo solo si hace falta (como mucho una vez cada 10 minutos).', 'imagina-turbo' ),
 			'readonly'    => false,
+			'destructive' => true,
 			'input'       => [
 				'type'                 => 'object',
 				'properties'           => [
@@ -174,14 +186,14 @@ final class Abilities {
 		];
 		$out['imagina-turbo/set-module']  = [
 			'label'       => __( 'Encender o apagar un módulo', 'imagina-turbo' ),
-			'description' => __( 'Enciende o apaga un módulo de Imagina Turbo por su id (ver get-status). Solo se pueden encender módulos de riesgo seguro; los moderados o invasivos se activan desde el admin.', 'imagina-turbo' ),
+			'description' => __( 'Enciende o apaga un módulo de Imagina Turbo por su id: profiler, tweaks, speculation, rum o frontend_hints. Los demás (protección, caché, Cloudflare y los de riesgo moderado o invasivo) solo se cambian desde el admin.', 'imagina-turbo' ),
 			'readonly'    => false,
 			'input'       => [
 				'type'                 => 'object',
 				'properties'           => [
 					'module'  => [
-						'type'    => 'string',
-						'pattern' => '^[a-z_]{2,40}$',
+						'type' => 'string',
+						'enum' => self::AI_MODULES,
 					],
 					'enabled' => [ 'type' => 'boolean' ],
 				],
@@ -199,6 +211,7 @@ final class Abilities {
 	 * @return array{0: string, 1: string, 2: array<string, mixed>}|null Método, ruta y parámetros.
 	 */
 	public static function route( string $name, array $input ): ?array {
+		$module = (string) preg_replace( '/[^a-z_]/', '', (string) ( $input['module'] ?? '' ) );
 		return match ( $name ) {
 			'imagina-turbo/get-status'         => [ 'GET', '/status', [] ],
 			'imagina-turbo/get-vitals'         => [ 'GET', '/navigation/report', [ 'days' => 30 === (int) ( $input['days'] ?? 7 ) ? 30 : 7 ] ],
@@ -214,7 +227,7 @@ final class Abilities {
 					'confirm' => true,
 				],
 			],
-			'imagina-turbo/set-module'         => [ 'PUT', '/modules/' . preg_replace( '/[^a-z_]/', '', (string) ( $input['module'] ?? '' ) ), [ 'enabled' => (bool) ( $input['enabled'] ?? false ) ] ],
+			'imagina-turbo/set-module'         => in_array( $module, self::AI_MODULES, true ) ? [ 'PUT', '/modules/' . $module, [ 'enabled' => (bool) ( $input['enabled'] ?? false ) ] ] : null,
 			default                            => null,
 		};
 	}
@@ -225,7 +238,15 @@ final class Abilities {
 	private function execute( string $name, array $input ): mixed {
 		$route = self::route( $name, $input );
 		if ( null === $route ) {
-			return new \WP_Error( 'itb_unknown_ability', __( 'Habilidad desconocida.', 'imagina-turbo' ) );
+			return 'imagina-turbo/set-module' === $name
+				? new \WP_Error( 'itb_ai_module', __( 'Un asistente solo puede encender o apagar profiler, tweaks, speculation, rum y frontend_hints. El resto se cambia desde el admin.', 'imagina-turbo' ) )
+				: new \WP_Error( 'itb_unknown_ability', __( 'Habilidad desconocida.', 'imagina-turbo' ) );
+		}
+		if ( 'imagina-turbo/purge-cache' === $name && 'all' === ( $input['type'] ?? '' ) ) {
+			if ( false !== get_transient( 'itb_ai_purge_all' ) ) {
+				return new \WP_Error( 'itb_ai_purge_wait', __( 'Ya se purgó todo hace menos de 10 minutos. Purga una URL o un tag, o espera.', 'imagina-turbo' ) );
+			}
+			set_transient( 'itb_ai_purge_all', time(), self::PURGE_ALL_GAP );
 		}
 		[ $method, $path, $params ] = $route;
 		$request                    = new \WP_REST_Request( $method, '/' . RestRegistrar::NAMESPACE . $path );

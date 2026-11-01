@@ -370,6 +370,7 @@ export type CfAction = 'create' | 'update' | 'delete' | 'none' | 'drifted' | 'bl
 
 export interface CfStatus {
 	available: boolean;
+	vault_problem: string;
 	enabled: boolean;
 	token: { state: 'none' | 'ok' | 'rotated' | 'broken'; last4: string; saved: number };
 	zone: { id: string; name: string; plan: string; plan_name: string; status: string } | null;

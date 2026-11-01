@@ -407,9 +407,32 @@ final class ConfigCompiler {
 			$endpoint = rtrim( $hub, '/' ) . '/v1/rum?site=' . rawurlencode( $siteId );
 		}
 		return [
-			'rate'     => (float) $this->settings->get( 'rum_rate', 0.05 ),
-			'endpoint' => $endpoint,
+			'rate'      => (float) $this->settings->get( 'rum_rate', 0.05 ),
+			'endpoint'  => $endpoint,
+			// Plantillas que el beacon puede reportar (0.21.2): las demás se descartan.
+			'templates' => self::rumTemplates(),
 		];
+	}
+
+	/**
+	 * Plantillas de RouteKey::template() que existen en el sitio. Vacío si los tipos de contenido aún no
+	 * están registrados (compilación antes de init): entonces el beacon acepta cualquiera.
+	 *
+	 * @return list<string>
+	 */
+	public static function rumTemplates(): array {
+		if ( ! did_action( 'init' ) ) {
+			return [];
+		}
+		$out = [ 'portada', 'blog', 'busqueda', '404', 'feed', 'autor', 'fecha', 'otra', 'temprano', 'single:desconocido', 'archivo:desconocido', 'tax:desconocida' ];
+		foreach ( get_post_types( [ 'public' => true ] ) as $type ) {
+			$out[] = 'single:' . $type;
+			$out[] = 'archivo:' . $type;
+		}
+		foreach ( get_taxonomies( [ 'public' => true ] ) as $taxonomy ) {
+			$out[] = 'tax:' . $taxonomy;
+		}
+		return array_values( array_unique( array_filter( $out, static fn( string $t ): bool => 1 === preg_match( '/^[a-z0-9:_\-]{1,40}$/', $t ) ) ) );
 	}
 
 	/**

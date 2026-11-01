@@ -53,13 +53,26 @@ final class VerifierService {
 		];
 	}
 
-	/** URL válida: https, o http en localhost/127.0.0.1 (pruebas). */
-	public static function validUrl( string $url ): bool {
+	/**
+	 * URL válida: https, sin usuario, query ni fragmento (0.21.2: con un query, la ruta que añade el
+	 * cliente quedaba dentro del query y el servidor podía consultar cualquier servicio interno). http
+	 * en localhost solo con ITB_VERIFIER_ALLOW_LOCAL (pruebas).
+	 */
+	public static function validUrl( string $url, ?bool $allowLocal = null ): bool {
 		$parts = wp_parse_url( $url );
-		if ( ! is_array( $parts ) || ! isset( $parts['scheme'], $parts['host'] ) ) {
+		if ( ! is_array( $parts ) || ! isset( $parts['scheme'], $parts['host'] ) || isset( $parts['user'] ) || isset( $parts['pass'] ) || isset( $parts['query'] ) || isset( $parts['fragment'] ) ) {
 			return false;
 		}
-		return 'https' === $parts['scheme'] || ( 'http' === $parts['scheme'] && in_array( $parts['host'], [ 'localhost', '127.0.0.1' ], true ) );
+		if ( isset( $parts['path'] ) && 1 !== preg_match( '#^[A-Za-z0-9/_.\-]*$#', $parts['path'] ) ) {
+			return false;
+		}
+		$allowLocal ??= self::localAllowed();
+		return 'https' === $parts['scheme'] || ( $allowLocal && 'http' === $parts['scheme'] && in_array( $parts['host'], [ 'localhost', '127.0.0.1' ], true ) );
+	}
+
+	/** Verificador en el mismo servidor (pruebas): define( 'ITB_VERIFIER_ALLOW_LOCAL', true ). */
+	public static function localAllowed(): bool {
+		return defined( 'ITB_VERIFIER_ALLOW_LOCAL' ) && true === ITB_VERIFIER_ALLOW_LOCAL;
 	}
 
 	public function configured(): bool {
@@ -78,7 +91,7 @@ final class VerifierService {
 		if ( '' !== $url && ! self::validUrl( $url ) ) {
 			return [
 				'ok'    => false,
-				'error' => __( 'La URL del verificador tiene que ser https (http solo en localhost).', 'imagina-turbo' ),
+				'error' => __( 'La URL del verificador tiene que ser https, sin usuario, parámetros ni fragmento.', 'imagina-turbo' ),
 				'key'   => '',
 			];
 		}
@@ -105,7 +118,7 @@ final class VerifierService {
 			if ( ! $this->vault()->store( $key ) ) {
 				return [
 					'ok'    => false,
-					'error' => __( 'No se pudo guardar la clave cifrada (falta sodium en PHP).', 'imagina-turbo' ),
+					'error' => '' !== $this->vault()->problem() ? $this->vault()->problem() : __( 'No se pudo guardar la clave cifrada.', 'imagina-turbo' ),
 					'key'   => '',
 				];
 			}
@@ -160,7 +173,9 @@ final class VerifierService {
 		if ( '' !== $raw ) {
 			$args['body'] = $raw;
 		}
-		$response = wp_remote_request( $s['url'] . $path, $args );
+		// wp_safe_remote_request rechaza direcciones privadas o reservadas y puertos raros (0.21.2): el
+		// verificador está en un VPS público. En pruebas locales, la petición normal.
+		$response = self::localAllowed() ? wp_remote_request( $s['url'] . $path, $args ) : wp_safe_remote_request( $s['url'] . $path, $args );
 		if ( is_wp_error( $response ) ) {
 			return [
 				'status' => 0,

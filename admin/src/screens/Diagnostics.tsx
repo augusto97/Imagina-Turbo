@@ -13,7 +13,7 @@ import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
 import { useRouter } from '@/lib/router';
 import type { AuditReport, ImageAuditReport, ImageItem, Period, PerVisitReport, PhaseCost, PlatformCheck, PlatformReport, PluginCost, ProfilerSummary, RouteCost, Sampling, WorkersReport } from '@/lib/types';
-import { cn, formatDate } from '@/lib/utils';
+import { cn, formatDate, safeHref } from '@/lib/utils';
 
 const PERIODS: { value: Period; label: string }[] = [
 	{ value: '1h', label: __( 'Última hora' ) },
@@ -814,7 +814,7 @@ function AuditCard() {
 							{ report.results.map( ( result ) => (
 								<li key={ result.url } className="itb:rounded-md itb:border itb:border-zinc-200 itb:p-3">
 									<div className="itb:flex itb:items-center itb:justify-between itb:gap-2">
-										<a href={ result.url } target="_blank" rel="noreferrer" className="itb:truncate itb:text-[13px] itb:font-medium itb:text-zinc-900 itb:hover:underline">
+										<a href={ safeHref( result.url ) } target="_blank" rel="noreferrer" className="itb:truncate itb:text-[13px] itb:font-medium itb:text-zinc-900 itb:hover:underline">
 											{ result.label }
 										</a>
 										<Badge tone={ result.verdict === 'ok' || result.verdict === 'info' ? 'green' : result.verdict === 'warning' ? 'amber' : 'red' }>

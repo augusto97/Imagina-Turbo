@@ -93,13 +93,33 @@ final class Installer {
 			$this->events->info( 'firewall', 'htaccess_removed', __( 'Reglas del firewall quitadas del .htaccess al desactivar el plugin. En OpenLiteSpeed, reinicia el servidor para que se apliquen.', 'imagina-turbo' ) );
 		}
 
-		foreach ( [ SafeMode::FLAG, SafeMode::COUNTER ] as $name ) {
+		foreach ( [ SafeMode::FLAG, SafeMode::COUNTER, ...SafeMode::LEGACY ] as $name ) {
 			$file = $this->dataDir . '/' . $name;
 			if ( is_file( $file ) ) {
 				wp_delete_file( $file );
 			}
 		}
 		self::removeDataDirIfUnused( $this->dataDir );
+	}
+
+	/**
+	 * 0.21.2: los archivos internos pasaron a .php con guarda (hasta la 0.21.1 eran .json y .log, que
+	 * OpenLiteSpeed y nginx servían por URL). La bandera del modo seguro se conserva; el resto son
+	 * contadores y registros de paso que se borran. Barato si no queda nada: corre en cada request de
+	 * admin, porque la actualización no avisa.
+	 */
+	public static function migrateDataFiles( string $dataDir, SafeMode $safeMode ): void {
+		if ( '' === $dataDir || ! is_dir( $dataDir ) ) {
+			return;
+		}
+		$safeMode->migrateLegacy();
+		$file = $dataDir . '/rum-limits.json';
+		if ( is_file( $file ) ) {
+			wp_delete_file( $file );
+		}
+		foreach ( glob( $dataDir . '/experiments/*.log' ) ?: [] as $file ) {
+			wp_delete_file( $file );
+		}
 	}
 
 	/**

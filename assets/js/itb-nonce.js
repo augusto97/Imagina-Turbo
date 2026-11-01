@@ -12,7 +12,10 @@
  */
 ( function () {
 	var MAX_AGE = 36000;
-	var node = document.getElementById( 'itb-nonce' );
+	// Solo el <script> JSON que imprime el plugin (0.21.2): un autor sin unfiltered_html puede escribir
+	// un elemento con id="itb-nonce" en una entrada, pero no un <script>.
+	var node = document.querySelector( 'script#itb-nonce[type="application/json"]' );
+	var NONCE = /^[0-9a-f]{10}$/;
 	var data;
 	var fresh;
 	if ( ! node || ! window.fetch ) {
@@ -20,6 +23,10 @@
 	}
 	try {
 		data = JSON.parse( node.textContent );
+		// El endpoint tiene que ser del propio sitio y los nonces, nonces.
+		if ( new URL( data.u, location.href ).origin !== location.origin || ! data.n || typeof data.n !== 'object' ) {
+			return;
+		}
 	} catch ( e ) {
 		return;
 	}
@@ -49,6 +56,9 @@
 	}
 
 	function swap( from, to ) {
+		if ( ! NONCE.test( from ) || ! NONCE.test( to ) ) {
+			return;
+		}
 		var attrs = document.evaluate( '//@*[contains(., "' + from + '")]', document, null, 7, null );
 		var i;
 		var attr;

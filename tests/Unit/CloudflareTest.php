@@ -66,7 +66,14 @@ final class CloudflareTest extends TestCase {
 					'url'    => $url,
 					'body'   => isset( $args['body'] ) ? json_decode( $args['body'], true ) : null,
 				];
-				$next = array_shift( $this->responses ) ?? [ 200, [ 'success' => true, 'errors' => [], 'result' => [] ] ];
+				$next             = array_shift( $this->responses ) ?? [
+					200,
+					[
+						'success' => true,
+						'errors'  => [],
+						'result'  => [],
+					],
+				];
 				return [
 					'code'    => $next[0],
 					'body'    => json_encode( $next[1] ),
@@ -138,6 +145,17 @@ final class CloudflareTest extends TestCase {
 		$this->assertSame( 'none', $vault->status()['state'] );
 	}
 
+	public function test_token_vault_refuses_known_keys(): void {
+		Functions\stubs( [ '__' ] );
+		// Las pruebas definen AUTH_KEY pero no SECURE_AUTH_SALT: la clave saldría de un valor conocido.
+		$this->assertFalse( TokenVault::saltsReady() );
+		$vault = new TokenVault();
+		$this->assertStringContainsString( 'SECURE_AUTH_SALT', $vault->problem() );
+		$this->assertFalse( $vault->store( self::TOKEN ) );
+		$this->assertArrayNotHasKey( TokenVault::OPTION, $this->options );
+		$this->assertSame( '', ( new TokenVault( 'material-de-prueba' ) )->problem() );
+	}
+
 	public function test_response_parsing(): void {
 		$ok = Response::fromHttp( 200, '{"success":true,"errors":[],"result":{"id":"x"}}' );
 		$this->assertTrue( $ok->ok() );
@@ -160,17 +178,50 @@ final class CloudflareTest extends TestCase {
 
 	public function test_client_retries_with_backoff_and_returns_long_waits(): void {
 		$this->responses = [
-			[ 500, [ 'success' => false, 'errors' => [] ] ],
-			[ 503, [ 'success' => false, 'errors' => [] ] ],
-			[ 200, [ 'success' => true, 'errors' => [], 'result' => [ 'ok' => 1 ] ] ],
+			[
+				500,
+				[
+					'success' => false,
+					'errors'  => [],
+				],
+			],
+			[
+				503,
+				[
+					'success' => false,
+					'errors'  => [],
+				],
+			],
+			[
+				200,
+				[
+					'success' => true,
+					'errors'  => [],
+					'result'  => [ 'ok' => 1 ],
+				],
+			],
 		];
-		$client = $this->client( $slept );
+		$client          = $this->client( $slept );
 		$this->assertTrue( $client->get( '/zones' )->ok() );
 		$this->assertSame( [ 1, 2 ], $slept );
 		$this->assertStringStartsWith( Client::BASE . '/zones', $this->requests[0]['url'] );
 
 		// 429 con Retry-After largo: no se espera dentro del request.
-		$this->responses = [ [ 429, [ 'success' => false, 'errors' => [ [ 'code' => 1134, 'message' => 'x' ] ] ], [ 'retry-after' => '60' ] ] ];
+		$this->responses = [
+			[
+				429,
+				[
+					'success' => false,
+					'errors'  => [
+						[
+							'code'    => 1134,
+							'message' => 'x',
+						],
+					],
+				],
+				[ 'retry-after' => '60' ],
+			],
+		];
 		$client          = $this->client( $slept );
 		$r               = $client->post( '/zones/x/purge_cache', [ 'tags' => [ 'a' ] ] );
 		$this->assertSame( 429, $r->status );
@@ -242,8 +293,8 @@ final class CloudflareTest extends TestCase {
 	}
 
 	public function test_html_expression_stays_within_limit(): void {
-		$many = array_map( static fn( int $i ): string => 'cookie_larga_de_plugin_numero_' . $i, range( 1, 140 ) );
-		$site = new SiteContext( 'a.com', '', 'wp-json', [], $many, [], [], 'itb-x-', true, 3600 );
+		$many      = array_map( static fn( int $i ): string => 'cookie_larga_de_plugin_numero_' . $i, range( 1, 140 ) );
+		$site      = new SiteContext( 'a.com', '', 'wp-json', [], $many, [], [], 'itb-x-', true, 3600 );
 		$templates = new Templates( $site, self::limits() );
 		$this->assertStringContainsString( 'cookie_larga_de_plugin_numero_140"', $templates->htmlExpression(), 'las cookies nunca se recortan' );
 		$this->assertNotSame( '', $templates->rules()[1]['blocked'], 'si no cabe, la regla no se propone' );
@@ -267,7 +318,7 @@ final class CloudflareTest extends TestCase {
 			'rules'    => $rules,
 			'error'    => '',
 		];
-		$out = [
+		$out   = [
 			'phases'   => [
 				Phases::CACHE     => $phase( $cache ),
 				Phases::TRANSFORM => $phase( [], false ),
@@ -380,7 +431,18 @@ final class CloudflareTest extends TestCase {
 	}
 
 	public function test_contains_and_same(): void {
-		$this->assertTrue( Planner::contains( [ 'a' => 1, 'b' => [ 'c' => 2, 'x' => 9 ] ], [ 'b' => [ 'c' => 2 ] ] ) );
+		$this->assertTrue(
+			Planner::contains(
+				[
+					'a' => 1,
+					'b' => [
+						'c' => 2,
+						'x' => 9,
+					],
+				],
+				[ 'b' => [ 'c' => 2 ] ]
+			)
+		);
 		$this->assertFalse( Planner::contains( [ 'a' => [ 1, 2, 3 ] ], [ 'a' => [ 1, 2 ] ] ), 'las listas se comparan enteras' );
 		$this->assertTrue( Planner::same( 0, '0' ) );
 		$this->assertFalse( Planner::same( true, '1' ) );
@@ -399,7 +461,21 @@ final class CloudflareTest extends TestCase {
 
 		// 429: lo pendiente vuelve con la espera pedida.
 		$this->requests  = [];
-		$this->responses = [ [ 429, [ 'success' => false, 'errors' => [ [ 'code' => 1134, 'message' => 'x' ] ] ], [ 'retry-after' => '60' ] ] ];
+		$this->responses = [
+			[
+				429,
+				[
+					'success' => false,
+					'errors'  => [
+						[
+							'code'    => 1134,
+							'message' => 'x',
+						],
+					],
+				],
+				[ 'retry-after' => '60' ],
+			],
+		];
 		$result          = ( new CloudflarePurger( $this->client(), 'z1', 'tienda.example.com', false, 100, 5 ) )->purge( [ 'k7-home' ], [], false );
 		$this->assertSame( [ 'k7-home' ], $result['tags_left'] );
 		$this->assertSame( 60, $result['retry_after'] );
@@ -415,8 +491,42 @@ final class CloudflareTest extends TestCase {
 	}
 
 	public function test_analytics_parse(): void {
-		$status = [ 'viewer' => [ 'zones' => [ [ 'httpRequestsAdaptiveGroups' => [ [ 'count' => 80, 'dimensions' => [ 'cacheStatus' => 'hit' ] ], [ 'count' => 5, 'dimensions' => [ 'cacheStatus' => 'revalidated' ] ], [ 'count' => 15, 'dimensions' => [ 'cacheStatus' => 'dynamic' ] ] ] ] ] ] ];
-		$paths  = [ 'viewer' => [ 'zones' => [ [ 'httpRequestsAdaptiveGroups' => [ [ 'count' => 9, 'dimensions' => [ 'clientRequestPath' => '/carrito/' ] ] ] ] ] ] ];
+		$status = [
+			'viewer' => [
+				'zones' => [
+					[
+						'httpRequestsAdaptiveGroups' => [
+							[
+								'count'      => 80,
+								'dimensions' => [ 'cacheStatus' => 'hit' ],
+							],
+							[
+								'count'      => 5,
+								'dimensions' => [ 'cacheStatus' => 'revalidated' ],
+							],
+							[
+								'count'      => 15,
+								'dimensions' => [ 'cacheStatus' => 'dynamic' ],
+							],
+						],
+					],
+				],
+			],
+		];
+		$paths  = [
+			'viewer' => [
+				'zones' => [
+					[
+						'httpRequestsAdaptiveGroups' => [
+							[
+								'count'      => 9,
+								'dimensions' => [ 'clientRequestPath' => '/carrito/' ],
+							],
+						],
+					],
+				],
+			],
+		];
 		$parsed = Analytics::parse( $status, $paths );
 		$this->assertSame( 100, $parsed['requests'] );
 		$this->assertSame( 85, $parsed['cached'] );

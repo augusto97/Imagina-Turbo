@@ -18,9 +18,9 @@
  *   cuenta desde el pago.
  * - Pago clásico: el widget va en woocommerce_checkout_after_customer_details, fuera del fragmento que
  *   WooCommerce recarga al cambiar la dirección; se verifica en woocommerce_after_checkout_validation
- *   solo para el envío del formulario (?wc-ajax=checkout o el POST sin JavaScript). Los botones exprés
- *   (Apple Pay, Google Pay, PayPal) crean el pedido por su propio endpoint y no pasan por aquí; las
- *   pasarelas de la lista de excepciones tampoco.
+ *   en cualquier vía que cree el pedido (0.21.2: también ?wc-ajax= con otra acción y admin-ajax.php).
+ *   Solo quedan fuera los endpoints exprés conocidos (EXPRESS_ENDPOINTS) y las pasarelas de la lista
+ *   de excepciones.
  * - Pago por bloques: el token viaja en los datos de extensión del checkout
  *   (setExtensionData('imagina-turbo', {turnstile})) y se verifica en
  *   woocommerce_store_api_checkout_update_order_from_request solo en el POST que crea el pedido; el error
@@ -52,12 +52,19 @@ final class TurnstileModule implements ModuleInterface {
 
 	public const HANDLE = 'itb-turnstile';
 
-	/** Tipos de request sin formularios de visitantes. */
-	private const SKIP = [ RequestType::Admin, RequestType::AdminAjax, RequestType::Cron, RequestType::Cli, RequestType::Rest, RequestType::XmlRpc, RequestType::Feed, RequestType::Sitemap, RequestType::Robots, RequestType::StaticMiss ];
+	/**
+	 * Tipos de request que nunca procesan formularios de visitantes. admin-ajax.php y la API REST sí
+	 * cuentan (0.21.2): WooCommerce procesa sus formularios en wp_loaded también ahí, y la Store API
+	 * sin versión (/wc/store/checkout) sigue registrada.
+	 */
+	private const SKIP = [ RequestType::Admin, RequestType::Cron, RequestType::Cli, RequestType::XmlRpc, RequestType::Feed, RequestType::Sitemap, RequestType::Robots, RequestType::StaticMiss ];
+
+	/** ?wc-ajax= de los botones exprés que crean el pedido con process_checkout (Stripe, WooPayments). */
+	public const EXPRESS_ENDPOINTS = [ 'wc_stripe_create_order', 'wcpay_create_order' ];
 
 	private static ?Container $container = null;
 
-	/** @var array<string, true> Formularios ya verificados en este request (lostpassword_post se dispara dos veces). */
+	/** @var array<string, string|null> Resultado por formulario en este request (lostpassword_post se dispara dos veces). */
 	private static array $checked = [];
 
 	public function register( Container $container, RequestContext $request ): void {
@@ -128,8 +135,8 @@ final class TurnstileModule implements ModuleInterface {
 	}
 
 	/**
-	 * Contenedor del widget: la clave, la acción y la URL de api.js van en atributos (sin datos en
-	 * línea que un plugin de caché pudiera retrasar).
+	 * Contenedor del widget: la clave y la acción van en atributos (sin datos en línea que un plugin de
+	 * caché pudiera retrasar). La URL de api.js está fija en el script.
 	 */
 	public static function widget( string $action, bool $now = false ): void {
 		echo self::container( $action, $now, false ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado en container().
@@ -142,10 +149,9 @@ final class TurnstileModule implements ModuleInterface {
 		}
 		self::enqueue();
 		return sprintf(
-			'<div class="itb-ts" data-k="%1$s" data-action="%2$s" data-u="%3$s"%4$s%5$s></div>',
+			'<div class="itb-ts" data-k="%1$s" data-action="%2$s"%3$s%4$s></div>',
 			esc_attr( $c['key'] ),
 			esc_attr( $action ),
-			esc_url( Turnstile::API_JS ),
 			$now ? ' data-now="1"' : '',
 			$block ? ' data-block="1"' : ''
 		);
@@ -276,10 +282,11 @@ final class TurnstileModule implements ModuleInterface {
 	 * Verifica el token del formulario (una vez por request). Null si pasa; si no, el mensaje.
 	 */
 	public static function check( string $form, ?string $token = null ): ?string {
-		if ( isset( self::$checked[ $form ] ) ) {
-			return null;
+		// El mismo resultado si otro hook del mismo request vuelve a preguntar (antes devolvía "pasa"
+		// aunque la primera comprobación hubiera fallado).
+		if ( array_key_exists( $form, self::$checked ) ) {
+			return self::$checked[ $form ];
 		}
-		self::$checked[ $form ] = true;
 		if ( null === $token ) {
 			$raw   = $_POST[ Turnstile::FIELD ] ?? ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- el token es la verificación; cada formulario valida su propio nonce.
 			$token = is_string( $raw ) ? sanitize_text_field( wp_unslash( $raw ) ) : '';
@@ -288,8 +295,9 @@ final class TurnstileModule implements ModuleInterface {
 		if ( null === $container ) {
 			return null;
 		}
-		$result = $container->get( Turnstile::class )->verify( $token, $form, RumCollector::clientIp( $_SERVER ) );
-		return $result['ok'] ? null : Turnstile::message( $result['code'] );
+		$result                 = $container->get( Turnstile::class )->verify( $token, $form, RumCollector::clientIp( $_SERVER ) );
+		self::$checked[ $form ] = $result['ok'] ? null : Turnstile::message( $result['code'] );
+		return self::$checked[ $form ];
 	}
 
 	/** Reinicio entre pruebas. */
@@ -298,22 +306,26 @@ final class TurnstileModule implements ModuleInterface {
 	}
 
 	private static function addError( \WP_Error $errors, ?string $message ): \WP_Error {
-		if ( null !== $message ) {
+		if ( null !== $message && ! in_array( 'itb_turnstile', $errors->get_error_codes(), true ) ) {
 			$errors->add( 'itb_turnstile', $message );
 		}
 		return $errors;
 	}
 
 	/**
-	 * Envío del formulario de pago: ?wc-ajax=checkout, o el POST sin JavaScript (lleva el nonce del
-	 * formulario y no es AJAX). Los endpoints de los botones exprés no cuentan.
+	 * El pago clásico exige el token en cualquier vía que cree el pedido (0.21.2). WooCommerce procesa
+	 * el formulario en wp_loaded de cualquier petición que lo traiga (?wc-ajax=checkout, ?wc-ajax= con
+	 * otra acción, admin-ajax.php con action=woocommerce_checkout, un POST a cualquier página): antes solo
+	 * se exigía en ?wc-ajax=checkout y un bot se lo saltaba cambiando la acción. Solo quedan fuera los
+	 * endpoints de los botones exprés conocidos (el monedero los firma en el dispositivo) y el envío que
+	 * solo recalcula totales (sin JavaScript), que no crea el pedido.
 	 */
 	public static function classicSubmit(): bool {
-		$ajax = $_GET['wc-ajax'] ?? null; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se lee el endpoint.
-		if ( wp_doing_ajax() ) {
-			return is_string( $ajax ) && 'checkout' === $ajax;
+		if ( ! empty( $_POST['woocommerce_checkout_update_totals'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce valida el nonce.
+			return false;
 		}
-		return isset( $_POST['woocommerce-process-checkout-nonce'] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce valida el nonce.
+		$ajax = $_GET['wc-ajax'] ?? null; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- solo se lee el endpoint.
+		return ! ( is_string( $ajax ) && in_array( $ajax, self::EXPRESS_ENDPOINTS, true ) );
 	}
 
 	private static function skipCheckout( string $method ): bool {

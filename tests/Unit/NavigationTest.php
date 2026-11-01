@@ -81,7 +81,17 @@ final class NavigationTest extends TestCase {
 		);
 		$this->assertSame( [], $rows['hist'] );
 		$this->assertSame( [], $rows['events'] );
-		$this->assertSame( '#featured', RumCollector::rows( [ 't' => 'single:post', 'lr' => 'f' ], '1', self::NOW )['events'][0][4] );
+		$this->assertSame(
+			'#featured',
+			RumCollector::rows(
+				[
+					't'  => 'single:post',
+					'lr' => 'f',
+				],
+				'1',
+				self::NOW
+			)['events'][0][4]
+		);
 		$this->assertSame( '', RumCollector::path( '/' . str_repeat( 'a', 130 ) ) );
 		$this->assertSame( '/a/b', RumCollector::path( '/a/b#frag' ) );
 	}
@@ -91,8 +101,51 @@ final class NavigationTest extends TestCase {
 		$this->assertTrue( RumCollector::sameHost( 'http://127.0.0.1:8080/', '127.0.0.1:8080' ) );
 		$this->assertFalse( RumCollector::sameHost( 'https://tienda.com.evil.net/', 'tienda.com' ) );
 		$this->assertFalse( RumCollector::sameHost( '', 'tienda.com' ) );
-		$this->assertSame( '190.1.1.1', RumCollector::clientIp( [ 'HTTP_CF_RAY' => 'x', 'HTTP_CF_CONNECTING_IP' => '190.1.1.1', 'REMOTE_ADDR' => '172.1.1.1' ] ) );
-		$this->assertSame( '172.1.1.1', RumCollector::clientIp( [ 'HTTP_CF_CONNECTING_IP' => '190.1.1.1', 'REMOTE_ADDR' => '172.1.1.1' ] ), 'sin CF-Ray la cabecera no se cree' );
+		$this->assertSame(
+			'190.1.1.1',
+			RumCollector::clientIp(
+				[
+					'HTTP_CF_RAY'           => 'x',
+					'HTTP_CF_CONNECTING_IP' => '190.1.1.1',
+					'REMOTE_ADDR'           => '172.64.1.1',
+				]
+			),
+			'la petición viene de Cloudflare'
+		);
+		$this->assertSame(
+			'190.1.1.1',
+			RumCollector::clientIp(
+				[
+					'HTTP_CF_CONNECTING_IP' => '190.1.1.1',
+					'REMOTE_ADDR'           => '2606:4700:10::6816:1',
+				]
+			)
+		);
+		$this->assertSame(
+			'172.1.1.1',
+			RumCollector::clientIp(
+				[
+					'HTTP_CF_RAY'           => 'x',
+					'HTTP_CF_CONNECTING_IP' => '190.1.1.1',
+					'REMOTE_ADDR'           => '172.1.1.1',
+				]
+			),
+			'origen abierto: la cabecera se falsifica'
+		);
+		$this->assertSame(
+			'172.1.1.1',
+			RumCollector::clientIp(
+				[
+					'HTTP_CF_CONNECTING_IP' => 'basura',
+					'REMOTE_ADDR'           => '172.1.1.1',
+				]
+			)
+		);
+		$this->assertTrue( RumCollector::fromCloudflare( '104.16.0.1' ) );
+		$this->assertTrue( RumCollector::fromCloudflare( '104.23.255.255' ) );
+		$this->assertFalse( RumCollector::fromCloudflare( '104.15.255.255' ) );
+		$this->assertFalse( RumCollector::fromCloudflare( '2606:4701::1' ) );
+		$this->assertFalse( RumCollector::fromCloudflare( '' ) );
 
 		$bit = RumCollector::ipBit( '190.1.1.1', '2026-10-13' );
 		$this->assertSame( 1, RumCollector::popcount( $bit ) );
@@ -107,14 +160,59 @@ final class NavigationTest extends TestCase {
 	public function test_report_p75_and_navigation(): void {
 		$this->assertNull( RumReport::p75( [ 10 => 3 ], 25 ), 'pocas muestras' );
 		// 100 muestras: 70 en el intervalo 40 (1000-1025 ms) y 30 en el 100 (2500 ms): p75 = 2512.
-		$this->assertSame( 2513, RumReport::p75( [ 40 => 70, 100 => 30 ], 25 ) );
+		$this->assertSame(
+			2513,
+			RumReport::p75(
+				[
+					40  => 70,
+					100 => 30,
+				],
+				25
+			)
+		);
 		$rows = [
-			[ 'template' => 'portada', 'device' => 'm', 'metric' => 'nav', 'bucket' => 0, 'n' => 60 ],
-			[ 'template' => 'portada', 'device' => 'm', 'metric' => 'nav', 'bucket' => 4, 'n' => 30 ],
-			[ 'template' => 'portada', 'device' => 'm', 'metric' => 'nav', 'bucket' => 5, 'n' => 10 ],
-			[ 'template' => 'portada', 'device' => 'm', 'metric' => 'nav', 'bucket' => 2, 'n' => 4 ],
-			[ 'template' => 'portada', 'device' => 'm', 'metric' => 'nav', 'bucket' => 3, 'n' => 16 ],
-			[ 'template' => 'portada', 'device' => 'm', 'metric' => 'cls', 'bucket' => 9, 'n' => 20 ],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'metric'   => 'nav',
+				'bucket'   => 0,
+				'n'        => 60,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'metric'   => 'nav',
+				'bucket'   => 4,
+				'n'        => 30,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'metric'   => 'nav',
+				'bucket'   => 5,
+				'n'        => 10,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'metric'   => 'nav',
+				'bucket'   => 2,
+				'n'        => 4,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'metric'   => 'nav',
+				'bucket'   => 3,
+				'n'        => 16,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'metric'   => 'cls',
+				'bucket'   => 9,
+				'n'        => 20,
+			],
 		];
 		$nav  = RumReport::navigation( $rows );
 		$this->assertSame( 100, $nav['navigations'] );
@@ -127,16 +225,52 @@ final class NavigationTest extends TestCase {
 	}
 
 	public function test_insights_predicted_requires_volume_distinct_and_content(): void {
-		$many = (string) ( ( 1 << 30 ) - 1 );
-		$few  = '3';
+		$many   = (string) ( ( 1 << 30 ) - 1 );
+		$few    = '3';
 		$events = [
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/tienda/', 'n' => 120, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/carrito/', 'n' => 80, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/spam/', 'n' => 200, 'bits' => $few ],
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/no-existe/', 'n' => 60, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/raro/', 'n' => 5, 'bits' => $many ],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/tienda/',
+				'n'        => 120,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/carrito/',
+				'n'        => 80,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/spam/',
+				'n'        => 200,
+				'bits'     => $few,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/no-existe/',
+				'n'        => 60,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/raro/',
+				'n'        => 5,
+				'bits'     => $many,
+			],
 			// El mismo destino desde escritorio, con un solo visitante: no le quita los visitantes del móvil.
-			[ 'template' => 'portada', 'device' => 'd', 'value' => '/tienda/', 'n' => 1, 'bits' => '1' ],
+			[
+				'template' => 'portada',
+				'device'   => 'd',
+				'value'    => '/tienda/',
+				'n'        => 1,
+				'bits'     => '1',
+			],
 		];
 		$content   = [ '/tienda/', '/carrito/', '/spam/', '/raro/' ];
 		$excluded  = [ '/carrito', '/carrito/*' ];
@@ -150,12 +284,48 @@ final class NavigationTest extends TestCase {
 	public function test_insights_lcp(): void {
 		$many   = (string) ( ( 1 << 40 ) - 1 );
 		$events = [
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/wp-content/uploads/hero-768x400.jpg', 'n' => 90, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => 'm', 'value' => '/wp-content/uploads/otra.jpg', 'n' => 10, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => 'd', 'value' => '/wp-content/uploads/hero.jpg', 'n' => 500, 'bits' => $many ],
-			[ 'template' => 'single:product', 'device' => 'm', 'value' => '#featured', 'n' => 70, 'bits' => $many ],
-			[ 'template' => 'single:product', 'device' => 'm', 'value' => '/wp-content/uploads/logo.png', 'n' => 20, 'bits' => $many ],
-			[ 'template' => 'single:post', 'device' => 'm', 'value' => '/wp-content/uploads/a.jpg', 'n' => 60, 'bits' => '1' ],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/wp-content/uploads/hero-768x400.jpg',
+				'n'        => 90,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'm',
+				'value'    => '/wp-content/uploads/otra.jpg',
+				'n'        => 10,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => 'd',
+				'value'    => '/wp-content/uploads/hero.jpg',
+				'n'        => 500,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'single:product',
+				'device'   => 'm',
+				'value'    => '#featured',
+				'n'        => 70,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'single:product',
+				'device'   => 'm',
+				'value'    => '/wp-content/uploads/logo.png',
+				'n'        => 20,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'single:post',
+				'device'   => 'm',
+				'value'    => '/wp-content/uploads/a.jpg',
+				'n'        => 60,
+				'bits'     => '1',
+			],
 		];
 		$lcp    = RumInsights::lcp( $events, static fn( string $p ): int => '/wp-content/uploads/hero-768x400.jpg' === $p ? 42 : 0 );
 		$this->assertSame( 'image', $lcp['portada']['kind'] );
@@ -208,13 +378,55 @@ final class NavigationTest extends TestCase {
 		$many   = (string) ( ( 1 << 30 ) - 1 );
 		$few    = '7';
 		$events = [
-			[ 'template' => 'portada', 'device' => '*', 'value' => '/a.woff2', 'n' => 100, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => '*', 'value' => '/b.woff2', 'n' => 60, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => '*', 'value' => '/c.woff2', 'n' => 55, 'bits' => $many ],
-			[ 'template' => 'portada', 'device' => '*', 'value' => '/d.woff2', 'n' => 40, 'bits' => $many ],
-			[ 'template' => 'single:post', 'device' => '*', 'value' => '/a.woff2', 'n' => 90, 'bits' => $few ],
-			[ 'template' => 'busqueda', 'device' => '*', 'value' => '/a.woff2', 'n' => 10, 'bits' => $many ],
-			[ 'template' => 'tax:category', 'device' => '*', 'value' => '/borrada.woff2', 'n' => 90, 'bits' => $many ],
+			[
+				'template' => 'portada',
+				'device'   => '*',
+				'value'    => '/a.woff2',
+				'n'        => 100,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => '*',
+				'value'    => '/b.woff2',
+				'n'        => 60,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => '*',
+				'value'    => '/c.woff2',
+				'n'        => 55,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'portada',
+				'device'   => '*',
+				'value'    => '/d.woff2',
+				'n'        => 40,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'single:post',
+				'device'   => '*',
+				'value'    => '/a.woff2',
+				'n'        => 90,
+				'bits'     => $few,
+			],
+			[
+				'template' => 'busqueda',
+				'device'   => '*',
+				'value'    => '/a.woff2',
+				'n'        => 10,
+				'bits'     => $many,
+			],
+			[
+				'template' => 'tax:category',
+				'device'   => '*',
+				'value'    => '/borrada.woff2',
+				'n'        => 90,
+				'bits'     => $many,
+			],
 		];
 		$out    = RumInsights::fonts( $events, static fn( string $p ): bool => '/borrada.woff2' !== $p );
 		$this->assertSame( [ 'portada' => [ '/a.woff2', '/b.woff2' ] ], $out, 'hasta 2, con muchos visitantes, muestras suficientes y archivos que existen' );
@@ -370,10 +582,42 @@ final class NavigationTest extends TestCase {
 
 	public function test_own_no_store_ignores_sessions_and_404(): void {
 		$cc = 'no-cache, must-revalidate, max-age=0, no-store, private';
-		$this->assertTrue( NavigationController::ownNoStore( [ 'anon' => 1, 'status' => 200, 'cache_control' => $cc ] ) );
-		$this->assertFalse( NavigationController::ownNoStore( [ 'anon' => 0, 'status' => 200, 'cache_control' => $cc ] ) );
-		$this->assertFalse( NavigationController::ownNoStore( [ 'anon' => 1, 'status' => 404, 'cache_control' => $cc ] ) );
-		$this->assertFalse( NavigationController::ownNoStore( [ 'anon' => 1, 'status' => 200, 'cache_control' => 'max-age=0' ] ) );
+		$this->assertTrue(
+			NavigationController::ownNoStore(
+				[
+					'anon'          => 1,
+					'status'        => 200,
+					'cache_control' => $cc,
+				]
+			)
+		);
+		$this->assertFalse(
+			NavigationController::ownNoStore(
+				[
+					'anon'          => 0,
+					'status'        => 200,
+					'cache_control' => $cc,
+				]
+			)
+		);
+		$this->assertFalse(
+			NavigationController::ownNoStore(
+				[
+					'anon'          => 1,
+					'status'        => 404,
+					'cache_control' => $cc,
+				]
+			)
+		);
+		$this->assertFalse(
+			NavigationController::ownNoStore(
+				[
+					'anon'          => 1,
+					'status'        => 200,
+					'cache_control' => 'max-age=0',
+				]
+			)
+		);
 	}
 
 	public function test_scripts_stay_under_budget(): void {
@@ -444,7 +688,7 @@ final class NavigationTest extends TestCase {
 			FrontendHintsModule::linkHeader(
 				[
 					'src'    => "https://t.test/a.webp\r\n",
-					'srcset' => "x.webp 1w, \"evil=1",
+					'srcset' => 'x.webp 1w, "evil=1',
 					'sizes'  => '',
 				]
 			),

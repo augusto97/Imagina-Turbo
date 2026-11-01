@@ -12,6 +12,11 @@
  * - Claves de prueba: 1x00000000000000000000AA (pasa) y 2x00000000000000000000AB (falla); secretos
  *   1x0000000000000000000000000000000AA (pasa) y 2x0000000000000000000000000000000AA (falla).
  *
+ * Un token aprobado se acepta hasta REUSES veces en sus 300 s para la misma acción (0.21.2): las
+ * pasarelas que validan el pago en varios pasos (PayPal Payments valida el formulario por su endpoint y
+ * después lo envía) disparan la validación de WooCommerce más de una vez con el mismo token, y
+ * siteverify solo lo acepta la primera. Quien resuelve un desafío consigue como mucho tres intentos.
+ *
  * Falla abierto (regla 7): si siteverify no responde, responde un error interno o la clave secreta deja
  * de valer, el formulario sigue y queda un aviso en el registro (como mucho uno por hora). La prueba de
  * claves del admin, en cambio, exige una verificación real: sin ella no se activa ningún formulario.
@@ -36,6 +41,9 @@ final class Turnstile {
 	public const SECRET_OPTION = 'itb_turnstile_secret';
 
 	public const SITEVERIFY = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
+	/** Usos de un token aprobado (el primero incluido). */
+	public const REUSES = 3;
 
 	public const API_JS = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
 
@@ -113,6 +121,22 @@ final class Turnstile {
 				'code' => 'invalid',
 			];
 		}
+		// Ya aprobado en otro paso del mismo envío: siteverify lo rechazaría como duplicado.
+		$seen = 'itb_ts_' . substr( hash( 'sha256', $action . '|' . $token ), 0, 32 );
+		$uses = get_transient( $seen );
+		if ( is_int( $uses ) && $uses > 0 ) {
+			if ( $uses >= self::REUSES ) {
+				return [
+					'ok'   => false,
+					'code' => 'expired',
+				];
+			}
+			set_transient( $seen, $uses + 1, 300 );
+			return [
+				'ok'   => true,
+				'code' => '',
+			];
+		}
 		$secret = $this->vault->read();
 		if ( null === $secret ) {
 			$this->failOpen( 'secret_unreadable' );
@@ -129,7 +153,11 @@ final class Turnstile {
 				'code' => 'failopen',
 			];
 		}
-		return self::judge( $reply, $action, fn( string $why ) => $this->failOpen( $why ) );
+		$result = self::judge( $reply, $action, fn( string $why ) => $this->failOpen( $why ) );
+		if ( $result['ok'] && '' === $result['code'] ) {
+			set_transient( $seen, 1, 300 );
+		}
+		return $result;
 	}
 
 	/**

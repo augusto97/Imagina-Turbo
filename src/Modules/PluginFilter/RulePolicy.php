@@ -27,6 +27,47 @@ final class RulePolicy {
 
 	public const BLOCKED_KEYS = [ 'WcAjax:update_order_review', 'WcAjax:checkout', 'Rest:wp/v2', 'Rest', 'WcAjax', 'AdminAjax' ];
 
+	/** Carpetas de plugins de seguridad, antispam, 2FA, captcha y membresías (0.21.2). */
+	public const SECURITY_FOLDERS = [
+		'wordfence',
+		'better-wp-security',
+		'ithemes-security-pro',
+		'all-in-one-wp-security-and-firewall',
+		'wp-simple-firewall',
+		'sucuri-scanner',
+		'wp-cerber',
+		'limit-login-attempts-reloaded',
+		'loginizer',
+		'wps-hide-login',
+		'wp-2fa',
+		'two-factor',
+		'two-factor-authentication',
+		'miniorange-2-factor-authentication',
+		'akismet',
+		'antispam-bee',
+		'cleantalk-spam-protect',
+		'simple-cloudflare-turnstile',
+		'advanced-google-recaptcha',
+		'really-simple-ssl',
+		'memberpress',
+		'paid-memberships-pro',
+		'restrict-content',
+		'restrict-content-pro',
+		'woocommerce-memberships',
+		'woocommerce-subscriptions',
+		'ultimate-member',
+		'members',
+		'sfwd-lms',
+		'lifterlms',
+		'tutor',
+	];
+
+	/**
+	 * Campos de formularios que inician sesión, registran, cambian la contraseña, crean un pedido o
+	 * publican un comentario (0.21.2): un POST que los lleva nunca se procesa con plugins quitados.
+	 */
+	public const SENSITIVE_POST = [ 'log', 'pwd', 'username', 'password', 'user_login', 'user_email', 'pass1', 'login', 'register', 'woocommerce-login-nonce', 'woocommerce-register-nonce', 'woocommerce-lost-password-nonce', 'woocommerce-reset-password-nonce', 'woocommerce-process-checkout-nonce', 'woocommerce_checkout_place_order', 'comment_post_ID' ];
+
 	/** Pares iguales seguidos para promover una regla (docs/02 módulo 4). */
 	public const REQUIRED_PAIRS = 20;
 
@@ -59,6 +100,14 @@ final class RulePolicy {
 	 */
 	public static function protectedPlugins( string $key, array $active, string $self ): array {
 		$out = [ $self ];
+		// Seguridad, antispam, 2FA, captcha y membresías nunca se quitan (0.21.2): sin ellos, un login, un
+		// comentario o una ruta protegida se procesaría sin bloqueo, sin segundo factor o sin restricción.
+		foreach ( self::SECURITY_FOLDERS as $folder ) {
+			$plugin = self::find( $active, $folder );
+			if ( null !== $plugin ) {
+				$out[] = $plugin;
+			}
+		}
 		$woo = self::find( $active, 'woocommerce' );
 		if ( null !== $woo && ( str_starts_with( $key, 'WcAjax' ) || str_starts_with( $key, 'Rest:wc/' ) || str_starts_with( $key, 'Rest:wc-' ) ) ) {
 			$out[] = $woo;

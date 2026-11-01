@@ -17,7 +17,7 @@ import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction, useStatus } from '@/lib/queries';
 import type { CompileResult, HubStatus, PublicSettings, Safety, SignedCookie, Status, VerifierRun, VerifierStatus } from '@/lib/types';
-import { downloadFile, formatDate } from '@/lib/utils';
+import { downloadFile, formatDate, safeHref } from '@/lib/utils';
 
 export function Advanced() {
 	const { data, isLoading, error } = useStatus();
@@ -350,7 +350,8 @@ function ImportExportCard() {
 	const [ pending, setPending ] = useState<z.infer<typeof importSchema> | null>( null );
 	const [ parseError, setParseError ] = useState( '' );
 	const [ exportError, setExportError ] = useState( '' );
-	const action = useAction( ( data: unknown ) => api<PublicSettings>( 'settings/import', 'POST', { data } ) );
+	const action = useAction( ( data: unknown ) => api<PublicSettings & { skipped?: string[] }>( 'settings/import', 'POST', { data } ) );
+	const skipped = action.data?.skipped ?? [];
 
 	const exportSettings = async () => {
 		setExportError( '' );
@@ -414,13 +415,18 @@ function ImportExportCard() {
 				{ parseError && <Notice level="error" className="itb:mt-3">{ parseError }</Notice> }
 				{ exportError && <Notice level="error" className="itb:mt-3">{ exportError }</Notice> }
 				{ action.isSuccess && <Notice level="success" className="itb:mt-3">{ __( 'Ajustes importados.' ) }</Notice> }
+				{ action.isSuccess && skipped.length > 0 && (
+					<Notice level="warning" className="itb:mt-3">
+						{ __( 'No se encendieron %s: no son seguros por defecto y se activan a mano en Módulos, con su confirmación.' ).replace( '%s', skipped.join( ', ' ) ) }
+					</Notice>
+				) }
 				<ErrorText error={ action.error } />
 			</CardContent>
 			<ConfirmDialog
 				open={ pending !== null }
 				onOpenChange={ ( open ) => ! open && setPending( null ) }
 				title={ __( '¿Importar estos ajustes?' ) }
-				description={ __( 'Se reemplazan los ajustes actuales y se recompila la configuración. Queda registrado en el registro de eventos.' ) }
+				description={ __( 'Se reemplazan los ajustes actuales y se recompila la configuración. No cambian el acceso de los asistentes de IA, el hub ni el control remoto de la flota, y los módulos que no son seguros por defecto no se encienden. Queda registrado en el registro de eventos.' ) }
 				confirmLabel={ __( 'Importar' ) }
 				pending={ action.isPending }
 				onConfirm={ () => pending && action.mutate( pending, { onSettled: () => setPending( null ) } ) }
@@ -740,7 +746,7 @@ function VerifierCard() {
 										{ run.results.map( ( r ) => (
 											<tr key={ r.url } className="itb:border-t itb:border-zinc-100 itb:align-top">
 												<td className="itb:py-1.5 itb:pr-3">
-													<a href={ r.url } target="_blank" rel="noreferrer">{ r.label }</a>
+													<a href={ safeHref( r.url ) } target="_blank" rel="noreferrer">{ r.label }</a>
 													<span className="itb:block itb:text-xs itb:text-zinc-500">{ `HTTP ${ r.status }${ r.ttfb !== null ? ` · TTFB ${ r.ttfb } ms` : '' }` }</span>
 												</td>
 												<td className="itb:py-1.5 itb:pr-3">

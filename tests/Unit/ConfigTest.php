@@ -25,11 +25,11 @@ final class ConfigTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		$this->options = [
-			'active_plugins'                  => [ 'woocommerce/woocommerce.php', 'wps-hide-login/wps-hide-login.php', 'perfmatters/perfmatters.php' ],
-			'woocommerce_cart_page_id'        => 10,
-			'woocommerce_checkout_page_id'    => 11,
-			'woocommerce_myaccount_page_id'   => 12,
-			'whl_page'                        => 'acceso',
+			'active_plugins'                => [ 'woocommerce/woocommerce.php', 'wps-hide-login/wps-hide-login.php', 'perfmatters/perfmatters.php' ],
+			'woocommerce_cart_page_id'      => 10,
+			'woocommerce_checkout_page_id'  => 11,
+			'woocommerce_myaccount_page_id' => 12,
+			'whl_page'                      => 'acceso',
 		];
 		Functions\when( 'get_option' )->alias( fn( string $name, mixed $default = false ): mixed => $this->options[ $name ] ?? $default );
 		Functions\when( 'update_option' )->alias(
@@ -82,10 +82,10 @@ final class ConfigTest extends TestCase {
 		$clean = Settings::sanitize(
 			[
 				'modules'         => [
-					'profiler'    => true,
-					'MAL'         => true,
-					'shield'      => 'yes',
-					'woo_cart'    => false,
+					'profiler' => true,
+					'MAL'      => true,
+					'shield'   => 'yes',
+					'woo_cart' => false,
 				],
 				'tag_prefix'      => 'k7',
 				'debug'           => 'true',
@@ -136,7 +136,32 @@ final class ConfigTest extends TestCase {
 		$this->assertTrue( $settings->get( 'debug' ) );
 		$this->assertSame( $prefix, $settings->get( 'tag_prefix' ) );
 
-		foreach ( [ null, [], [ 'plugin' => 'otro' ], [ 'plugin' => 'imagina-turbo', 'version' => 99, 'settings' => [] ] ] as $bad ) {
+		// Lo que da acceso a terceros no se importa, y los módulos que no son seguros no se encienden.
+		$export['settings']['ai_write']     = true;
+		$export['settings']['fleet_remote'] = true;
+		$export['settings']['hub_url']      = 'https://hub.ajeno.example';
+		$export['settings']['modules']      = [
+			'plugin_filter' => true,
+			'rum'           => false,
+		];
+		$result                             = $settings->import( $export, static fn( string $id ): bool => 'plugin_filter' === $id );
+		$this->assertSame( [ 'plugin_filter' ], $result['skipped'] );
+		$this->assertFalse( $settings->get( 'ai_write' ) );
+		$this->assertFalse( $settings->get( 'fleet_remote' ) );
+		$this->assertSame( '', $settings->get( 'hub_url' ) );
+		$this->assertFalse( $settings->modules()['plugin_filter'] ?? false );
+		$this->assertFalse( $settings->modules()['rum'], 'apagar sí se importa' );
+
+		foreach ( [
+			null,
+			[],
+			[ 'plugin' => 'otro' ],
+			[
+				'plugin'   => 'imagina-turbo',
+				'version'  => 99,
+				'settings' => [],
+			],
+		] as $bad ) {
 			try {
 				$settings->import( $bad );
 				$this->fail( 'Debió rechazar la importación.' );

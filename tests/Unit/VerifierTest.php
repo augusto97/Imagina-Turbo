@@ -58,7 +58,7 @@ final class VerifierTest extends TestCase {
 		Functions\when( 'is_wp_error' )->justReturn( false );
 		Functions\when( 'sanitize_key' )->returnArg();
 		Functions\when( 'wp_strip_all_tags' )->returnArg();
-		Functions\when( 'wp_remote_request' )->alias(
+		Functions\when( 'wp_safe_remote_request' )->alias(
 			function ( string $url, array $args ): array {
 				$this->requests[] = [
 					'url'  => $url,
@@ -86,9 +86,14 @@ final class VerifierTest extends TestCase {
 
 	public function test_urls_and_site_ids(): void {
 		$this->assertTrue( VerifierService::validUrl( 'https://verificador.imaginawp.com' ) );
-		$this->assertTrue( VerifierService::validUrl( 'http://127.0.0.1:8787' ) );
+		$this->assertTrue( VerifierService::validUrl( 'https://imaginawp.com/verificador' ) );
+		$this->assertTrue( VerifierService::validUrl( 'http://127.0.0.1:8787', true ) );
+		$this->assertFalse( VerifierService::validUrl( 'http://127.0.0.1:8787', false ), 'local solo con la constante' );
 		$this->assertFalse( VerifierService::validUrl( 'http://verificador.imaginawp.com' ) );
 		$this->assertFalse( VerifierService::validUrl( 'ftp://x' ) );
+		$this->assertFalse( VerifierService::validUrl( 'https://v.com/?x=' ), 'el query volvía la ruta parte del query' );
+		$this->assertFalse( VerifierService::validUrl( 'https://v.com/#x' ) );
+		$this->assertFalse( VerifierService::validUrl( 'https://u:p@v.com' ) );
 
 		$service = $this->service();
 		$this->assertFalse( $service->save( 'http://otro.com', 'tienda', false )['ok'] );
@@ -113,12 +118,18 @@ final class VerifierTest extends TestCase {
 	}
 
 	public function test_requests_are_signed_like_the_hub(): void {
-		$service = $this->service();
-		$key     = $service->save( 'https://v.com', 'tienda.com', false )['key'];
-		$this->responses[] = [ 202, [ 'id' => '20261026-0123456789', 'status' => 'queued' ] ];
-		$reply   = $service->request( 'POST', '/v1/runs', [ 'lighthouse' => true ] );
+		$service           = $this->service();
+		$key               = $service->save( 'https://v.com', 'tienda.com', false )['key'];
+		$this->responses[] = [
+			202,
+			[
+				'id'     => '20261026-0123456789',
+				'status' => 'queued',
+			],
+		];
+		$reply             = $service->request( 'POST', '/v1/runs', [ 'lighthouse' => true ] );
 		$this->assertSame( 202, $reply['status'] );
-		$sent    = $this->requests[0];
+		$sent = $this->requests[0];
 		$this->assertSame( 'https://v.com/v1/runs', $sent['url'] );
 		$h = $sent['args']['headers'];
 		$this->assertSame( 'tienda.com', $h['X-ITB-Site'] );
@@ -133,10 +144,20 @@ final class VerifierTest extends TestCase {
 	public function test_daily_reports_each_nightly_once(): void {
 		$service = $this->service();
 		$service->save( 'https://v.com', 'tienda.com', false );
-		$runs = [
+		$runs              = [
 			'runs' => [
-				[ 'id' => '20261027-aaaaaaaaaa', 'trigger' => 'manual', 'status' => 'done', 'alerts' => [] ],
-				[ 'id' => '20261027-bbbbbbbbbb', 'trigger' => 'nightly', 'status' => 'done', 'alerts' => [ 'Portada: Lighthouse 85 → 70' ] ],
+				[
+					'id'      => '20261027-aaaaaaaaaa',
+					'trigger' => 'manual',
+					'status'  => 'done',
+					'alerts'  => [],
+				],
+				[
+					'id'      => '20261027-bbbbbbbbbb',
+					'trigger' => 'nightly',
+					'status'  => 'done',
+					'alerts'  => [ 'Portada: Lighthouse 85 → 70' ],
+				],
 			],
 		];
 		$this->responses[] = [ 200, $runs ];

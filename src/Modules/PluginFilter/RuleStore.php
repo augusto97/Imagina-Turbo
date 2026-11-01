@@ -130,7 +130,8 @@ final class RuleStore {
 			if ( '' !== RulePolicy::blockedReason( $rule['key'] ) ) {
 				continue;
 			}
-			$plugins = array_values( array_intersect( $rule['plugins'], $active ) );
+			// Las reglas guardadas antes de la 0.21.2 pueden incluir plugins que ahora están protegidos.
+			$plugins = array_values( array_diff( array_intersect( $rule['plugins'], $active ), RulePolicy::protectedPlugins( $rule['key'], $active, '' ) ) );
 			if ( [] === $plugins ) {
 				continue;
 			}

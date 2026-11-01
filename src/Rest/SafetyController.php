@@ -73,6 +73,10 @@ final class SafetyController extends Controller {
 	}
 
 	public function killSwitch( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$network = $this->networkOnly();
+		if ( null !== $network ) {
+			return $network;
+		}
 		$enabled = (bool) $request->get_param( 'enabled' );
 		if ( ! $enabled && KillSwitch::constantActive() ) {
 			return $this->error( 'itb_constant', __( 'El kill switch está definido en wp-config.php (ITB_DISABLE). Quítalo de ahí.', 'imagina-turbo' ), 409 );
@@ -166,6 +170,10 @@ final class SafetyController extends Controller {
 	}
 
 	public function exitSafeMode(): \WP_REST_Response|\WP_Error {
+		$network = $this->networkOnly();
+		if ( null !== $network ) {
+			return $network;
+		}
 		$safeMode = $this->container->get( SafeMode::class );
 		if ( ! $safeMode->isActive() ) {
 			return $this->ok( $this->container->get( Diagnostics::class )->safety() );

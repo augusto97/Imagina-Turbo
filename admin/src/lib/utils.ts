@@ -43,3 +43,13 @@ export function formatBytes( bytes: number, locale: string ): string {
 	}
 	return `${ number.format( bytes ) } B`;
 }
+
+/** Solo enlaces http(s): una URL que llega de un servicio externo nunca se abre como javascript:. */
+export function safeHref( url: string ): string | undefined {
+	try {
+		const parsed = new URL( url, window.location.href );
+		return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : undefined;
+	} catch {
+		return undefined;
+	}
+}

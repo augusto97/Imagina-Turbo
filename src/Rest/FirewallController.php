@@ -168,6 +168,10 @@ final class FirewallController extends Controller {
 	}
 
 	public function htaccess( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$network = $this->networkOnly();
+		if ( null !== $network ) {
+			return $network;
+		}
 		if ( true !== $request->get_param( 'confirm' ) ) {
 			return $this->error( 'itb_confirm', __( 'Confirma el cambio en el .htaccess.', 'imagina-turbo' ), 428 );
 		}

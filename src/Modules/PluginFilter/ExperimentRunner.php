@@ -22,6 +22,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Modules\PluginFilter;
 
 use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Core\Safety\DataFile;
 
 /**
  * Ejecución por pasos.
@@ -207,14 +208,12 @@ final class ExperimentRunner {
 	 * @return Measure|null
 	 */
 	private function measure( string $id, string $nonce ): ?array {
-		$file = $this->dataDir . '/experiments/' . $id . '.log';
+		$file = ExperimentProbe::file( $this->dataDir, $id );
 		for ( $try = 0; $try < 20; $try++ ) {
 			if ( is_file( $file ) ) {
 				clearstatcache( true, $file );
-				$lines = file( $file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
-				foreach ( array_reverse( is_array( $lines ) ? $lines : [] ) as $line ) {
-					$row = json_decode( $line, true );
-					if ( is_array( $row ) && ( $row['n'] ?? '' ) === $nonce ) {
+				foreach ( array_reverse( DataFile::lines( $file ) ) as $row ) {
+					if ( ( $row['n'] ?? '' ) === $nonce ) {
 						return [
 							'ms' => (float) ( $row['ms'] ?? 0 ),
 							'kb' => (float) ( $row['kb'] ?? 0 ),
@@ -289,7 +288,7 @@ final class ExperimentRunner {
 	}
 
 	private function cleanup( string $id ): void {
-		$file = $this->dataDir . '/experiments/' . $id . '.log';
+		$file = ExperimentProbe::file( $this->dataDir, $id );
 		if ( is_file( $file ) ) {
 			wp_delete_file( $file );
 		}

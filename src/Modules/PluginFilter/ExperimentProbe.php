@@ -3,7 +3,7 @@
  * Medición de un request de experimento: tiempo, memoria pico, avisos y fatales de PHP.
  *
  * Se activa solo con una cookie de experimento válida. Escribe una línea JSON por request en
- * wp-content/imagina-turbo/experiments/{id}.log (escritura acotada: solo en requests firmados por el
+ * wp-content/imagina-turbo/experiments/{id}.php, con guarda (escritura acotada: solo en requests firmados por el
  * propio sitio). Corre desde el loader MU, sin funciones de WordPress.
  *
  * @package ImaginaTurbo
@@ -12,6 +12,8 @@
 declare(strict_types=1);
 
 namespace ImaginaTurbo\Modules\PluginFilter;
+
+use ImaginaTurbo\Core\Safety\DataFile;
 
 /**
  * Contador de errores y registro en shutdown.
@@ -49,7 +51,7 @@ final class ExperimentProbe {
 	public static function start( array $experiment, string $dataDir, int $startNs, \Closure $hidden ): void {
 		self::$experiment = $experiment;
 		self::$startNs    = $startNs;
-		self::$file       = $dataDir . '/experiments/' . $experiment['id'] . '.log';
+		self::$file       = self::file( $dataDir, $experiment['id'] );
 		self::$hidden     = $hidden;
 		set_error_handler( [ self::class, 'onError' ] ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_set_error_handler -- solo cuenta y devuelve false para que siga el manejador normal.
 		register_shutdown_function( [ self::class, 'onShutdown' ] );
@@ -89,7 +91,18 @@ final class ExperimentProbe {
 		if ( ! is_dir( $dir ) ) {
 			mkdir( $dir, 0755, true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- loader MU, sin WP_Filesystem.
 		}
-		file_put_contents( self::$file, json_encode( $line ) . "\n", FILE_APPEND | LOCK_EX ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents, WordPress.WP.AlternativeFunctions.json_encode_json_encode -- loader MU.
+		// Loader MU: sin autoloader.
+		if ( ! class_exists( DataFile::class, false ) ) {
+			require_once dirname( __DIR__, 2 ) . '/Core/Safety/DataFile.php';
+		}
+		DataFile::append( self::$file, $line );
+	}
+
+	/**
+	 * Registro de un experimento (.php con guarda: no se puede leer por URL).
+	 */
+	public static function file( string $dataDir, string $id ): string {
+		return $dataDir . '/experiments/' . $id . '.php';
 	}
 
 	/**

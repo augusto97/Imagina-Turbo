@@ -154,14 +154,29 @@ final class SettingsController extends Controller {
 	}
 
 	public function import( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$catalog = $this->container->get( ModuleCatalog::class );
 		try {
-			$this->container->get( Settings::class )->import( $request->get_param( 'data' ) );
+			$result = $this->container->get( Settings::class )->import(
+				$request->get_param( 'data' ),
+				static function ( string $id ) use ( $catalog ): bool {
+					$definition = $catalog->get( $id );
+					return null === $definition || RiskLevel::Safe !== $definition->risk;
+				}
+			);
 		} catch ( \InvalidArgumentException $e ) {
 			return $this->error( 'itb_import', $e->getMessage(), 400 );
 		}
 		$this->container->get( ConfigCompiler::class )->compile();
-		$this->container->get( EventLog::class )->warning( 'core', 'import', __( 'Ajustes importados.', 'imagina-turbo' ), [ 'user' => get_current_user_id() ] );
-		return $this->ok( $this->publicSettings() );
+		$this->container->get( EventLog::class )->warning(
+			'core',
+			'import',
+			[] === $result['skipped'] ? __( 'Ajustes importados.', 'imagina-turbo' ) : __( 'Ajustes importados. Los módulos que no son seguros por defecto quedaron como estaban: se encienden a mano, con su confirmación.', 'imagina-turbo' ),
+			[
+				'user'    => get_current_user_id(),
+				'skipped' => $result['skipped'],
+			]
+		);
+		return $this->ok( $this->publicSettings() + [ 'skipped' => $result['skipped'] ] );
 	}
 
 	/**

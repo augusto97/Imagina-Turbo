@@ -66,7 +66,7 @@ export function Cloudflare() {
 			{ data && (
 				<div className="itb:flex itb:flex-col itb:gap-4">
 					{ data.simulator && <Notice level="warning">{ __( 'Conectado a un simulador de la API (ITB_CF_API_BASE en wp-config.php). Solo para pruebas.' ) }</Notice> }
-					{ ! data.available && <Notice level="error">{ __( 'Este servidor no tiene la extensión sodium de PHP: el token no se puede guardar cifrado y Cloudflare queda desactivado.' ) }</Notice> }
+					{ ! data.available && <Notice level="error">{ data.vault_problem || __( 'Este servidor no tiene la extensión sodium de PHP: el token no se puede guardar cifrado y Cloudflare queda desactivado.' ) }</Notice> }
 					<div className="itb:grid itb:gap-4 itb:lg:grid-cols-2 itb:*:min-w-0">
 						<ConnectionCard status={ data } />
 						{ connected && <ZoneCard status={ data } /> }

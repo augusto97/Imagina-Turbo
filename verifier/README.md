@@ -44,7 +44,7 @@ O con un túnel de Cloudflare (`cloudflared tunnel`) hacia `http://127.0.0.1:878
 
 ## Conectar un sitio
 
-1. En el WordPress: **Imagina Turbo → Avanzado → Verificador externo**. Escribe la URL del verificador y un id del sitio, y guarda.
+1. En el WordPress: **Imagina Turbo → Avanzado → Verificador externo**. Escribe la URL del verificador y un id del sitio, y guarda. La URL tiene que ser `https://`, sin usuario, parámetros ni fragmento, y apuntar a una dirección pública (el plugin usa `wp_safe_remote_request`, que rechaza redes privadas). Para un verificador en la misma máquina o en tu red de pruebas (`http://127.0.0.1:8787`), añade `define( 'ITB_VERIFIER_ALLOW_LOCAL', true );` en `wp-config.php` de ese sitio (0.21.2).
 2. El plugin genera la clave y muestra **una sola vez** el bloque para `sites.json`, con la URL del sitio y sus páginas clave: portada, entrada, página, producto con el flujo del carrito, tienda, categoría, carrito, pago, cuenta y una página inexistente.
 3. Pégalo dentro de `"sites"` en `data/sites.json` y recarga sin reiniciar: `docker compose kill -s HUP verifier`.
 4. En el plugin: **Probar conexión** y **Ejecutar batería**.

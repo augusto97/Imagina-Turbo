@@ -63,8 +63,13 @@ final class Filesystem {
 		opcache_invalidate( $file, true );
 	}
 
+	/** Reglas del .htaccess del directorio de datos. La reescritura es la que aplica OpenLiteSpeed. */
+	public const DATA_HTACCESS = "# Imagina Turbo: datos internos, sin acceso web.\n<IfModule mod_authz_core.c>\n\tRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n\tOrder deny,allow\n\tDeny from all\n</IfModule>\n# OpenLiteSpeed no aplica Require: estas reglas sí (tras reiniciar el servidor).\n<IfModule mod_rewrite.c>\n\tRewriteEngine On\n\tRewriteRule .* - [F,L]\n</IfModule>\n";
+
 	/**
-	 * Crea el directorio de datos con index.php vacío y reglas de denegación (Apache y IIS).
+	 * Crea el directorio de datos con index.php vacío y reglas de denegación (Apache, OpenLiteSpeed e
+	 * IIS). En nginx no hay reglas que valgan: por eso los archivos con detalles son .php con guarda
+	 * (Core\Safety\DataFile).
 	 */
 	public static function ensureDataDir( string $dir ): bool {
 		if ( ! is_dir( $dir ) ) {
@@ -82,7 +87,7 @@ final class Filesystem {
 		}
 		$files = [
 			'index.php'  => "<?php\n// Silencio.\n",
-			'.htaccess'  => "# Imagina Turbo: datos internos, sin acceso web.\n<IfModule mod_authz_core.c>\n\tRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n\tOrder deny,allow\n\tDeny from all\n</IfModule>\n",
+			'.htaccess'  => self::DATA_HTACCESS,
 			'web.config' => "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration><system.webServer><authorization><deny users=\"*\" /></authorization></system.webServer></configuration>\n",
 		];
 		foreach ( $files as $name => $contents ) {
@@ -90,6 +95,12 @@ final class Filesystem {
 			if ( ! is_file( $path ) ) {
 				file_put_contents( $path, $contents, LOCK_EX );
 			}
+		}
+		// El .htaccess propio de la 0.21.1 o anterior no tenía la regla que aplica OpenLiteSpeed.
+		$htaccess = $dir . '/.htaccess';
+		$current  = is_file( $htaccess ) ? (string) file_get_contents( $htaccess ) : '';
+		if ( str_starts_with( $current, '# Imagina Turbo' ) && ! str_contains( $current, 'RewriteRule' ) ) {
+			file_put_contents( $htaccess, self::DATA_HTACCESS, LOCK_EX );
 		}
 		return is_dir( $dir ) && is_writable( $dir );
 	}

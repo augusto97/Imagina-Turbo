@@ -60,7 +60,8 @@ final class EarlyGuard {
 
 		$loggedIn = self::hasLoginCookie( $cookies );
 
-		if ( RequestType::FrontendHtml === $type && true === ( $shield['author'] ?? false ) && ! $loggedIn && isset( $get['author'] ) && is_scalar( $get['author'] ) && 1 === preg_match( '/^\s*\d+\s*$/', (string) $get['author'] ) ) {
+		// También con ?wc-ajax= (0.21.2): sin WooCommerce, WordPress resuelve ?author=1 igual.
+		if ( in_array( $type, [ RequestType::FrontendHtml, RequestType::WcAjax ], true ) && true === ( $shield['author'] ?? false ) && ! $loggedIn && isset( $get['author'] ) && is_scalar( $get['author'] ) && 1 === preg_match( '/^\s*\d+\s*$/', (string) $get['author'] ) ) {
 			return [
 				'status'  => 404,
 				'headers' => [ 'Content-Type: text/plain; charset=utf-8', 'Cache-Control: no-store', 'X-Robots-Tag: noindex' ],
@@ -98,7 +99,9 @@ final class EarlyGuard {
 			];
 		}
 
-		if ( RequestType::Rest === $type && true === ( $shield['rest_users'] ?? false ) && ! $loggedIn && ! self::hasCredentials( $server ) && self::isUsersRoute( $path, $restPrefix, $get ) ) {
+		// Cualquier tipo (0.21.2): /?wc-ajax=x&rest_route=/wp/v2/users llega como WcAjax y WordPress la
+		// sirve igual en parse_request.
+		if ( in_array( $type, [ RequestType::Rest, RequestType::WcAjax, RequestType::FrontendHtml ], true ) && true === ( $shield['rest_users'] ?? false ) && ! $loggedIn && ! self::hasCredentials( $server ) && self::isUsersRoute( $path, $restPrefix, $get ) ) {
 			return [
 				'status'  => 401,
 				'headers' => [ 'Content-Type: application/json; charset=utf-8', 'Cache-Control: no-store' ],
@@ -160,7 +163,8 @@ final class EarlyGuard {
 	 */
 	public static function isUsersRoute( string $path, string $restPrefix, array $get ): bool {
 		$base = '/' . trim( $restPrefix, '/' ) . '/wp/v2/users';
-		if ( str_starts_with( strtolower( $path ), $base ) ) {
+		// También detrás de un prefijo de idioma (/en/wp-json/wp/v2/users).
+		if ( 1 === preg_match( '#^(/[a-z]{2}(?:[-_][a-z]{2})?)?' . preg_quote( $base, '#' ) . '#', strtolower( $path ) ) ) {
 			return true;
 		}
 		$route = $get['rest_route'] ?? null;

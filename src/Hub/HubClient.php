@@ -126,7 +126,7 @@ final class HubClient {
 				'redirection' => 0,
 				'headers'     => [
 					'Content-Type'  => 'application/json',
-					'X-ITB-License' => $this->license->licenseKey(),
+					'X-ITB-License' => $this->licenseFor(),
 					'User-Agent'    => 'ImaginaTurbo/' . ITB_VERSION,
 				],
 				'body'        => $body,
@@ -213,7 +213,7 @@ final class HubClient {
 		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
 
 		$headers = array_merge(
-			Signer::headers( $state['site_id'], $this->siteKey(), $this->license->licenseKey(), 'POST', $path, $body, $now ),
+			Signer::headers( $state['site_id'], $this->siteKey(), $this->licenseFor(), 'POST', $path, $body, $now ),
 			[
 				'Content-Type' => 'application/json',
 				'User-Agent'   => 'ImaginaTurbo/' . ITB_VERSION,
@@ -291,7 +291,7 @@ final class HubClient {
 		$url     = $this->url() . '/v1/fleet/policy';
 		$path    = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$nonce   = bin2hex( random_bytes( 16 ) );
-		$headers = Signer::headers( $this->siteId(), $this->siteKey(), $this->license->licenseKey(), 'GET', $path, '', $now, $nonce );
+		$headers = Signer::headers( $this->siteId(), $this->siteKey(), $this->licenseFor(), 'GET', $path, '', $now, $nonce );
 
 		$response = wp_remote_get(
 			$url,
@@ -385,6 +385,20 @@ final class HubClient {
 	 */
 	private function saveState( array $state ): void {
 		update_option( self::STATE_OPTION, $state, false );
+	}
+
+	/**
+	 * La clave de licencia solo viaja a un hub en el mismo host que el servidor de licencias (que ya la
+	 * recibe) o al fijado en wp-config.php con ITB_HUB_URL (0.21.2). Si no, un admin podía apuntar el hub
+	 * a su propio servidor y llevarse la licencia de la agencia.
+	 */
+	private function licenseFor(): string {
+		$hub = strtolower( (string) wp_parse_url( $this->url(), PHP_URL_HOST ) );
+		if ( '' === $hub ) {
+			return '';
+		}
+		$pinned = defined( 'ITB_HUB_URL' ) && is_string( ITB_HUB_URL ) ? strtolower( (string) wp_parse_url( ITB_HUB_URL, PHP_URL_HOST ) ) : '';
+		return $hub === $this->license->serverHost() || $hub === $pinned ? $this->license->licenseKey() : '';
 	}
 
 	/**

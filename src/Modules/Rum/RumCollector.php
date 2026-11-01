@@ -20,6 +20,9 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Modules\Rum;
 
+use ImaginaTurbo\Core\Runtime;
+use ImaginaTurbo\Core\Safety\DataFile;
+
 /**
  * Validación, conversión a contadores y escritura.
  */
@@ -29,8 +32,20 @@ final class RumCollector {
 
 	public const MAX_BODY = 2048;
 
-	/** Beacons por minuto e IP (con APCu). */
+	/** Beacons por minuto e IP (con APCu o caché de objetos). */
 	public const RATE_LIMIT = 30;
+
+	/**
+	 * Beacons por minuto en todo el sitio, y filas de eventos (rutas de LCP, fuentes, siguiente página)
+	 * nuevas por día (0.21.2). Sin estos topes, un bucle anónimo con valores al azar creaba filas sin
+	 * fin. Con la muestra por defecto (5 %), 120 por minuto son 2.400 páginas vistas por minuto.
+	 */
+	public const GLOBAL_LIMIT = 120;
+
+	public const EVENTS_PER_DAY = 50000;
+
+	/** Rangos de Cloudflare (cloudflare.com/ips, revisados el 2026-11-01). */
+	public const CLOUDFLARE_RANGES = [ '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22', '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32' ];
 
 	/** Tipos de navegación (métrica "nav"). */
 	public const NAV = [
@@ -84,9 +99,15 @@ final class RumCollector {
 		if ( ! self::allow( $ip ) ) {
 			return 429;
 		}
-		$rows = self::rows( $beacon, self::ipBit( $ip, gmdate( 'Y-m-d' ) ), time() );
+		$rum       = Runtime::$config?->get( 'rum', [] );
+		$templates = is_array( $rum ) && is_array( $rum['templates'] ?? null ) ? array_values( array_filter( $rum['templates'], 'is_string' ) ) : [];
+		$rows      = self::rows( $beacon, self::ipBit( $ip, gmdate( 'Y-m-d' ) ), time(), $templates );
 		if ( [] === $rows['hist'] && [] === $rows['events'] ) {
 			return 400;
+		}
+		// Pasado el cupo del día, solo los histogramas (acotados por plantilla, métrica y hora).
+		if ( [] !== $rows['events'] && self::counter( 'ev' . gmdate( 'Ymd' ), count( $rows['events'] ), 86400 ) > self::EVENTS_PER_DAY ) {
+			$rows['events'] = [];
 		}
 		self::write( $rows );
 		return 204;
@@ -95,16 +116,21 @@ final class RumCollector {
 	/**
 	 * Convierte un beacon en filas de contadores. Lo que no valida se descarta.
 	 *
-	 * @param array<mixed> $b Beacon.
+	 * @param array<mixed> $b         Beacon.
+	 * @param list<string> $templates Plantillas conocidas (vacío = cualquiera).
 	 * @return array{hist: list<array{0: string, 1: string, 2: string, 3: string, 4: int}>, events: list<array{0: string, 1: string, 2: string, 3: string, 4: string, 5: string}>}
 	 */
-	public static function rows( array $b, string $ipBit, int $now ): array {
+	public static function rows( array $b, string $ipBit, int $now, array $templates = [] ): array {
 		$out      = [
 			'hist'   => [],
 			'events' => [],
 		];
 		$template = self::template( $b['t'] ?? null );
-		$device   = ( $b['d'] ?? '' ) === 'd' ? 'd' : 'm';
+		// Solo plantillas que existen en el sitio (0.21.2; la config las lista).
+		if ( [] !== $templates && ! in_array( $template, $templates, true ) ) {
+			return $out;
+		}
+		$device = ( $b['d'] ?? '' ) === 'd' ? 'd' : 'm';
 		if ( '' === $template ) {
 			return $out;
 		}
@@ -166,6 +192,7 @@ final class RumCollector {
 			}
 		}
 		$from = self::template( $b['pf'] ?? null );
+		$from = [] === $templates || in_array( $from, $templates, true ) ? $from : '';
 		$to   = self::path( $b['pu'] ?? null );
 		if ( '' !== $from && '' !== $to ) {
 			$out['events'][] = [ $day, 'next', $from, $device, $to, $ipBit ];
@@ -207,13 +234,46 @@ final class RumCollector {
 	}
 
 	/**
-	 * IP del visitante: detrás de Cloudflare, la de CF-Connecting-IP. Solo para el límite y el hash.
+	 * IP del visitante. CF-Connecting-IP solo cuenta si la petición llega de una IP de Cloudflare
+	 * (0.21.2): si el origen está abierto, cualquiera la falsifica. Si el servidor ya la traduce
+	 * (mod_remoteip, «Use Client IP in Header» de LiteSpeed), REMOTE_ADDR ya es la del visitante.
 	 *
 	 * @param array<mixed> $server $_SERVER.
 	 */
 	public static function clientIp( array $server ): string {
-		$ip = isset( $server['HTTP_CF_RAY'] ) && is_string( $server['HTTP_CF_CONNECTING_IP'] ?? null ) ? $server['HTTP_CF_CONNECTING_IP'] : ( $server['REMOTE_ADDR'] ?? '' );
-		return is_string( $ip ) ? $ip : '';
+		$remote = is_string( $server['REMOTE_ADDR'] ?? null ) ? trim( $server['REMOTE_ADDR'] ) : '';
+		$cf     = is_string( $server['HTTP_CF_CONNECTING_IP'] ?? null ) ? trim( $server['HTTP_CF_CONNECTING_IP'] ) : '';
+		if ( '' !== $cf && false !== filter_var( $cf, FILTER_VALIDATE_IP ) && self::fromCloudflare( $remote ) ) {
+			return $cf;
+		}
+		return $remote;
+	}
+
+	/**
+	 * La IP está en los rangos de Cloudflare.
+	 */
+	public static function fromCloudflare( string $ip ): bool {
+		$bin = false !== filter_var( $ip, FILTER_VALIDATE_IP ) ? inet_pton( $ip ) : false;
+		if ( false === $bin ) {
+			return false;
+		}
+		foreach ( self::CLOUDFLARE_RANGES as $range ) {
+			[ $net, $bits ] = explode( '/', $range );
+			$netBin         = inet_pton( $net );
+			if ( false === $netBin || strlen( $netBin ) !== strlen( $bin ) ) {
+				continue;
+			}
+			$bits  = (int) $bits;
+			$bytes = intdiv( $bits, 8 );
+			if ( substr( $bin, 0, $bytes ) !== substr( $netBin, 0, $bytes ) ) {
+				continue;
+			}
+			$rest = $bits % 8;
+			if ( 0 === $rest || ( ( ord( $bin[ $bytes ] ) ^ ord( $netBin[ $bytes ] ) ) & ( 0xFF << ( 8 - $rest ) ) & 0xFF ) === 0 ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -263,13 +323,76 @@ final class RumCollector {
 		return $count;
 	}
 
+	/**
+	 * Tope global por minuto y, si hay dónde contarlo, por IP.
+	 */
 	private static function allow( string $ip ): bool {
-		if ( ! function_exists( 'apcu_inc' ) || '' === $ip ) {
+		$minute = intdiv( time(), 60 );
+		if ( self::counter( 'm' . $minute, 1, 120 ) > self::GLOBAL_LIMIT ) {
+			return false;
+		}
+		if ( '' === $ip || ! self::sharedMemory() ) {
 			return true;
 		}
-		$key   = 'itb_rum_' . md5( $ip ) . '_' . intdiv( time(), 60 );
-		$count = apcu_inc( $key, 1, $success, 120 );
-		return ! is_int( $count ) || $count <= self::RATE_LIMIT;
+		return self::counter( 'ip' . md5( $ip ) . '_' . $minute, 1, 120, false ) <= self::RATE_LIMIT;
+	}
+
+	private static function sharedMemory(): bool {
+		return function_exists( 'apcu_inc' ) || ( function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache() && function_exists( 'wp_cache_incr' ) );
+	}
+
+	/**
+	 * Contador compartido entre peticiones: APCu, la caché de objetos o, sin ninguna, un archivo con
+	 * bloqueo en el directorio de datos (solo los contadores globales: uno por IP no cabe en un archivo).
+	 */
+	private static function counter( string $key, int $by, int $ttl, bool $fileFallback = true ): int {
+		if ( function_exists( 'apcu_inc' ) ) {
+			$count = apcu_inc( 'itb_rum_' . $key, $by, $success, $ttl );
+			if ( is_int( $count ) ) {
+				return $count;
+			}
+		}
+		if ( function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache() && function_exists( 'wp_cache_incr' ) ) {
+			wp_cache_add( $key, 0, 'itb_rum', $ttl );
+			$count = wp_cache_incr( $key, $by, 'itb_rum' );
+			if ( is_int( $count ) ) {
+				return $count;
+			}
+		}
+		return $fileFallback ? self::fileCounter( $key, $by ) : 0;
+	}
+
+	/**
+	 * Contadores en rum-limits.php (con guarda): solo los de la ventana actual (minuto y día).
+	 */
+	private static function fileCounter( string $key, int $by ): int {
+		$dir = Runtime::$dataDir;
+		if ( '' === $dir || ! is_dir( $dir ) ) {
+			return 0;
+		}
+		// Loader MU: sin autoloader.
+		if ( ! class_exists( DataFile::class, false ) ) {
+			require_once dirname( __DIR__, 2 ) . '/Core/Safety/DataFile.php';
+		}
+		$handle = fopen( $dir . '/rum-limits.php', 'c+' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- loader MU, contador con bloqueo.
+		if ( false === $handle ) {
+			return 0;
+		}
+		$count = 0;
+		if ( flock( $handle, LOCK_EX ) ) {
+			$data          = json_decode( DataFile::strip( (string) stream_get_contents( $handle ) ), true );
+			$data          = is_array( $data ) ? $data : [];
+			$kind          = (string) preg_replace( '/\d+$/', '', $key );
+			$prev          = is_array( $data[ $kind ] ?? null ) && ( $data[ $kind ][0] ?? null ) === $key ? (int) ( $data[ $kind ][1] ?? 0 ) : 0;
+			$count         = $prev + $by;
+			$data[ $kind ] = [ $key, $count ];
+			ftruncate( $handle, 0 );
+			rewind( $handle );
+			fwrite( $handle, DataFile::encode( $data ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- loader MU.
+			flock( $handle, LOCK_UN );
+		}
+		fclose( $handle ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- idem.
+		return $count;
 	}
 
 	/**

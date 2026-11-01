@@ -669,3 +669,31 @@ Lo gratuito de Cloudflare que faltaba, cada cosa con su interruptor, y los crawl
 - [x] La prueba del escudo incluye el caso del filtro vacío.
 - [ ] En La Tienda del Pintor: probar el 404 con los filtros AJAX de WoodMart (PJAX) en el navegador y revisar en Search Console las URL con filtros antes de activar el robots.txt.
 
+## Versión 0.21.2 (seguridad)
+
+Revisión de seguridad completa del plugin con cuatro auditorías independientes (superficie pública, admin y REST, archivos y secretos, scripts del frontend), cada hallazgo verificado en el código y, los graves, reproducidos en local antes de arreglarlos. Sin ejecución remota de código, inyección SQL, `unserialize` de datos externos ni forma de saltarse las firmas. Lo encontrado:
+
+- **Turnstile en todas las vías** (grave): WooCommerce procesa el pago, el login y el registro con cualquier `?wc-ajax=`, con admin-ajax y con la Store API sin versión. Con 0.21.1 tres de esas vías creaban pedidos sin token y el login de Mi cuenta por admin-ajax abría sesión. Ahora todas pasan por la verificación (docs/02, sección 17). Para no romper las pasarelas que validan el pago en varios pasos, un token aprobado vale hasta tres veces en sus 5 minutos. Y una segunda comprobación en el mismo request ya no pasa si la primera falló.
+- **Carga condicional sin abuso** (grave): `?wc-ajax=` solo en la raíz, POST de login, pago, registro y comentarios nunca filtrados, plugins de seguridad, antispam, 2FA, membresías y LMS nunca quitados (docs/02, módulo 4). En multisitio, un administrador de sitio no quita plugins de red.
+- **Scripts del frontend**: un autor (sin `unfiltered_html`) podía escribir en una entrada elementos que los scripts del plugin leían: la URL de la fachada de un video (`javascript:`), la de `api.js` de Turnstile y el bloque de nonces. La fachada solo acepta YouTube y Vimeo, la URL de Turnstile es fija y el refresco de nonces solo acepta su `<script type="application/json">` con URL del mismo origen y nonces de 10 caracteres hex. JSON de RUM y Speculation con `JSON_HEX_TAG`.
+- **RUM**: IP de Cloudflare solo desde sus rangos, tope global por minuto y por día, plantillas conocidas (docs/04).
+- **Cachés de fragmentos**: sin guardar para visitantes con carrito o sesión de Woo, un tope de escrituras por hora y el menú no se guarda con parámetros que no sean de campañas: antes, URLs inventadas llenaban la caché de objetos.
+- **Verificador**: URL `https` sin usuario, parámetros ni fragmento y `wp_safe_remote_request` (sin redes privadas salvo `ITB_VERIFIER_ALLOW_LOCAL`). Enlaces del admin solo `http(s)`.
+- **Bajos**: escudo de enumeración de usuarios también en `?wc-ajax`, REST con prefijo de idioma y portada; endpoint de la flota con la firma antes del límite y solo los fallos contando; licencia solo al hub del servidor de licencias o de `ITB_HUB_URL`; inspección de caché solo al puerto del sitio; acciones de red solo con `manage_network_options`; archivos internos `.php` con guarda y regla para OpenLiteSpeed (docs/01); modo seguro y reglas solo por fatales de símbolos que faltan; Zaraz solo informa el pedido si WooCommerce lo mostró (tras su verificación por email); la importación no abre accesos ni enciende módulos no seguros; los asistentes de IA solo tocan módulos seguros que no protegen el sitio; el token de Cloudflare, el secreto de Turnstile y la clave del verificador no se guardan si faltan `AUTH_KEY`/`SECURE_AUTH_SALT` únicos.
+
+**Riesgos que quedan** (aceptados y por qué):
+
+- Los botones exprés (`wc_stripe_create_order`, `wcpay_create_order`) no pasan por Turnstile: el pago lo autoriza la pasarela, que tiene su propia protección contra el fraude.
+- Un autor puede escribir un contenedor `.itb-ts` con otra clave del sitio: el widget aparece, pero el servidor verifica con la clave secreta propia y el token no vale.
+- La clave del hub (`itb_site_key`) sigue en claro en la base de datos. Con ella se puede firmar como el sitio ante el hub o pedirle al sitio que aplique la plantilla del hub real (el cuerpo nunca trae configuración, y solo si el sitio autorizó la flota). Cifrarla como el token de Cloudflare queda pendiente para cuando el hub esté en producción.
+- El `.htaccess` nuevo del directorio de datos puede necesitar reiniciar OpenLiteSpeed; mientras, protege la guarda de los archivos.
+
+**Criterios de aceptación** (probados en local):
+
+- [x] Guion de ataque con curl (pruebas locales, fuera del repositorio): con 0.21.1, `?wc-ajax=x`, admin-ajax y `/wc/store/checkout` crean pedidos sin token y el login por admin-ajax abre sesión; con 0.21.2, las siete vías se rechazan y un pago con token válido (claves de prueba que siempre aprueban) crea el pedido.
+- [x] OpenLiteSpeed: `fatals.json` respondía 200; tras actualizar, el siguiente request de admin borra los antiguos, reescribe el `.htaccess` y el directorio responde 403. Sin `.htaccess` (como en nginx), un archivo con guarda responde 200 con 0 bytes.
+- [x] Importar un archivo con `ai_write`, otro `hub_url`, `fleet_remote` y el firewall encendido: nada de eso cambia y la respuesta lista `firewall` y `script_loading` como no encendidos.
+- [x] Portada, tienda, producto, cuenta, búsqueda, filtros, página de gracias y admin responden igual; `/wp-json/wp/v2/users` 401 y `?author=1` 404 sin sesión.
+- [x] 338 pruebas unitarias, PHPStan, PHPCS y el benchmark del loader (0,047 ms).
+- [ ] En La Tienda del Pintor: instalar la 0.21.2, abrir el admin una vez (migra los archivos) y comprobar que el pago y el login siguen funcionando.
+- [ ] Con Turnstile en el pago y PayPal Payments (u otra pasarela con botón propio en el pago clásico): un pedido de prueba completo.

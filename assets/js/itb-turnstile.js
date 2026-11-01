@@ -14,7 +14,10 @@
 		queue = [],
 		all = d.getElementsByClassName( 'itb-ts' );
 
-	function api( src, cb ) {
+	// URL fija (0.21.2): nunca la de un atributo, que un autor podría escribir en una entrada.
+	var API = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+
+	function api( cb ) {
 		if ( state === 2 ) {
 			return cb();
 		}
@@ -30,7 +33,7 @@
 			} );
 		};
 		var s = d.createElement( 'script' );
-		s.src = src + '?render=explicit&onload=itbTsReady';
+		s.src = API + '?render=explicit&onload=itbTsReady';
 		s.async = true;
 		d.head.appendChild( s );
 	}
@@ -71,7 +74,7 @@
 		}
 		el.itbId = null;
 		var isBlock = el.hasAttribute( 'data-block' );
-		api( el.getAttribute( 'data-u' ), function () {
+		api( function () {
 			el.itbId = w.turnstile.render( el, {
 				sitekey: el.getAttribute( 'data-k' ),
 				action: el.getAttribute( 'data-action' ),

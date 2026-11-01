@@ -15,7 +15,9 @@
  * - E-commerce: en la ficha, el carrito, el pago y la página de pedido recibido, los datos de
  *   zaraz.ecommerce (Product Viewed, Cart Viewed, Checkout Started, Order Completed) y itb-zaraz.js
  *   (1,3 KB) que los envía, más "Product Added" en el navegador. El pedido solo se informa con su
- *   clave (la de la URL de la página de gracias).
+ *   clave (la de la URL de la página de gracias) y, desde la 0.21.2, solo si WooCommerce llegó a
+ *   mostrarlo (woocommerce_thankyou): con un pedido antiguo sin sesión, WooCommerce pide el email del
+ *   comprador antes de enseñarlo, y la clave sola no debe bastar para ver productos, importes y cupones.
  *
  * @package ImaginaTurbo
  */
@@ -41,6 +43,9 @@ final class ZarazBridge {
 	 */
 	public function __construct( private readonly array $takeover ) {
 	}
+
+	/** Pedido que WooCommerce mostró en la página de gracias de este request. */
+	private int $shown = 0;
 
 	/**
 	 * @return array{ga4: bool, meta: bool}
@@ -78,8 +83,19 @@ final class ZarazBridge {
 		}
 		// WooCommerce carga después que este plugin: se comprueba al imprimir, no al registrar.
 		if ( $html ) {
+			add_action( 'woocommerce_thankyou', [ $this, 'orderShown' ], 1 );
 			add_action( 'wp_footer', [ $this, 'printData' ], 50 );
 		}
+	}
+
+	/**
+	 * WooCommerce solo dispara woocommerce_thankyou cuando muestra el pedido (plantilla clásica y bloque
+	 * de confirmación), después de su propia verificación.
+	 *
+	 * @param mixed $orderId Pedido.
+	 */
+	public function orderShown( mixed $orderId ): void {
+		$this->shown = is_numeric( $orderId ) ? (int) $orderId : 0;
 	}
 
 	public function printData(): void {
@@ -98,7 +114,7 @@ final class ZarazBridge {
 			}
 		} elseif ( is_order_received_page() ) {
 			$order = self::receivedOrder();
-			if ( null !== $order ) {
+			if ( null !== $order && $order->get_id() === $this->shown ) {
 				$data['events'][] = [ 'Order Completed', self::order( $order ) ];
 			}
 		} elseif ( is_cart() || is_checkout() ) {

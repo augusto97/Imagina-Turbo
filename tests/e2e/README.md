@@ -18,7 +18,7 @@ Procedimiento con el que se validaron las fases 0, 1 y 2a (WordPress 7.1.3, WooC
 | Coordinación | Activar LiteSpeed Cache | Aparece en "Coordinados", sin conflictos |
 | Kill switch | `POST /safety/kill-switch` | Archivo `disable`; el frontend no carga config; el admin sigue funcionando |
 | Cookie de bypass | `POST /safety/bypass-cookie` | Solo el navegador con la cookie ve el sitio sin el plugin; una cookie falsificada se ignora |
-| Modo seguro | 3 fatales en un archivo del plugin (`?itb_probe_fatal=1` con `zz-test-fatal.php` dentro del plugin) | `safe-mode.flag` al tercer fatal; evento y correo en el siguiente request de admin; fatales de **otros** plugins no cuentan |
+| Modo seguro | 3 fatales en un archivo del plugin (`?itb_probe_fatal=1` con `zz-test-fatal.php` dentro del plugin) | `safe-mode.php` al tercer fatal (con la guarda: pedido por URL responde vacío o 403); evento y correo en el siguiente request de admin; fatales de **otros** plugins no cuentan |
 | Licencia | Inyectar la protección con el generador real de imagina-updater | Sin licencia el plugin no arranca y el loader se desarma solo; con licencia arranca y el panel la muestra |
 | Desactivar | Admin → Desactivar | Sin loader, sin config y sin directorio de datos (se respeta un `disable` puesto a mano) |
 | Loader huérfano | Borrar la carpeta del plugin por FTP | El sitio y el admin siguen respondiendo 200, sin errores |
@@ -99,7 +99,7 @@ Plugins de prueba en el sitio (solo pruebas): uno pesado (6 MB y 15 ms), uno que
 2. Una regla que quita el plugin del fragmento falla. Una que quita el pesado y el de reescritura pasa en un paso.
 3. `POST /?wc-ajax=get_refreshed_fragments` 30 veces: `active_plugins` intacta y ordenada; `X-ITB-Test-Heavy-Active: no`.
 4. Con `&itb_flush=1`: la ruta `^itb-test-route/?$` sigue en `rewrite_rules`.
-5. Con `&itb_fatal=1`: 500, línea en `filter-faults.log`; al abrir el admin, la regla queda desactivada.
+5. Con `&itb_fatal=1` (llama a una función del pesado: `Call to undefined function`): 500, línea en `filter-faults.php`; al abrir el admin, la regla queda desactivada. Un fatal de otro tipo (memoria, tiempo) no cuenta (0.21.2).
 6. Imagina Search: copiar `woo-smart-search` del repositorio, activarlo y probar el candidato `Rest:wss/v1`.
 
 Las contrapruebas (sin la protección de escritura o de `rewrite_rules`) se hacen comentando el `add_filter` correspondiente en la copia del sitio y esperando a que OPcache revalide (unos segundos).

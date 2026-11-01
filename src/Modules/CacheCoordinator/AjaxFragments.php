@@ -43,6 +43,12 @@ final class AjaxFragments {
 		'woodmart' => [ 'woodmart_load_html_dropdowns', 'woodmart_get_products_shortcode', 'woodmart_get_products_tab_shortcode' ],
 	];
 
+	/**
+	 * Copias nuevas por hora en el grupo, entre menús y AJAX (0.21.2): sin tope, un bucle anónimo con
+	 * parámetros al azar llenaba la caché de objetos.
+	 */
+	public const STORES_PER_HOUR = 500;
+
 	private static string $key = '';
 
 	/**
@@ -86,6 +92,10 @@ final class AjaxFragments {
 				return null;
 			}
 		}
+		// Un invitado con carrito o sesión de WooCommerce puede recibir otra cosa (0.21.2).
+		if ( self::hasCartCookie( $cookies ) ) {
+			return null;
+		}
 		unset( $request['action'] );
 		$params = self::normalize( $request );
 		$json   = json_encode( $params ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- etapa temprana.
@@ -104,6 +114,30 @@ final class AjaxFragments {
 			wp_cache_set( 'gen', $gen, self::GROUP );
 		}
 		return 'a' . md5( $action . '|' . $json . '|' . json_encode( $variant ) . '|' . $gen ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- idem.
+	}
+
+	/**
+	 * Cookies de carrito o de sesión de WooCommerce.
+	 *
+	 * @param array<mixed> $cookies $_COOKIE.
+	 */
+	public static function hasCartCookie( array $cookies ): bool {
+		foreach ( array_keys( $cookies ) as $name ) {
+			if ( is_string( $name ) && ( str_starts_with( $name, 'woocommerce_items_in_cart' ) || str_starts_with( $name, 'woocommerce_cart_hash' ) || str_starts_with( $name, 'wp_woocommerce_session_' ) ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Cupo de copias nuevas de esta hora (compartido con la caché de menús).
+	 */
+	public static function storeBudget(): bool {
+		$slot = 'stores' . intdiv( time(), 3600 );
+		wp_cache_add( $slot, 0, self::GROUP, 7200 );
+		$count = wp_cache_incr( $slot, 1, self::GROUP );
+		return ! is_int( $count ) || $count <= self::STORES_PER_HOUR;
 	}
 
 	/**
@@ -156,7 +190,7 @@ final class AjaxFragments {
 				$type = trim( substr( $header, 13 ) );
 			}
 		}
-		if ( ! str_contains( strtolower( $type ), 'json' ) || ! is_array( json_decode( $body, true ) ) || 1 === preg_match( '/nonce/i', $body ) ) {
+		if ( ! str_contains( strtolower( $type ), 'json' ) || ! is_array( json_decode( $body, true ) ) || 1 === preg_match( '/nonce/i', $body ) || ! self::storeBudget() ) {
 			return;
 		}
 		wp_cache_set(

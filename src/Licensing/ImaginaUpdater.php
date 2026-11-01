@@ -78,6 +78,18 @@ final class ImaginaUpdater {
 	}
 
 	/**
+	 * Servidor de licencias al que ya va la clave: el que guarda el código inyectado o el del cliente de
+	 * Imagina Updater (mismo orden que la protección). Vacío si no se sabe.
+	 */
+	public function serverHost(): string {
+		$custom = get_option( 'ilp_server_' . self::uid(), '' );
+		$config = get_option( 'imagina_updater_client_config', [] );
+		$url    = is_string( $custom ) && '' !== $custom ? $custom : ( is_array( $config ) && is_string( $config['server_url'] ?? null ) ? $config['server_url'] : '' );
+		$host   = '' !== $url ? wp_parse_url( $url, PHP_URL_HOST ) : null;
+		return is_string( $host ) ? strtolower( $host ) : '';
+	}
+
+	/**
 	 * Pantalla donde se activa la licencia: el panel central del cliente si existe, si no la propia.
 	 */
 	public function licensePageUrl(): string {

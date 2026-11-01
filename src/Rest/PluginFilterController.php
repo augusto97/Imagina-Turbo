@@ -101,7 +101,7 @@ final class PluginFilterController extends Controller {
 				'active' => null !== ImaginaSearch::plugin( $active ),
 				'key'    => 'Rest:' . ImaginaSearch::REST_NAMESPACE,
 			],
-			'faults_pending' => is_file( Runtime::$dataDir . '/' . EarlyLoader::FILTER_FAULTS ),
+			'faults_pending' => is_file( Runtime::$dataDir . '/' . EarlyLoader::FILTER_FAULTS ) || is_file( Runtime::$dataDir . '/' . EarlyLoader::FILTER_FAULTS_LEGACY ),
 			'required_pairs' => RulePolicy::REQUIRED_PAIRS,
 		];
 	}
@@ -133,8 +133,12 @@ final class PluginFilterController extends Controller {
 		$active    = $this->container->get( Detector::class )->activePlugins();
 		$self      = plugin_basename( Runtime::$pluginDir . '/imagina-turbo.php' );
 		$protected = RulePolicy::protectedPlugins( $key, $active, $self );
-		$plugins   = array_values( array_unique( array_filter( (array) $request->get_param( 'plugins' ), 'is_string' ) ) );
-		$invalid   = array_values( array_merge( array_diff( $plugins, $active ), array_intersect( $plugins, $protected ) ) );
+		// Multisitio (0.21.2): el admin de un sitio no puede quitar plugins activados en toda la red.
+		if ( is_multisite() && ! is_super_admin() ) {
+			$protected = array_values( array_unique( array_merge( $protected, array_keys( (array) get_site_option( 'active_sitewide_plugins', [] ) ) ) ) );
+		}
+		$plugins = array_values( array_unique( array_filter( (array) $request->get_param( 'plugins' ), 'is_string' ) ) );
+		$invalid = array_values( array_merge( array_diff( $plugins, $active ), array_intersect( $plugins, $protected ) ) );
 		if ( [] === $plugins || [] !== $invalid ) {
 			return $this->error( 'itb_filter_plugins', [] === $plugins ? __( 'Elige al menos un plugin.', 'imagina-turbo' ) : __( 'Estos plugins no están activos o no se pueden quitar en este endpoint: ', 'imagina-turbo' ) . implode( ', ', $invalid ), 400 );
 		}

@@ -93,6 +93,9 @@ final class Installer {
 			$this->events->info( 'firewall', 'htaccess_removed', __( 'Reglas del firewall quitadas del .htaccess al desactivar el plugin. En OpenLiteSpeed, reinicia el servidor para que se apliquen.', 'imagina-turbo' ) );
 		}
 
+		// Los accesos de Claude no sobreviven a la desactivación (0.22.1).
+		( new \ImaginaTurbo\Modules\Connector\TokenStore() )->revokeAll();
+
 		foreach ( [ SafeMode::FLAG, SafeMode::COUNTER, ...SafeMode::LEGACY ] as $name ) {
 			$file = $this->dataDir . '/' . $name;
 			if ( is_file( $file ) ) {

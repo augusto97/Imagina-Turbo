@@ -45,11 +45,24 @@ final class Connector {
 	public const REFRESH_TTL = 30 * DAY_IN_SECONDS;
 	public const CODE_TTL    = 600;
 
+	/** Vida máxima de un acceso: después hay que volver a dar permiso, aunque se use a diario. */
+	public const MAX_GRANT_AGE = 90 * DAY_IN_SECONDS;
+
 	/** Accesos activos como máximo (cada conexión desde Claude es uno). */
 	public const MAX_CONNECTIONS = 20;
 
 	/** Dominios desde los que se aceptan documentos de cliente (CIMD). */
 	public const TRUSTED_CLIENT_HOSTS = [ 'claude.ai', 'claude.com' ];
+
+	/**
+	 * Únicas direcciones de vuelta HTTPS aceptadas (0.22.1): las de las apps de Claude. Aunque alguien
+	 * consiguiera publicar un JSON en esos dominios, el código de autorización nunca saldría hacia un
+	 * tercero. Las demás solo pueden ser de loopback (Claude Code en el computador del usuario).
+	 */
+	public const TRUSTED_REDIRECTS = [ 'https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback' ];
+
+	/** Conectar exige haber iniciado sesión hace menos de esto (una cookie robada y vieja no basta). */
+	public const RECENT_LOGIN = 2 * HOUR_IN_SECONDS;
 
 	/** Rango de salida de Anthropic hacia los servidores MCP (documentación de conectores). */
 	public const ANTHROPIC_EGRESS = '160.79.104.0/21';
@@ -86,10 +99,62 @@ final class Connector {
 	}
 
 	/**
-	 * HTTP sin cifrar solo para pruebas locales (constante en wp-config.php).
+	 * HTTP sin cifrar solo para pruebas locales: la constante en wp-config.php y, además, un sitio en
+	 * una dirección local. Olvidarla puesta en producción no deja el conector sin cifrar.
 	 */
 	public static function allowHttp(): bool {
-		return defined( 'ITB_CONNECTOR_ALLOW_HTTP' ) && true === ITB_CONNECTOR_ALLOW_HTTP;
+		if ( ! defined( 'ITB_CONNECTOR_ALLOW_HTTP' ) || true !== ITB_CONNECTOR_ALLOW_HTTP ) {
+			return false;
+		}
+		$host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		return in_array( $host, [ 'localhost', '127.0.0.1', '::1', '[::1]' ], true ) || 1 === preg_match( '/\.(localhost|local|test)$/', $host );
+	}
+
+	/**
+	 * Límite de uso por clave y ventana. Con caché de objetos persistente, un contador atómico en
+	 * memoria; sin ella, un transient de clave fija por cada clave (no uno por minuto: las filas no
+	 * crecen con el tiempo).
+	 */
+	public static function budget( string $key, int $max, int $window ): bool {
+		$slot = intdiv( time(), $window );
+		$name = 'itb_cn_' . md5( $key );
+		if ( wp_using_ext_object_cache() ) {
+			$k = $name . '_' . $slot;
+			wp_cache_add( $k, 0, 'itb_connector', $window * 2 );
+			$count = wp_cache_incr( $k, 1, 'itb_connector' );
+			return is_int( $count ) && $count <= $max;
+		}
+		$data  = get_transient( $name );
+		$count = is_array( $data ) && ( $data[0] ?? null ) === $slot ? (int) ( $data[1] ?? 0 ) : 0;
+		if ( $count >= $max ) {
+			return false;
+		}
+		set_transient( $name, [ $slot, $count + 1 ], $window * 2 );
+		return true;
+	}
+
+	/**
+	 * IP para los límites: en IPv6, el prefijo /64 (rotar direcciones dentro de una red no da más cupo).
+	 */
+	public static function ipKey( string $ip ): string {
+		if ( str_contains( $ip, ':' ) ) {
+			$bin = inet_pton( $ip );
+			return false === $bin ? $ip : bin2hex( substr( $bin, 0, 8 ) ) . '::/64';
+		}
+		return $ip;
+	}
+
+	/**
+	 * El request llegó por HTTPS (también detrás de un proxy o de Cloudflare), o es un sitio local
+	 * en modo de pruebas.
+	 */
+	public static function secureRequest(): bool {
+		if ( is_ssl() || self::allowHttp() ) {
+			return true;
+		}
+		$proto = isset( $_SERVER['HTTP_X_FORWARDED_PROTO'] ) ? strtolower( sanitize_text_field( wp_unslash( $_SERVER['HTTP_X_FORWARDED_PROTO'] ) ) ) : '';
+		$cf    = isset( $_SERVER['HTTP_CF_VISITOR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_VISITOR'] ) ) : '';
+		return 'https' === $proto || str_contains( $cf, '"https"' );
 	}
 
 	/**

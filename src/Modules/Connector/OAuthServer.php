@@ -77,9 +77,33 @@ final class OAuthServer {
 		Connector::noStore();
 		if ( ! headers_sent() ) {
 			header( 'X-Frame-Options: DENY' );
-			header( "Content-Security-Policy: frame-ancestors 'none'" );
+			// Página sin recursos externos ni scripts: nada que inyectar, nada que enmarcar.
+			header( "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'" );
+			header( 'Referrer-Policy: no-referrer' );
+		}
+		if ( ! Connector::budget( 'authorize|' . RumCollector::clientIp( $_SERVER ), 30, 60 ) ) {
+			self::page( __( 'Demasiados intentos', 'imagina-turbo' ), '<p>' . esc_html__( 'Espera un minuto y vuelve a intentarlo.', 'imagina-turbo' ) . '</p>', 429 );
 		}
 		$p = self::params( $_GET ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- parámetros de OAuth; el POST verifica su nonce.
+
+		$problems = Connector::problems();
+		if ( [] !== $problems ) {
+			self::page( __( 'El conector no está listo', 'imagina-turbo' ), '<p>' . implode( '</p><p>', array_map( 'esc_html', $problems ) ) . '</p>', 503 );
+		}
+		// Primero la sesión: un visitante anónimo no hace que el sitio pida documentos a ningún lado.
+		if ( ! is_user_logged_in() ) {
+			wp_safe_redirect( wp_login_url( self::selfUrl( $p ) ) );
+			exit;
+		}
+		$user = get_current_user_id();
+		if ( ! Connector::userCan( $user ) ) {
+			self::page( __( 'Sin permiso', 'imagina-turbo' ), '<p>' . esc_html__( 'Tu usuario no administra Imagina Turbo en este sitio. Entra con una cuenta de administrador.', 'imagina-turbo' ) . '</p>', 403 );
+		}
+		// Una sesión vieja (o una cookie robada) no basta: hay que haber entrado hace poco.
+		if ( ! self::recentLogin( $user ) ) {
+			wp_safe_redirect( wp_login_url( self::selfUrl( $p ), true ) );
+			exit;
+		}
 
 		// Antes de redirigir nada: el cliente y su dirección de vuelta.
 		$client = ClientMetadata::load( $p['client_id'] );
@@ -99,18 +123,6 @@ final class OAuthServer {
 		if ( '' !== $p['resource'] && Connector::canonical( $p['resource'] ) !== Connector::canonical( Connector::resource() ) ) {
 			self::back( $back, $p['state'], 'invalid_target', 'El recurso no es el conector de este sitio.' );
 		}
-		$problems = Connector::problems();
-		if ( [] !== $problems ) {
-			self::page( __( 'El conector no está listo', 'imagina-turbo' ), '<p>' . implode( '</p><p>', array_map( 'esc_html', $problems ) ) . '</p>', 503 );
-		}
-		if ( ! is_user_logged_in() ) {
-			wp_safe_redirect( wp_login_url( self::selfUrl( $p ) ) );
-			exit;
-		}
-		$user = get_current_user_id();
-		if ( ! Connector::userCan( $user ) ) {
-			self::page( __( 'Sin permiso', 'imagina-turbo' ), '<p>' . esc_html__( 'Tu usuario no administra Imagina Turbo en este sitio. Entra con una cuenta de administrador.', 'imagina-turbo' ) . '</p>', 403 );
-		}
 
 		$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_key( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : 'GET';
 		if ( 'POST' !== $method ) {
@@ -121,8 +133,9 @@ final class OAuthServer {
 			$this->events->info( 'connector', 'denied', __( 'Conexión de Claude rechazada en el consentimiento.', 'imagina-turbo' ), [ 'user' => $user ] );
 			self::back( $back, $p['state'], 'access_denied', 'El usuario no dio acceso.' );
 		}
+		// Solo ajusta quien lo elige explícitamente y si Claude lo pidió: lo demás, solo lectura.
 		$level = isset( $_POST['level'] ) ? sanitize_key( wp_unslash( $_POST['level'] ) ) : '';
-		$scope = 'read' === $level ? Connector::SCOPE_READ : Connector::SCOPE_READ . ' ' . Connector::SCOPE_ADJUST;
+		$scope = 'adjust' === $level && self::adjustRequested( $p['scope'] ) ? Connector::SCOPE_READ . ' ' . Connector::SCOPE_ADJUST : Connector::SCOPE_READ;
 		$code  = Connector::secret( 'itbac_' );
 		set_transient(
 			self::CODE_PREFIX . Connector::hash( $code ),
@@ -160,6 +173,15 @@ final class OAuthServer {
 	 */
 	public function token(): void {
 		Connector::noStore();
+		if ( ! Connector::secureRequest() ) {
+			self::json(
+				400,
+				[
+					'error'             => 'invalid_request',
+					'error_description' => 'Solo por HTTPS.',
+				]
+			);
+		}
 		$ip = RumCollector::clientIp( $_SERVER );
 		if ( ! self::allow( 'tok', $ip, 30 ) ) {
 			self::json(
@@ -191,8 +213,14 @@ final class OAuthServer {
 		if ( 'authorization_code' === $grant ) {
 			$key  = self::CODE_PREFIX . Connector::hash( $code );
 			$data = '' !== $code ? get_transient( $key ) : false;
-			// Un solo uso: solo gana quien lo borra.
+			// Un solo uso: solo gana quien lo borra. Un código ya canjeado que vuelve a aparecer revoca el
+			// acceso que se emitió con él (alguien lo interceptó).
 			if ( ! is_array( $data ) || ! delete_transient( $key ) ) {
+				$used = '' !== $code ? get_transient( self::CODE_PREFIX . 'u_' . Connector::hash( $code ) ) : false;
+				// El transient vuelve de la base de datos como texto.
+				if ( is_numeric( $used ) && (int) $used > 0 ) {
+					$this->tokens->revoke( (int) $used );
+				}
 				self::json(
 					400,
 					[
@@ -240,6 +268,7 @@ final class OAuthServer {
 					]
 				);
 			}
+			set_transient( self::CODE_PREFIX . 'u_' . Connector::hash( $code ), $issued['id'], Connector::CODE_TTL );
 			$this->events->warning(
 				'connector',
 				'connected',
@@ -282,6 +311,9 @@ final class OAuthServer {
 	 */
 	public function revoke(): void {
 		Connector::noStore();
+		if ( ! Connector::secureRequest() ) {
+			self::json( 400, [ 'error' => 'invalid_request' ] );
+		}
 		$token = isset( $_POST['token'] ) && is_string( $_POST['token'] ) ? sanitize_text_field( wp_unslash( $_POST['token'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- RFC 7009: el token es la credencial.
 		if ( '' !== $token && self::allow( 'rev', RumCollector::clientIp( $_SERVER ), 30 ) ) {
 			$this->tokens->revokeToken( $token );
@@ -304,13 +336,27 @@ final class OAuthServer {
 	 * Límite por IP y minuto (transient; con caché de objetos, en memoria).
 	 */
 	public static function allow( string $kind, string $ip, int $max ): bool {
-		$key   = 'itb_cn_' . $kind . '_' . md5( $ip ) . '_' . intdiv( time(), 60 );
-		$count = (int) get_transient( $key );
-		if ( $count >= $max ) {
+		return Connector::budget( $kind . '|' . Connector::ipKey( $ip ), $max, 60 );
+	}
+
+	/**
+	 * Claude pidió poder ajustar (o no dijo qué: entonces el dueño elige).
+	 */
+	public static function adjustRequested( string $scope ): bool {
+		return '' === trim( $scope ) || in_array( Connector::SCOPE_ADJUST, Connector::scopes( $scope ), true );
+	}
+
+	/**
+	 * La sesión actual se abrió hace poco (WP_Session_Tokens guarda el momento del login).
+	 */
+	private static function recentLogin( int $user ): bool {
+		$token = wp_get_session_token();
+		if ( '' === $token ) {
 			return false;
 		}
-		set_transient( $key, $count + 1, 120 );
-		return true;
+		$session = \WP_Session_Tokens::get_instance( $user )->get( $token );
+		$login   = is_array( $session ) && is_int( $session['login'] ?? null ) ? $session['login'] : 0;
+		return $login > time() - Connector::RECENT_LOGIN;
 	}
 
 	/**
@@ -352,11 +398,11 @@ final class OAuthServer {
 	 * @param array{client_id: string, client_name: string, redirect_uris: list<string>, host: string}                                                                                         $client Cliente.
 	 */
 	private function consent( array $p, array $client ): never {
-		$site     = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
-		$user     = wp_get_current_user();
-		$adjust   = in_array( Connector::SCOPE_ADJUST, Connector::scopes( $p['scope'] ), true ) || '' === $p['scope'];
-		$backHost = (string) wp_parse_url( $p['redirect_uri'], PHP_URL_HOST );
-		$loopback = ClientMetadata::isLoopback( $p['redirect_uri'] );
+		$site      = wp_specialchars_decode( (string) get_bloginfo( 'name' ), ENT_QUOTES );
+		$user      = wp_get_current_user();
+		$canAdjust = self::adjustRequested( $p['scope'] );
+		$backHost  = (string) wp_parse_url( $p['redirect_uri'], PHP_URL_HOST );
+		$loopback  = ClientMetadata::isLoopback( $p['redirect_uri'] );
 		ob_start();
 		?>
 		<p class="lead">
@@ -377,14 +423,16 @@ final class OAuthServer {
 		<form method="post" action="<?php echo esc_url( self::selfUrl( $p ) ); ?>">
 			<?php wp_nonce_field( self::NONCE_ACTION ); ?>
 			<fieldset>
-				<label class="opt"><input type="radio" name="level" value="adjust" <?php checked( $adjust ); ?>>
-					<span><strong><?php esc_html_e( 'Diagnosticar y ajustar', 'imagina-turbo' ); ?></strong>
-					<?php esc_html_e( 'Lee el estado del sitio y cambia los ajustes de Imagina Turbo: lo seguro directamente y lo de riesgo moderado con una prueba de las páginas clave y vuelta atrás automática si algo falla. Todo queda en el registro y se puede deshacer.', 'imagina-turbo' ); ?></span>
-				</label>
-				<label class="opt"><input type="radio" name="level" value="read" <?php checked( ! $adjust ); ?>>
+				<label class="opt"><input type="radio" name="level" value="read" checked>
 					<span><strong><?php esc_html_e( 'Solo diagnosticar', 'imagina-turbo' ); ?></strong>
 					<?php esc_html_e( 'Lee el estado y las métricas y explica qué hacer, sin cambiar nada.', 'imagina-turbo' ); ?></span>
 				</label>
+				<?php if ( $canAdjust ) : ?>
+				<label class="opt"><input type="radio" name="level" value="adjust">
+					<span><strong><?php esc_html_e( 'Diagnosticar y ajustar', 'imagina-turbo' ); ?></strong>
+					<?php esc_html_e( 'Además cambia ajustes de rendimiento de Imagina Turbo: lo seguro directamente y lo de riesgo moderado con una prueba de las páginas clave y vuelta atrás automática si algo falla. Todo queda en el registro y se puede deshacer.', 'imagina-turbo' ); ?></span>
+				</label>
+				<?php endif; ?>
 			</fieldset>
 			<p class="muted"><?php esc_html_e( 'Nunca puede tocar el token de Cloudflare, DNS, archivos, usuarios, pedidos ni otros plugins, ni apagar las protecciones del sitio. Puedes cortar el acceso cuando quieras en Imagina Turbo → Avanzado.', 'imagina-turbo' ); ?></p>
 			<div class="actions">
@@ -481,6 +529,9 @@ final class OAuthServer {
 	.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 	button{font:inherit;border-radius:8px;padding:9px 16px;cursor:pointer;border:1px solid #d6d3d1;background:#fff}
 	button.primary{background:#1c1917;color:#fff;border-color:#1c1917}
+	/* Contra el doble clic engañoso: Permitir no responde durante el primer segundo. */
+	button.primary{animation:itb-arm 1s linear forwards}
+	@keyframes itb-arm{0%,99%{pointer-events:none;opacity:.45}100%{pointer-events:auto;opacity:1}}
 </style>
 </head>
 <body><main><div class="card"><h1><?php echo esc_html( $title ); ?></h1><?php echo $body; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado al construirlo. ?></div></main></body>

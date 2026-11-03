@@ -46,6 +46,7 @@ final class ConnectorTest extends TestCase {
 		Functions\when( 'wp_unslash' )->returnArg();
 		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 		Functions\when( 'get_bloginfo' )->justReturn( 'Tienda' );
+		Functions\when( 'wp_using_ext_object_cache' )->justReturn( false );
 		Functions\when( 'wp_specialchars_decode' )->returnArg();
 		Functions\when( 'get_transient' )->alias( fn( string $k ) => $this->transients[ $k ] ?? false );
 		Functions\when( 'set_transient' )->alias(
@@ -251,11 +252,13 @@ final class ConnectorTest extends TestCase {
 		$this->assertIsString( ChangeSet::validSteps( [ [ 'module' => 'plugin_filter', 'enabled' => true ] ] ), 'lo invasivo, en el admin' );
 		$this->assertIsString( ChangeSet::validSteps( [ [ 'area' => 'shield', 'changes' => [ 'xmlrpc' => false ] ] ] ) );
 		$this->assertIsString( ChangeSet::validSteps( [ [ 'area' => 'navigation', 'changes' => [] ] ] ) );
+		$this->assertIsString( ChangeSet::validSteps( [ [ 'area' => 'navigation', 'changes' => [ 'confirm' => true, 'spec_mode' => 'prerender' ] ] ] ), 'el confirm solo lo pone el lote' );
 		$this->assertSame(
 			[
 				[
 					'area'    => 'navigation',
-					'changes' => [ 'spec_eagerness' => 'moderate' ],
+					'changes' => [ 'spec_mode' => 'prerender' ],
+					'keys'    => [ 'spec_mode' ],
 				],
 				[
 					'module'  => 'cache_coordinator',
@@ -266,10 +269,7 @@ final class ConnectorTest extends TestCase {
 				[
 					[
 						'area'    => 'navigation',
-						'changes' => [
-							'spec_eagerness' => 'moderate',
-							'confirm'        => true,
-						],
+						'changes' => [ 'spec_mode' => 'prerender' ],
 					],
 					[
 						'module'  => 'cache_coordinator',
@@ -302,6 +302,146 @@ final class ConnectorTest extends TestCase {
 		$this->assertFalse( ChangeSet::fatal( '<p>Error al cargar el carrito</p>' ) );
 		$this->assertIsString( ChangeSet::measure( 'https://otro.example/', false ), 'solo rutas del sitio' );
 		$this->assertIsString( ChangeSet::measure( '//otro.example/', false ) );
+	}
+
+	public function test_undo_touches_only_what_the_change_set_changed(): void {
+		$before = [
+			'spec_eagerness' => 'conservative',
+			'shield_facets'  => false,
+			'modules'        => [
+				'rum'       => true,
+				'firewall'  => false,
+				'turnstile' => false,
+			],
+			'tweaks'         => [ 'emojis' => true ],
+		];
+		$after  = $before;
+
+		$after['spec_eagerness']   = 'moderate';
+		$after['modules']['rum']   = false;
+		$after['tweaks']['embeds'] = true;
+		$undo                      = ChangeSet::undo( $before, $after );
+		$this->assertSame( [ 'spec_eagerness', 'modules', 'tweaks' ], array_keys( $undo ) );
+		$this->assertSame( [ 'rum' ], array_keys( $undo['modules']['map'] ), 'solo la entrada que cambió' );
+
+		// Después, el dueño activa el firewall y Turnstile y cambia la anticipación: deshacer no lo pisa.
+		$current                         = $after;
+		$current['modules']['firewall']  = true;
+		$current['modules']['turnstile'] = true;
+		$current['shield_facets']        = true;
+		$current['spec_eagerness']       = 'eager';
+		$changes                         = ChangeSet::restoration( $undo, $current );
+		$this->assertArrayNotHasKey( 'spec_eagerness', $changes, 'el dueño lo cambió después: se respeta' );
+		$this->assertArrayNotHasKey( 'shield_facets', $changes );
+		$this->assertSame(
+			[
+				'rum'       => true,
+				'firewall'  => true,
+				'turnstile' => true,
+			],
+			$changes['modules']
+		);
+		$this->assertSame( [ 'emojis' => true ], $changes['tweaks'], 'la entrada que añadió el lote se quita' );
+
+		// Deshacer en el mismo momento devuelve exactamente lo de antes.
+		$this->assertSame( 'conservative', ChangeSet::restoration( $undo, $after )['spec_eagerness'] ?? null );
+	}
+
+	public function test_closed_list_of_settings(): void {
+		// Lo seguro pasa por update_settings; lo moderado, solo en un lote.
+		$this->assertSame( [ 'params' => [ 'hints_lcp' => true ], 'keys' => [ 'hints_lcp' ] ], Tools::validate( 'navigation', [ 'hints_lcp' => true ], false ) );
+		$this->assertStringContainsString( 'apply_change_set', (string) Tools::validate( 'navigation', [ 'spec_mode' => 'prerender' ], false ) );
+		$this->assertIsArray( Tools::validate( 'navigation', [ 'spec_mode' => 'prerender' ], true ) );
+		// Fuera de la lista: lo que borra contenido, rompe el pago, purga todo o escribe archivos.
+		foreach ( [
+			[ 'scripts', [ 'script_delay' => [ 'stripe' ] ] ],
+			[ 'database', [ 'db_keep_revisions' => 1 ] ],
+			[ 'tweaks', [ 'revisions' => 1 ] ],
+			[ 'tweaks', [ 'tweaks' => [ 'revisions' => true ] ] ],
+			[ 'tweaks', [ 'tweaks' => [ 'comments' => true ] ] ],
+			[ 'tweaks', [ 'tweaks' => [ 'feeds' => true ] ] ],
+			[ 'tweaks', [ 'tweaks' => [ 'jquery_migrate' => true ] ] ],
+			[ 'cache', [ 'mode' => 'headers' ] ],
+			[ 'cache', [ 'edge_variants' => true ] ],
+			[ 'navigation', [ 'lazy_documents' => [] ] ],
+			[ 'navigation', [ 'spec_eagerness' => 'eager' ] ],
+			[ 'navigation', [ 'rum_rate' => 1 ] ],
+			[ 'profiler', [ 'sample_rate' => 1 ] ],
+			[ 'navigation', [] ],
+			[ 'navigation', [ 'hints_lcp' => 'true' ] ],
+		] as [ $area, $changes ] ) {
+			$this->assertIsString( Tools::validate( $area, $changes, true ), $area . ' ' . wp_json_encode( $changes ) );
+		}
+		$this->assertArrayNotHasKey( 'scripts', Tools::WRITE_AREAS );
+		$this->assertArrayNotHasKey( 'database', Tools::WRITE_AREAS );
+		$this->assertSame( [ 'profiler', 'tweaks', 'speculation', 'rum', 'frontend_hints', 'cache_coordinator' ], Tools::CHANGE_SET_MODULES );
+
+		// Para deshacer un lote que muere a mitad: los valores de antes de lo que toca.
+		$this->assertSame(
+			[
+				'spec_mode' => 'prefetch',
+				'modules'   => [ 'cache_coordinator' => false ],
+			],
+			ChangeSet::touched(
+				[
+					'spec_mode' => 'prefetch',
+					'hints_lcp' => true,
+					'modules'   => [ 'cache_coordinator' => false ],
+				],
+				[
+					[ 'keys' => [ 'spec_mode' ] ],
+					[
+						'module'  => 'cache_coordinator',
+						'enabled' => true,
+					],
+				]
+			)
+		);
+	}
+
+	public function test_oauth_hardening(): void {
+		// Solo las direcciones de vuelta de Claude, aunque el documento declare otras.
+		$client = ClientMetadata::parse(
+			'https://claude.ai/oauth/x',
+			[
+				'client_id'     => 'https://claude.ai/oauth/x',
+				'redirect_uris' => [ 'https://claude.ai/api/mcp/auth_callback', 'https://evil.tld/cb', 'https://claude.ai/otra', 'http://localhost:8080/callback', 'http://user@localhost/callback' ],
+			]
+		);
+		$this->assertIsArray( $client );
+		$this->assertSame( [ 'https://claude.ai/api/mcp/auth_callback' ], $client['redirect_uris'] );
+		$this->assertFalse( ClientMetadata::validClientId( 'https://claude.ai:8443/oauth/x' ), 'sin puerto' );
+		$this->assertTrue( OAuthServer::adjustRequested( 'itb.read itb.adjust' ) );
+		$this->assertTrue( OAuthServer::adjustRequested( '' ) );
+		$this->assertFalse( OAuthServer::adjustRequested( 'itb.read' ), 'el alcance pedido es el techo' );
+		$this->assertSame( '2001:0db8:0001:0002::/64', Connector::ipKey( '2001:db8:1:2:aaaa:bbbb:cccc:dddd' ) === Connector::ipKey( '2001:db8:1:2::1' ) ? '2001:0db8:0001:0002::/64' : 'distinto' );
+		$this->assertSame( '203.0.113.9', Connector::ipKey( '203.0.113.9' ) );
+	}
+
+	public function test_rest_special_params_and_budget(): void {
+		$this->assertSame(
+			[ 'spec_mode' => 'prefetch' ],
+			Tools::changes(
+				[
+					'spec_mode' => 'prefetch',
+					'_method'   => 'DELETE',
+					'_fields'   => 'x',
+					'_envelope' => 1,
+					'context'   => 'edit',
+					'id'        => 'shield',
+				]
+			)
+		);
+		$many = [];
+		for ( $i = 0; $i < 50; $i++ ) {
+			$many[ 'key_' . chr( 97 + intdiv( $i, 26 ) ) . chr( 97 + $i % 26 ) ] = $i;
+		}
+		$this->assertCount( 30, Tools::changes( $many ) );
+
+		$this->assertTrue( Connector::budget( 'prueba', 2, 60 ) );
+		$this->assertTrue( Connector::budget( 'prueba', 2, 60 ) );
+		$this->assertFalse( Connector::budget( 'prueba', 2, 60 ) );
+		$this->assertTrue( Connector::budget( 'otra', 2, 60 ) );
 	}
 
 	private function server(): McpServer {

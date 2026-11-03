@@ -41,8 +41,20 @@ final class ChangeSet {
 
 	private const LOCK = 'itb_connector_lock';
 
+	/** Lotes (y deshacer) por hora: cada uno purga la caché entera. */
+	private const PER_HOUR = 6;
+
+	/** Claves de los ajustes que son mapas: se deshacen por entrada. */
+	private const MAPS = [ 'modules', 'tweaks' ];
+
 	/** Páginas que se miden en cada lote. */
-	private const PAGES = 8;
+	private const PAGES = 6;
+
+	/** Segundos como máximo desde que empieza el lote hasta terminar de medir. */
+	private const DEADLINE = 120;
+
+	/** Un lote pendiente más viejo que esto murió a mitad: se deshace. */
+	private const STALE = 360;
 
 	public const USER_AGENT = 'ImaginaTurbo-Connector/1.0';
 
@@ -71,20 +83,30 @@ final class ChangeSet {
 				'error'  => $steps,
 			];
 		}
-		if ( false !== get_transient( self::LOCK ) ) {
+		$this->recover();
+		if ( ! self::lock() ) {
 			return [
 				'result' => 'rejected',
 				'error'  => 'Hay otro lote en curso. Espera a que termine.',
 			];
 		}
-		set_transient( self::LOCK, time(), 180 );
-		if ( function_exists( 'set_time_limit' ) ) {
-			set_time_limit( 180 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- el lote mide páginas antes y después.
+		// Cada lote purga la caché entera: como mucho seis lotes (o deshacer) por hora.
+		if ( ! Connector::budget( 'changes', self::PER_HOUR, HOUR_IN_SECONDS ) ) {
+			self::unlock();
+			return [
+				'result' => 'rejected',
+				'error'  => 'Ya se aplicaron varios lotes en la última hora. Espera antes de seguir: cada lote purga la caché del sitio.',
+			];
 		}
+		if ( function_exists( 'set_time_limit' ) ) {
+			set_time_limit( 300 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- el lote mide páginas antes y después.
+		}
+		// Si Claude o Cloudflare cortan la conexión, el lote termina igual: se comprueba o se deshace.
+		ignore_user_abort( true );
 		try {
 			return $this->run( $summary, $steps, $grant );
 		} finally {
-			delete_transient( self::LOCK );
+			self::unlock();
 		}
 	}
 
@@ -95,9 +117,25 @@ final class ChangeSet {
 	 */
 	private function run( string $summary, array $steps, array $grant ): array {
 		$settings = $this->container->get( Settings::class );
-		$snapshot = $settings->all();
-		$pages    = self::pages();
-		$before   = [];
+		$snapshot = $settings->fresh();
+		$start    = microtime( true );
+		$id       = substr( bin2hex( random_bytes( 6 ) ), 0, 12 );
+		// Antes de tocar nada queda registrado como pendiente con los valores de antes: si el proceso
+		// muere a mitad, el siguiente lote, el historial o el admin lo deshacen (recover()).
+		$this->save(
+			[
+				'id'      => $id,
+				'at'      => time(),
+				'summary' => $summary,
+				'steps'   => $steps,
+				'result'  => 'pending',
+				'client'  => $grant['client_name'],
+				'user'    => get_current_user_id(),
+				'before'  => self::touched( $snapshot, $steps ),
+			]
+		);
+		$pages  = self::pages();
+		$before = [];
 		foreach ( $pages as $page ) {
 			$before[ $page['url'] ] = self::measure( $page['url'], true );
 		}
@@ -116,7 +154,7 @@ final class ChangeSet {
 				);
 			} else {
 				$route  = Tools::writeRoute( $step['area'] ?? '' ) ?? [ 'PUT', '/' ];
-				$result = Tools::rest( $route[0], $route[1], Tools::changes( $step['changes'] ?? [] ) + [ 'confirm' => true ] );
+				$result = Tools::rest( $route[0], $route[1], (array) ( $step['changes'] ?? [] ) + [ 'confirm' => true ] );
 			}
 			if ( ! $result['ok'] ) {
 				$data  = $result['data'];
@@ -130,6 +168,11 @@ final class ChangeSet {
 		$after   = [];
 		if ( '' === $error ) {
 			foreach ( $pages as $page ) {
+				// Plazo total: un cambio que hace que el sitio no responda no puede dejar el lote colgado.
+				if ( microtime( true ) - $start > self::DEADLINE ) {
+					$reasons[] = $page['label'] . ' (' . $page['url'] . '): el sitio tardó demasiado en responder';
+					break;
+				}
 				$now = self::measure( $page['url'], true );
 				$was = $before[ $page['url'] ];
 				$why = self::regression( $was, $now );
@@ -146,24 +189,25 @@ final class ChangeSet {
 			}
 		}
 
+		// Solo lo que este lote cambió, con el valor de antes y el de después.
+		$undo     = self::undo( $snapshot, $settings->fresh() );
 		$reverted = '' !== $error || [] !== $reasons;
 		if ( $reverted ) {
-			$this->restore( $snapshot );
+			$this->restore( $undo );
 		}
 		$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: lote de cambios' ) );
 
-		$id = substr( bin2hex( random_bytes( 6 ) ), 0, 12 );
-		$this->remember(
+		$this->save(
 			[
-				'id'       => $id,
-				'at'       => time(),
-				'summary'  => $summary,
-				'steps'    => $steps,
-				'result'   => $reverted ? 'reverted' : 'applied',
-				'reasons'  => '' !== $error ? [ $error ] : $reasons,
-				'client'   => $grant['client_name'],
-				'user'     => get_current_user_id(),
-				'snapshot' => $snapshot,
+				'id'      => $id,
+				'at'      => time(),
+				'summary' => $summary,
+				'steps'   => $steps,
+				'result'  => $reverted ? 'reverted' : 'applied',
+				'reasons' => '' !== $error ? [ $error ] : $reasons,
+				'client'  => $grant['client_name'],
+				'user'    => get_current_user_id(),
+				'undo'    => $undo,
 			]
 		);
 		$this->container->get( EventLog::class )->warning(
@@ -206,11 +250,15 @@ final class ChangeSet {
 	 * @param array{id: int, client_name: string, scope: string} $grant Acceso.
 	 */
 	public function revert( string $id, array $grant ): bool {
+		$this->recover();
 		$list = get_option( self::OPTION, [] );
 		$list = is_array( $list ) ? $list : [];
 		foreach ( $list as $i => $item ) {
-			if ( is_array( $item ) && ( $item['id'] ?? null ) === $id && is_array( $item['snapshot'] ?? null ) ) {
-				$this->restore( $item['snapshot'] );
+			if ( is_array( $item ) && ( $item['id'] ?? null ) === $id && 'applied' === ( $item['result'] ?? '' ) && is_array( $item['undo'] ?? null ) ) {
+				if ( ! Connector::budget( 'changes', self::PER_HOUR, HOUR_IN_SECONDS ) ) {
+					return false;
+				}
+				$this->restore( $item['undo'] );
 				$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: deshacer un lote' ) );
 				$list[ $i ]['result']    = 'undone';
 				$list[ $i ]['undone_at'] = time();
@@ -238,11 +286,12 @@ final class ChangeSet {
 	 * @return list<array<string, mixed>>
 	 */
 	public function history(): array {
+		$this->recover();
 		$list = get_option( self::OPTION, [] );
 		$out  = [];
 		foreach ( array_reverse( is_array( $list ) ? $list : [] ) as $item ) {
 			if ( is_array( $item ) ) {
-				unset( $item['snapshot'] );
+				unset( $item['undo'], $item['snapshot'], $item['before'] );
 				$out[] = $item;
 			}
 		}
@@ -253,7 +302,7 @@ final class ChangeSet {
 	 * Pasos válidos, o el motivo del rechazo.
 	 *
 	 * @param list<mixed> $steps Pasos.
-	 * @return list<array{area?: string, changes?: array<string, mixed>, module?: string, enabled?: bool}>|string
+	 * @return list<array{area?: string, changes?: array<string, mixed>, keys?: list<string>, module?: string, enabled?: bool}>|string
 	 */
 	public static function validSteps( array $steps ): array|string {
 		if ( [] === $steps || count( $steps ) > 5 ) {
@@ -274,12 +323,15 @@ final class ChangeSet {
 				];
 				continue;
 			}
-			if ( null === Tools::writeRoute( $step['area'] ?? null ) || [] === Tools::changes( $step['changes'] ?? null ) ) {
-				return sprintf( 'El paso %d necesita un área ajustable y sus cambios.', $i + 1 );
+			$area  = is_string( $step['area'] ?? null ) ? $step['area'] : '';
+			$valid = null === Tools::writeRoute( $area ) ? 'área no ajustable desde el conector.' : Tools::validate( $area, $step['changes'] ?? null, true );
+			if ( is_string( $valid ) ) {
+				return sprintf( 'El paso %d: %s', $i + 1, $valid );
 			}
 			$out[] = [
-				'area'    => (string) $step['area'],
-				'changes' => Tools::changes( $step['changes'] ),
+				'area'    => $area,
+				'changes' => $valid['params'],
+				'keys'    => $valid['keys'],
 			];
 		}
 		return $out;
@@ -335,7 +387,7 @@ final class ChangeSet {
 		$response = wp_remote_get(
 			$url,
 			[
-				'timeout'             => 20,
+				'timeout'             => 10,
 				'redirection'         => 0,
 				'user-agent'          => self::USER_AGENT,
 				'limit_response_size' => 4194304,
@@ -399,21 +451,191 @@ final class ChangeSet {
 	}
 
 	/**
-	 * @param array<string, mixed> $snapshot Ajustes completos.
+	 * Lo que cambió entre dos estados de los ajustes: por clave, [antes, después]. En los mapas
+	 * (módulos y ajustes rápidos) solo las entradas que cambiaron.
+	 *
+	 * @param array<string, mixed> $before Antes.
+	 * @param array<string, mixed> $after  Después.
+	 * @return array<string, mixed>
 	 */
-	private function restore( array $snapshot ): void {
-		$this->container->get( Settings::class )->update( $snapshot );
+	public static function undo( array $before, array $after ): array {
+		$out = [];
+		foreach ( array_unique( array_merge( array_keys( $before ), array_keys( $after ) ) ) as $key ) {
+			$was = $before[ $key ] ?? null;
+			$now = $after[ $key ] ?? null;
+			if ( $was === $now ) {
+				continue;
+			}
+			if ( in_array( $key, self::MAPS, true ) && ( is_array( $was ) || null === $was ) && ( is_array( $now ) || null === $now ) ) {
+				$entries = [];
+				foreach ( array_unique( array_merge( array_keys( (array) $was ), array_keys( (array) $now ) ) ) as $entry ) {
+					if ( ( $was[ $entry ] ?? null ) !== ( $now[ $entry ] ?? null ) ) {
+						$entries[ $entry ] = [ $was[ $entry ] ?? null, $now[ $entry ] ?? null ];
+					}
+				}
+				$out[ $key ] = [ 'map' => $entries ];
+				continue;
+			}
+			$out[ $key ] = [ 'value' => [ $was, $now ] ];
+		}
+		return $out;
+	}
+
+	/**
+	 * Cambios que deshacen un lote sobre los ajustes actuales. Una clave que alguien cambió después
+	 * (ya no tiene el valor que dejó el lote) no se toca: deshacer nunca pisa lo que hizo el dueño.
+	 *
+	 * @param array<string, mixed> $undo    Resultado de undo().
+	 * @param array<string, mixed> $current Ajustes actuales.
+	 * @return array<string, mixed>
+	 */
+	public static function restoration( array $undo, array $current ): array {
+		$changes = [];
+		foreach ( $undo as $key => $diff ) {
+			if ( ! is_string( $key ) || ! is_array( $diff ) ) {
+				continue;
+			}
+			if ( isset( $diff['map'] ) && is_array( $diff['map'] ) ) {
+				$map     = is_array( $current[ $key ] ?? null ) ? $current[ $key ] : [];
+				$touched = false;
+				foreach ( $diff['map'] as $entry => $pair ) {
+					if ( is_array( $pair ) && ( $map[ $entry ] ?? null ) === ( $pair[1] ?? null ) ) {
+						if ( null === ( $pair[0] ?? null ) ) {
+							unset( $map[ $entry ] );
+						} else {
+							$map[ $entry ] = $pair[0];
+						}
+						$touched = true;
+					}
+				}
+				if ( $touched ) {
+					$changes[ $key ] = $map;
+				}
+				continue;
+			}
+			$pair = $diff['value'] ?? null;
+			if ( is_array( $pair ) && ( $current[ $key ] ?? null ) === ( $pair[1] ?? null ) ) {
+				$changes[ $key ] = $pair[0] ?? null;
+			}
+		}
+		return $changes;
+	}
+
+	/**
+	 * @param array<string, mixed> $undo Resultado de undo().
+	 */
+	private function restore( array $undo ): void {
+		$settings = $this->container->get( Settings::class );
+		$changes  = self::restoration( $undo, $settings->all() );
+		if ( [] !== $changes ) {
+			$settings->update( $changes );
+		}
 		$this->container->get( ConfigCompiler::class )->compile();
 	}
 
 	/**
+	 * Guarda un lote (reemplaza el del mismo id).
+	 *
 	 * @param array<string, mixed> $entry Lote.
 	 */
-	private function remember( array $entry ): void {
-		$list   = get_option( self::OPTION, [] );
-		$list   = is_array( $list ) ? $list : [];
-		$list[] = $entry;
+	private function save( array $entry ): void {
+		$list  = get_option( self::OPTION, [] );
+		$list  = is_array( $list ) ? array_values( $list ) : [];
+		$found = false;
+		foreach ( $list as $i => $item ) {
+			if ( is_array( $item ) && ( $item['id'] ?? null ) === $entry['id'] ) {
+				$list[ $i ] = $entry;
+				$found      = true;
+			}
+		}
+		if ( ! $found ) {
+			$list[] = $entry;
+		}
 		update_option( self::OPTION, array_slice( $list, -self::KEEP ), false );
+	}
+
+	/**
+	 * Valores de antes de las claves que tocan los pasos (para deshacer un lote que murió a mitad).
+	 *
+	 * @param array<string, mixed>                                                      $settings Ajustes.
+	 * @param list<array{keys?: list<string>, module?: string, enabled?: bool}>          $steps    Pasos.
+	 * @return array<string, mixed>
+	 */
+	public static function touched( array $settings, array $steps ): array {
+		$out = [];
+		foreach ( $steps as $step ) {
+			if ( isset( $step['module'] ) ) {
+				$out['modules'][ $step['module'] ] = $settings['modules'][ $step['module'] ] ?? null;
+				continue;
+			}
+			foreach ( $step['keys'] ?? [] as $key ) {
+				$out[ $key ] = $settings[ $key ] ?? null;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Deshace los lotes pendientes que murieron a mitad (más viejos que STALE).
+	 */
+	public function recover(): void {
+		$list = get_option( self::OPTION, [] );
+		if ( ! is_array( $list ) ) {
+			return;
+		}
+		foreach ( $list as $item ) {
+			if ( ! is_array( $item ) || 'pending' !== ( $item['result'] ?? '' ) || (int) ( $item['at'] ?? 0 ) > time() - self::STALE ) {
+				continue;
+			}
+			$before  = is_array( $item['before'] ?? null ) ? $item['before'] : [];
+			$changes = array_filter( $before, static fn( $v ): bool => null !== $v );
+			if ( isset( $changes['modules'] ) && is_array( $changes['modules'] ) ) {
+				$changes['modules'] = array_filter( $changes['modules'], 'is_bool' );
+			}
+			if ( [] !== $changes ) {
+				$this->container->get( Settings::class )->update( $changes );
+				$this->container->get( ConfigCompiler::class )->compile();
+				$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: lote interrumpido' ) );
+			}
+			$item['result']  = 'interrupted';
+			$item['reasons'] = [ 'El lote se interrumpió a mitad: se volvió a los valores de antes.' ];
+			unset( $item['before'] );
+			$this->save( $item );
+			$this->container->get( EventLog::class )->warning(
+				'connector',
+				'change_interrupted',
+				/* translators: %s: resumen del lote */
+				sprintf( __( 'Un cambio de Claude se interrumpió a mitad y se deshizo: %s', 'imagina-turbo' ), (string) ( $item['summary'] ?? '' ) ),
+				[ 'change' => $item['id'] ?? '' ]
+			);
+		}
+	}
+
+	/**
+	 * Bloqueo atómico entre requests (INSERT IGNORE: solo uno gana). Un bloqueo de más de 6 minutos
+	 * es de un lote que murió y se libera.
+	 */
+	private static function lock(): bool {
+		global $wpdb;
+		$table = $wpdb->options;
+		for ( $try = 0; $try < 2; $try++ ) {
+			$inserted = (int) $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$table} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", self::LOCK, (string) time() ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- tabla de opciones del core; bloqueo atómico.
+			if ( 1 === $inserted ) {
+				return true;
+			}
+			$since = (int) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$table} WHERE option_name = %s", self::LOCK ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- idem.
+			if ( $since > time() - self::STALE ) {
+				return false;
+			}
+			self::unlock();
+		}
+		return false;
+	}
+
+	private static function unlock(): void {
+		global $wpdb;
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s", self::LOCK ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- idem.
+		wp_cache_delete( self::LOCK, 'options' );
 	}
 
 	/**

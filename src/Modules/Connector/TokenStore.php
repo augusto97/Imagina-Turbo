@@ -104,7 +104,7 @@ final class TokenStore {
 			return null;
 		}
 		$grant = self::grant( $row );
-		if ( 1 === $grant['revoked'] || $grant['refresh_expires'] <= time() || $grant['client_id'] !== $clientId || ! Connector::userCan( $grant['user_id'] ) ) {
+		if ( 1 === $grant['revoked'] || $grant['refresh_expires'] <= time() || $grant['created_at'] < time() - Connector::MAX_GRANT_AGE || $grant['client_id'] !== $clientId || ! Connector::userCan( $grant['user_id'] ) ) {
 			return null;
 		}
 		$access     = Connector::secret( 'itbat_' );
@@ -167,9 +167,23 @@ final class TokenStore {
 		$wpdb->query( $wpdb->prepare( 'UPDATE ' . $this->table() . ' SET revoked = 1 WHERE access_hash = %s OR refresh_hash = %s', $hash, $hash ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- nombre de tabla propio.
 	}
 
+	/**
+	 * Revoca los accesos de un usuario (cambió su contraseña o su rol, o se borró).
+	 */
+	public function revokeUser( int $userId ): void {
+		global $wpdb;
+		$previous = $wpdb->suppress_errors( true );
+		$wpdb->query( $wpdb->prepare( 'UPDATE ' . $this->table() . ' SET revoked = 1 WHERE user_id = %d AND revoked = 0', $userId ) );
+		$wpdb->suppress_errors( $previous );
+	}
+
 	public function revokeAll(): int {
 		global $wpdb;
-		return (int) $wpdb->query( 'UPDATE ' . $this->table() . ' SET revoked = 1 WHERE revoked = 0' ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- nombre de tabla propio.
+		// También se llama al desactivar el plugin, cuando la tabla puede no existir todavía.
+		$previous = $wpdb->suppress_errors( true );
+		$count    = (int) $wpdb->query( 'UPDATE ' . $this->table() . ' SET revoked = 1 WHERE revoked = 0' );
+		$wpdb->suppress_errors( $previous );
+		return $count;
 	}
 
 	/**

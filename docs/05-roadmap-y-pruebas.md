@@ -715,3 +715,18 @@ Para que cada cliente que compre el plugin acelere su propio sitio con Claude, s
 - [x] 348 pruebas unitarias, PHPStan, PHPCS y el benchmark del loader.
 - [ ] Conectar desde claude.ai (web) y Claude Code contra un sitio real con HTTPS. Comprobar que Cloudflare (Bot Fight Mode, reglas de la zona) deja pasar `160.79.104.0/21` a `/itb-mcp` y `/itb-oauth/`.
 - [ ] Una sesión real «Acelerar mi sitio» en La Tienda del Pintor, revisando qué propone y qué cambia.
+
+## Versión 0.22.1 (seguridad del conector)
+
+Dos auditorías independientes del conector (OAuth y herramientas), sin hallazgos críticos ni altos. Lo medio y bajo, corregido (docs/02, sección 18, «Endurecimiento»):
+
+- Lista cerrada de ajustes con riesgo y límites. Fuera: scripts, base de datos, revisiones, feeds, comentarios, jQuery Migrate, modo de cabeceras y variantes del borde.
+- Deshacer solo lo que cambió el lote, sin pisar lo que el dueño cambió después. Ajustes releídos antes de escribir.
+- Lotes a prueba de caídas, con bloqueo atómico y plazo total; límites por sitio.
+- OAuth: direcciones de vuelta solo de Claude o de loopback, sesión reciente, solo lectura por defecto, código reutilizado que revoca, accesos ligados a la contraseña y el rol del usuario, 90 días como máximo y HTTPS en todo.
+
+**Criterios de aceptación** (probados en local):
+
+- [x] 50 comprobaciones de punta a punta. Entre ellas: vuelta ajena rechazada, código reutilizado que revoca, scripts, revisiones y base de datos rechazados, lote interrumpido recuperado y cambio de rol que corta el acceso. Al terminar no queda bloqueo ni lote pendiente.
+- [x] La prueba encontró un error y quedó corregido: un lote rechazado por el límite por hora dejaba tomado el bloqueo.
+- [x] 352 pruebas unitarias, PHPStan, PHPCS y el benchmark del loader.

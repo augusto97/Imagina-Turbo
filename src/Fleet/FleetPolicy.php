@@ -105,7 +105,8 @@ final class FleetPolicy {
 		$modules = [];
 		foreach ( is_array( $raw['modules'] ?? null ) ? $raw['modules'] : [] as $module => $on ) {
 			$definition = is_string( $module ) ? $catalog->get( $module ) : null;
-			if ( null === $definition || ! is_bool( $on ) || RiskLevel::Invasive === $definition->risk ) {
+			// El conector de Claude abre una puerta al sitio: solo lo enciende su dueño (0.22.1).
+			if ( null === $definition || ! is_bool( $on ) || RiskLevel::Invasive === $definition->risk || 'connector' === $module ) {
 				$ignored[] = 'module:' . $module;
 				continue;
 			}

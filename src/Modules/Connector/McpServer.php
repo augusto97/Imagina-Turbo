@@ -43,6 +43,10 @@ final class McpServer {
 			}
 			self::respond( 405, null );
 		}
+		// El token nunca viaja sin cifrar.
+		if ( ! Connector::secureRequest() ) {
+			self::respond( 400, self::error( null, -32600, 'Solo por HTTPS.' ) );
+		}
 		if ( ! self::originAllowed( isset( $_SERVER['HTTP_ORIGIN'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_ORIGIN'] ) ) : '' ) ) {
 			self::respond( 403, self::error( null, -32600, 'Origin no permitido.' ) );
 		}

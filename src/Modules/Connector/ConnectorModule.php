@@ -24,6 +24,31 @@ use ImaginaTurbo\Core\Request\RequestContext;
 final class ConnectorModule implements ModuleInterface {
 
 	public function register( Container $container, RequestContext $request ): void {
+		// Un acceso no sobrevive a la credencial que lo creó: contraseña nueva, rol cambiado o usuario
+		// borrado lo cortan (0.22.1).
+		$revoke = static function ( mixed $user ): void {
+			$id = $user instanceof \WP_User ? $user->ID : ( is_numeric( $user ) ? (int) $user : 0 );
+			if ( $id > 0 ) {
+				( new TokenStore() )->revokeUser( $id );
+			}
+		};
+		add_action( 'after_password_reset', $revoke );
+		add_action( 'wp_set_password', static fn( mixed $password, mixed $user ) => $revoke( $user ), 10, 2 );
+		add_action( 'set_user_role', $revoke );
+		add_action( 'remove_user_role', $revoke );
+		add_action( 'delete_user', $revoke );
+		add_action(
+			'profile_update',
+			static function ( mixed $userId, mixed $old ) use ( $revoke ): void {
+				$now = get_userdata( (int) $userId );
+				if ( $old instanceof \WP_User && $now instanceof \WP_User && $old->user_pass !== $now->user_pass ) {
+					$revoke( $now );
+				}
+			},
+			10,
+			2
+		);
+
 		$route = self::route( $request->path );
 		if ( null === $route ) {
 			return;

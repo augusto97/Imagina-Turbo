@@ -48,7 +48,7 @@ final class ClientMetadata {
 			return false;
 		}
 		$path = (string) ( $parts['path'] ?? '' );
-		if ( '' === $path || '/' === $path || strlen( $clientId ) > 255 ) {
+		if ( '' === $path || '/' === $path || strlen( $clientId ) > 255 || isset( $parts['port'] ) ) {
 			return false;
 		}
 		return in_array( strtolower( (string) ( $parts['host'] ?? '' ) ), self::trustedHosts(), true );
@@ -118,15 +118,17 @@ final class ClientMetadata {
 	}
 
 	/**
-	 * Una dirección de vuelta es HTTPS o de loopback (spec MCP: localhost o HTTPS).
+	 * Una dirección de vuelta es una de las de Claude o de loopback sin puerto fijo (Claude Code).
 	 */
 	private static function redirectAllowed( string $uri ): bool {
+		if ( in_array( $uri, Connector::TRUSTED_REDIRECTS, true ) ) {
+			return true;
+		}
 		$parts = wp_parse_url( $uri );
-		if ( ! is_array( $parts ) || isset( $parts['fragment'] ) || ! isset( $parts['host'] ) ) {
+		if ( ! is_array( $parts ) || isset( $parts['fragment'] ) || isset( $parts['user'] ) || isset( $parts['pass'] ) || isset( $parts['port'] ) || ! isset( $parts['host'] ) ) {
 			return false;
 		}
-		$scheme = (string) ( $parts['scheme'] ?? '' );
-		return 'https' === $scheme || ( 'http' === $scheme && self::loopback( (string) $parts['host'] ) );
+		return 'http' === ( $parts['scheme'] ?? '' ) && self::loopback( (string) $parts['host'] );
 	}
 
 	private static function loopback( string $host ): bool {

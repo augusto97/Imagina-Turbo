@@ -93,10 +93,6 @@ final class SettingsController extends Controller {
 
 		$this->container->get( Settings::class )->update( [ 'modules' => [ $id => $enabled ] ] );
 		$result = $this->container->get( ConfigCompiler::class )->compile();
-		// Apagar el conector corta todos los accesos: al volver a encenderlo, Claude pide permiso otra vez.
-		if ( 'connector' === $id && ! $enabled ) {
-			( new \ImaginaTurbo\Modules\Connector\TokenStore() )->revokeAll();
-		}
 
 		$this->container->get( EventLog::class )->log(
 			$id,

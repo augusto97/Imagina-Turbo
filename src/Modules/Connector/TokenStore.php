@@ -167,6 +167,16 @@ final class TokenStore {
 		$wpdb->query( $wpdb->prepare( 'UPDATE ' . $this->table() . ' SET revoked = 1 WHERE access_hash = %s OR refresh_hash = %s', $hash, $hash ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- nombre de tabla propio.
 	}
 
+	/**
+	 * Revoca los accesos de un usuario (cambió su contraseña o su rol, o se borró).
+	 */
+	public function revokeUser( int $userId ): void {
+		global $wpdb;
+		$previous = $wpdb->suppress_errors( true );
+		$wpdb->query( $wpdb->prepare( 'UPDATE ' . $this->table() . ' SET revoked = 1 WHERE user_id = %d AND revoked = 0', $userId ) );
+		$wpdb->suppress_errors( $previous );
+	}
+
 	public function revokeAll(): int {
 		global $wpdb;
 		// También se llama al desactivar el plugin, cuando la tabla puede no existir todavía.

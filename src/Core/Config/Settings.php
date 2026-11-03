@@ -144,14 +144,32 @@ final class Settings {
 	 * @return array<string, mixed>
 	 */
 	public function update( array $changes ): array {
-		$merged = array_replace( $this->all(), $changes );
+		// Siempre sobre lo guardado ahora (0.22.1): un request largo, como un lote del conector de
+		// Claude, no debe pisar con su copia en memoria lo que otro request cambió mientras tanto.
+		$this->cache  = null;
+		$wasConnector = true === ( $this->modules()['connector'] ?? false );
+		$merged       = array_replace( $this->all(), $changes );
 		if ( isset( $changes['modules'] ) && is_array( $changes['modules'] ) ) {
 			$merged['modules'] = array_replace( $this->modules(), $changes['modules'] );
 		}
 		$clean = self::sanitize( $merged );
 		update_option( self::OPTION, $clean, false );
 		$this->cache = $clean;
+		// Apagar el conector, venga de donde venga (admin, importación), corta todos sus accesos.
+		if ( $wasConnector && true !== ( $clean['modules']['connector'] ?? false ) && class_exists( \ImaginaTurbo\Modules\Connector\TokenStore::class ) ) {
+			( new \ImaginaTurbo\Modules\Connector\TokenStore() )->revokeAll();
+		}
 		return $clean;
+	}
+
+	/**
+	 * Ajustes leídos de nuevo de la base de datos (sin la copia del request).
+	 *
+	 * @return array<string, mixed>
+	 */
+	public function fresh(): array {
+		$this->cache = null;
+		return $this->all();
 	}
 
 	/**

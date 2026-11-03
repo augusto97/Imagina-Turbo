@@ -27,7 +27,7 @@ interface ConnectorChange {
 	id: string;
 	at: number;
 	summary: string;
-	result: 'applied' | 'reverted' | 'undone';
+	result: 'applied' | 'reverted' | 'undone' | 'pending' | 'interrupted';
 	reasons?: string[];
 }
 
@@ -148,11 +148,11 @@ export function ConnectorCard() {
 								{ data.changes.map( ( ch ) => (
 									<div key={ ch.id } className="itb:flex itb:flex-col itb:gap-0.5 itb:border-b itb:border-zinc-100 itb:pb-2 itb:last:border-0">
 										<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
-											<Badge tone={ ch.result === 'applied' ? 'green' : 'neutral' }>{ ch.result === 'applied' ? __( 'Aplicado' ) : ch.result === 'reverted' ? __( 'Se deshizo solo' ) : __( 'Deshecho' ) }</Badge>
+											<Badge tone={ ch.result === 'applied' ? 'green' : 'neutral' }>{ { applied: __( 'Aplicado' ), reverted: __( 'Se deshizo solo' ), undone: __( 'Deshecho' ), pending: __( 'En curso' ), interrupted: __( 'Interrumpido y deshecho' ) }[ ch.result ] }</Badge>
 											<span>{ ch.summary }</span>
 											<span className="itb:text-xs itb:text-zinc-500">{ formatDate( ch.at, config.locale ) }</span>
 										</div>
-										{ ch.result === 'reverted' && ch.reasons && ch.reasons.length > 0 && (
+										{ ( ch.result === 'reverted' || ch.result === 'interrupted' ) && ch.reasons && ch.reasons.length > 0 && (
 											<span className="itb:text-xs itb:text-zinc-500">
 												{ ch.reasons.slice( 0, 2 ).join( ' · ' ) }
 												{ ch.reasons.length > 2 && ` · ${ __( 'y' ) } ${ ch.reasons.length - 2 } ${ __( 'más' ) }` }

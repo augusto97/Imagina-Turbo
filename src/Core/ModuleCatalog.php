@@ -38,6 +38,7 @@ final class ModuleCatalog {
 			'database'          => \ImaginaTurbo\Modules\Database\DatabaseModule::class,
 			'script_loading'    => \ImaginaTurbo\Modules\ScriptLoading\ScriptLoadingModule::class,
 			'turnstile'         => \ImaginaTurbo\Modules\Turnstile\TurnstileModule::class,
+			'connector'         => \ImaginaTurbo\Modules\Connector\ConnectorModule::class,
 		];
 	}
 
@@ -91,6 +92,7 @@ final class ModuleCatalog {
 			$m( 'database', __( 'Base de datos', 'imagina-turbo' ), __( 'Auditoría y limpieza con respaldo.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
 			$m( 'script_loading', __( 'Carga de scripts', 'imagina-turbo' ), __( 'Diferido nativo de WordPress y retraso solo de los scripts de terceros indicados.', 'imagina-turbo' ), RiskLevel::Moderate, false, 7 ),
 			$m( 'turnstile', __( 'Turnstile', 'imagina-turbo' ), __( 'Verificación invisible de Cloudflare en el inicio de sesión, el registro, la contraseña y el pago, cada uno con su interruptor.', 'imagina-turbo' ), RiskLevel::Moderate, false, 4 ),
+			$m( 'connector', __( 'Conector de Claude', 'imagina-turbo' ), __( 'Deja que el dueño del sitio use Claude para diagnosticar y ajustar Imagina Turbo: lo seguro directamente y lo moderado con prueba y vuelta atrás automática.', 'imagina-turbo' ), RiskLevel::Moderate, false, 8 ),
 		];
 	}
 }

@@ -1,0 +1,431 @@
+<?php
+/**
+ * Lotes de cambios del conector con prueba y vuelta atrás automática (regla 3: nada sensible por fe).
+ *
+ * 1. Guarda una copia de todos los ajustes (itb_settings incluye módulos, ajustes rápidos, scripts y
+ *    navegación: todo lo que el conector puede tocar).
+ * 2. Mide las páginas clave del sitio saltando la caché de página (las mismas del verificador).
+ * 3. Aplica los pasos con `confirm` por las rutas del admin (las mismas validaciones).
+ * 4. Vuelve a medir. Si una página deja de responder bien, muestra un error de PHP, queda casi vacía
+ *    o tarda mucho más (medido dos veces, para no confundir un pico con un fallo), restaura la copia.
+ * 5. Purga la caché de páginas para que los visitantes vean el resultado, sea cual sea.
+ *
+ * Un lote a la vez (bloqueo de 3 minutos). Los últimos 20 quedan en itb_connector_changes con la copia
+ * para deshacerlos después.
+ *
+ * @package ImaginaTurbo
+ */
+
+declare(strict_types=1);
+
+namespace ImaginaTurbo\Modules\Connector;
+
+use ImaginaTurbo\Core\Config\ConfigCompiler;
+use ImaginaTurbo\Core\Config\Settings;
+use ImaginaTurbo\Core\Container;
+use ImaginaTurbo\Core\Events\EventLog;
+use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
+use ImaginaTurbo\Modules\CacheCoordinator\Purger;
+use ImaginaTurbo\Verifier\VerifierService;
+
+/**
+ * Aplicar, comprobar y deshacer.
+ *
+ * @phpstan-type Measure array{path: string, status: int, ms: int, bytes: int, fatal: bool, headers: array<string, string>}
+ */
+final class ChangeSet {
+
+	public const OPTION = 'itb_connector_changes';
+
+	private const KEEP = 20;
+
+	private const LOCK = 'itb_connector_lock';
+
+	/** Páginas que se miden en cada lote. */
+	private const PAGES = 8;
+
+	public const USER_AGENT = 'ImaginaTurbo-Connector/1.0';
+
+	/** Cabeceras que se devuelven al medir. */
+	private const HEADERS = [ 'x-litespeed-cache', 'x-litespeed-cache-control', 'x-qc-cache', 'cf-cache-status', 'cache-control', 'age', 'server-timing', 'x-itb-probe', 'x-itb-shield', 'content-type', 'location' ];
+
+	/** @var \Closure(string, bool): (Measure|string)|null Medición simulada (pruebas). */
+	private static ?\Closure $measurer = null;
+
+	public function __construct( private readonly Container $container ) {
+	}
+
+	/**
+	 * Aplica un lote.
+	 *
+	 * @param list<mixed>                                         $steps Pasos.
+	 * @param array{id: int, client_name: string, scope: string} $grant Acceso.
+	 * @return array<string, mixed>
+	 */
+	public function apply( string $summary, array $steps, array $grant ): array {
+		$summary = sanitize_text_field( $summary );
+		$steps   = self::validSteps( $steps );
+		if ( is_string( $steps ) ) {
+			return [
+				'result' => 'rejected',
+				'error'  => $steps,
+			];
+		}
+		if ( false !== get_transient( self::LOCK ) ) {
+			return [
+				'result' => 'rejected',
+				'error'  => 'Hay otro lote en curso. Espera a que termine.',
+			];
+		}
+		set_transient( self::LOCK, time(), 180 );
+		if ( function_exists( 'set_time_limit' ) ) {
+			set_time_limit( 180 ); // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- el lote mide páginas antes y después.
+		}
+		try {
+			return $this->run( $summary, $steps, $grant );
+		} finally {
+			delete_transient( self::LOCK );
+		}
+	}
+
+	/**
+	 * @param list<array{area?: string, changes?: array<string, mixed>, module?: string, enabled?: bool}> $steps Pasos válidos.
+	 * @param array{id: int, client_name: string, scope: string}                                          $grant Acceso.
+	 * @return array<string, mixed>
+	 */
+	private function run( string $summary, array $steps, array $grant ): array {
+		$settings = $this->container->get( Settings::class );
+		$snapshot = $settings->all();
+		$pages    = self::pages();
+		$before   = [];
+		foreach ( $pages as $page ) {
+			$before[ $page['url'] ] = self::measure( $page['url'], true );
+		}
+
+		$applied = [];
+		$error   = '';
+		foreach ( $steps as $i => $step ) {
+			if ( isset( $step['module'] ) ) {
+				$result = Tools::rest(
+					'PUT',
+					'/modules/' . $step['module'],
+					[
+						'enabled' => (bool) ( $step['enabled'] ?? false ),
+						'confirm' => true,
+					]
+				);
+			} else {
+				$route  = Tools::writeRoute( $step['area'] ?? '' ) ?? [ 'PUT', '/' ];
+				$result = Tools::rest( $route[0], $route[1], Tools::changes( $step['changes'] ?? [] ) + [ 'confirm' => true ] );
+			}
+			if ( ! $result['ok'] ) {
+				$data  = $result['data'];
+				$error = sprintf( 'El paso %d no se aplicó: %s', $i + 1, is_array( $data ) && is_string( $data['error'] ?? null ) ? $data['error'] : 'error' );
+				break;
+			}
+			$applied[] = $step;
+		}
+
+		$reasons = [];
+		$after   = [];
+		if ( '' === $error ) {
+			foreach ( $pages as $page ) {
+				$now = self::measure( $page['url'], true );
+				$was = $before[ $page['url'] ];
+				$why = self::regression( $was, $now );
+				if ( null !== $why && str_contains( $why, 'lenta' ) ) {
+					// Un pico de tiempo se mide otra vez antes de dar el lote por malo.
+					$again = self::measure( $page['url'], true );
+					$why   = self::regression( $was, $again );
+					$now   = $again;
+				}
+				$after[ $page['url'] ] = $now;
+				if ( null !== $why ) {
+					$reasons[] = $page['label'] . ' (' . $page['url'] . '): ' . $why;
+				}
+			}
+		}
+
+		$reverted = '' !== $error || [] !== $reasons;
+		if ( $reverted ) {
+			$this->restore( $snapshot );
+		}
+		$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: lote de cambios' ) );
+
+		$id = substr( bin2hex( random_bytes( 6 ) ), 0, 12 );
+		$this->remember(
+			[
+				'id'       => $id,
+				'at'       => time(),
+				'summary'  => $summary,
+				'steps'    => $steps,
+				'result'   => $reverted ? 'reverted' : 'applied',
+				'reasons'  => '' !== $error ? [ $error ] : $reasons,
+				'client'   => $grant['client_name'],
+				'user'     => get_current_user_id(),
+				'snapshot' => $snapshot,
+			]
+		);
+		$this->container->get( EventLog::class )->warning(
+			'connector',
+			$reverted ? 'change_reverted' : 'change_applied',
+			$reverted
+				/* translators: %s: resumen del lote */
+				? sprintf( __( 'Claude intentó un cambio y se deshizo solo: %s', 'imagina-turbo' ), $summary )
+				/* translators: %s: resumen del lote */
+				: sprintf( __( 'Claude aplicó un cambio probado en las páginas clave: %s', 'imagina-turbo' ), $summary ),
+			[
+				'user'    => get_current_user_id(),
+				'client'  => $grant['client_name'],
+				'change'  => $id,
+				'steps'   => $steps,
+				'reasons' => '' !== $error ? [ $error ] : $reasons,
+			]
+		);
+
+		return [
+			'result'  => $reverted ? 'reverted' : 'applied',
+			'id'      => $id,
+			'reasons' => '' !== $error ? [ $error ] : $reasons,
+			'pages'   => array_map(
+				static fn( array $page ): array => [
+					'label'  => $page['label'],
+					'path'   => $page['url'],
+					'before' => self::short( $before[ $page['url'] ] ?? null ),
+					'after'  => self::short( $after[ $page['url'] ] ?? null ),
+				],
+				$pages
+			),
+			'note'    => $reverted ? 'Los ajustes volvieron a como estaban.' : 'Para deshacerlo: revert_change con este id.',
+		];
+	}
+
+	/**
+	 * Deshace un lote aplicado.
+	 *
+	 * @param array{id: int, client_name: string, scope: string} $grant Acceso.
+	 */
+	public function revert( string $id, array $grant ): bool {
+		$list = get_option( self::OPTION, [] );
+		$list = is_array( $list ) ? $list : [];
+		foreach ( $list as $i => $item ) {
+			if ( is_array( $item ) && ( $item['id'] ?? null ) === $id && is_array( $item['snapshot'] ?? null ) ) {
+				$this->restore( $item['snapshot'] );
+				$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: deshacer un lote' ) );
+				$list[ $i ]['result']    = 'undone';
+				$list[ $i ]['undone_at'] = time();
+				update_option( self::OPTION, $list, false );
+				$this->container->get( EventLog::class )->warning(
+					'connector',
+					'change_undone',
+					/* translators: %s: resumen del lote */
+					sprintf( __( 'Claude deshizo un cambio: %s', 'imagina-turbo' ), (string) ( $item['summary'] ?? '' ) ),
+					[
+						'user'   => get_current_user_id(),
+						'client' => $grant['client_name'],
+						'change' => $id,
+					]
+				);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Historial sin las copias.
+	 *
+	 * @return list<array<string, mixed>>
+	 */
+	public function history(): array {
+		$list = get_option( self::OPTION, [] );
+		$out  = [];
+		foreach ( array_reverse( is_array( $list ) ? $list : [] ) as $item ) {
+			if ( is_array( $item ) ) {
+				unset( $item['snapshot'] );
+				$out[] = $item;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Pasos válidos, o el motivo del rechazo.
+	 *
+	 * @param list<mixed> $steps Pasos.
+	 * @return list<array{area?: string, changes?: array<string, mixed>, module?: string, enabled?: bool}>|string
+	 */
+	public static function validSteps( array $steps ): array|string {
+		if ( [] === $steps || count( $steps ) > 5 ) {
+			return 'Entre 1 y 5 pasos por lote.';
+		}
+		$out = [];
+		foreach ( $steps as $i => $step ) {
+			if ( ! is_array( $step ) ) {
+				return sprintf( 'El paso %d no es válido.', $i + 1 );
+			}
+			if ( isset( $step['module'] ) ) {
+				if ( ! in_array( $step['module'], Tools::CHANGE_SET_MODULES, true ) || ! is_bool( $step['enabled'] ?? null ) ) {
+					return sprintf( 'El paso %d: ese módulo no se cambia desde el conector (protecciones, Cloudflare y carga condicional se cambian en el admin).', $i + 1 );
+				}
+				$out[] = [
+					'module'  => (string) $step['module'],
+					'enabled' => $step['enabled'],
+				];
+				continue;
+			}
+			if ( null === Tools::writeRoute( $step['area'] ?? null ) || [] === Tools::changes( $step['changes'] ?? null ) ) {
+				return sprintf( 'El paso %d necesita un área ajustable y sus cambios.', $i + 1 );
+			}
+			$out[] = [
+				'area'    => (string) $step['area'],
+				'changes' => Tools::changes( $step['changes'] ),
+			];
+		}
+		return $out;
+	}
+
+	/**
+	 * Motivo por el que la página empeoró, o null.
+	 *
+	 * @param Measure|string $before Antes.
+	 * @param Measure|string $after  Después.
+	 */
+	public static function regression( array|string $before, array|string $after ): ?string {
+		if ( ! is_array( $before ) ) {
+			return null; // Sin medida de antes no hay con qué comparar.
+		}
+		if ( ! is_array( $after ) ) {
+			return 'no respondió (' . $after . ')';
+		}
+		if ( $after['fatal'] && ! $before['fatal'] ) {
+			return 'muestra un error de PHP';
+		}
+		$okBefore = $before['status'] < 400 || 404 === $before['status'];
+		if ( $okBefore && $after['status'] !== $before['status'] && ( $after['status'] >= 500 || ( $before['status'] < 400 && $after['status'] >= 400 ) ) ) {
+			return sprintf( 'pasó de %d a %d', $before['status'], $after['status'] );
+		}
+		if ( $before['bytes'] > 2000 && $after['bytes'] < $before['bytes'] / 2 ) {
+			return sprintf( 'quedó casi vacía (%d → %d bytes)', $before['bytes'], $after['bytes'] );
+		}
+		if ( $after['ms'] > max( 2 * $before['ms'], $before['ms'] + 1500 ) ) {
+			return sprintf( 'mucho más lenta (%d → %d ms)', $before['ms'], $after['ms'] );
+		}
+		return null;
+	}
+
+	/**
+	 * Mide una página del sitio como visitante anónimo.
+	 *
+	 * @return Measure|string Medida o motivo del error.
+	 */
+	public static function measure( string $path, bool $fresh ): array|string {
+		$path = trim( $path );
+		if ( '' === $path || '/' !== $path[0] || str_starts_with( $path, '//' ) || str_contains( $path, '\\' ) || strlen( $path ) > 300 || 1 === preg_match( '/[\x00-\x20\x7F]/', $path ) ) {
+			return 'Ruta no válida: tiene que empezar por / y ser del propio sitio.';
+		}
+		if ( null !== self::$measurer ) {
+			return ( self::$measurer )( $path, $fresh );
+		}
+		$url = home_url( $path );
+		if ( $fresh ) {
+			$url = add_query_arg( 'itb_nc', bin2hex( random_bytes( 4 ) ), $url );
+		}
+		$start    = microtime( true );
+		$response = wp_remote_get(
+			$url,
+			[
+				'timeout'             => 20,
+				'redirection'         => 0,
+				'user-agent'          => self::USER_AGENT,
+				'limit_response_size' => 4194304,
+				'sslverify'           => (bool) apply_filters( 'https_local_ssl_verify', false ), // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- filtro del core para loopback.
+			]
+		);
+		$ms       = (int) round( ( microtime( true ) - $start ) * 1000 );
+		if ( is_wp_error( $response ) ) {
+			return $response->get_error_message();
+		}
+		$body    = (string) wp_remote_retrieve_body( $response );
+		$headers = [];
+		foreach ( wp_remote_retrieve_headers( $response ) as $name => $value ) {
+			$name = strtolower( (string) $name );
+			if ( in_array( $name, self::HEADERS, true ) || str_starts_with( $name, 'x-itb-' ) ) {
+				$headers[ $name ] = substr( is_array( $value ) ? implode( ', ', array_map( 'strval', $value ) ) : (string) $value, 0, 300 );
+			}
+		}
+		return [
+			'path'    => $path,
+			'status'  => (int) wp_remote_retrieve_response_code( $response ),
+			'ms'      => $ms,
+			'bytes'   => strlen( $body ),
+			'fatal'   => self::fatal( $body ),
+			'headers' => $headers,
+		];
+	}
+
+	/**
+	 * La página muestra un error fatal de PHP o la pantalla de error crítico de WordPress.
+	 */
+	public static function fatal( string $body ): bool {
+		return str_contains( $body, 'There has been a critical error' ) || str_contains( $body, 'Ha habido un error crítico' ) || 1 === preg_match( '/<b>(Fatal|Parse) error<\/b>|PHP (Fatal|Parse) error:/', $body );
+	}
+
+	/**
+	 * Medición simulada (pruebas).
+	 *
+	 * @param \Closure(string, bool): (Measure|string)|null $measurer Medición.
+	 */
+	public static function useMeasurer( ?\Closure $measurer ): void {
+		self::$measurer = $measurer;
+	}
+
+	/**
+	 * Páginas clave (sin la que debe dar 404, que no cambia con los ajustes).
+	 *
+	 * @return list<array{label: string, url: string}>
+	 */
+	private static function pages(): array {
+		$out = [];
+		foreach ( VerifierService::defaultPages() as $page ) {
+			if ( 404 !== ( $page['expect'] ?? 200 ) ) {
+				$out[] = [
+					'label' => $page['label'],
+					'url'   => $page['url'],
+				];
+			}
+		}
+		return array_slice( $out, 0, self::PAGES );
+	}
+
+	/**
+	 * @param array<string, mixed> $snapshot Ajustes completos.
+	 */
+	private function restore( array $snapshot ): void {
+		$this->container->get( Settings::class )->update( $snapshot );
+		$this->container->get( ConfigCompiler::class )->compile();
+	}
+
+	/**
+	 * @param array<string, mixed> $entry Lote.
+	 */
+	private function remember( array $entry ): void {
+		$list   = get_option( self::OPTION, [] );
+		$list   = is_array( $list ) ? $list : [];
+		$list[] = $entry;
+		update_option( self::OPTION, array_slice( $list, -self::KEEP ), false );
+	}
+
+	/**
+	 * @param Measure|string|null $m Medida.
+	 * @return array<string, mixed>|string|null
+	 */
+	private static function short( array|string|null $m ): array|string|null {
+		return is_array( $m ) ? [
+			'status' => $m['status'],
+			'ms'     => $m['ms'],
+			'bytes'  => $m['bytes'],
+			'fatal'  => $m['fatal'],
+		] : $m;
+	}
+}

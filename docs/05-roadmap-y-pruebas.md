@@ -697,3 +697,21 @@ Revisión de seguridad completa del plugin con cuatro auditorías independientes
 - [x] 338 pruebas unitarias, PHPStan, PHPCS y el benchmark del loader (0,047 ms).
 - [ ] En La Tienda del Pintor: instalar la 0.21.2, abrir el admin una vez (migra los archivos) y comprobar que el pago y el login siguen funcionando.
 - [ ] Con Turnstile en el pago y PayPal Payments (u otra pasarela con botón propio en el pago clásico): un pedido de prueba completo.
+
+## Versión 0.22.0 (conector de Claude)
+
+Para que cada cliente que compre el plugin acelere su propio sitio con Claude, sin acceso al chat de desarrollo ni a nada más que los ajustes de Imagina Turbo (docs/02, sección 18):
+
+- **Conector MCP propio** en `https://sitio/itb-mcp`, con su propio inicio de sesión OAuth 2.1 en el WordPress del cliente. Solo acepta a Claude, que se identifica con un documento de cliente alojado por Anthropic. No hay registro dinámico.
+- **Consentimiento** con dos niveles: «Diagnosticar y ajustar» o «Solo diagnosticar». Cada acceso se puede cortar desde Avanzado.
+- **Guía para Claude** con el método de trabajo (diagnóstico, prioridades, cambiar poco, medir, explicar, dar los pasos de lo que va fuera del plugin) y un punto de partida, «Acelerar mi sitio». Viaja con cada versión.
+- **20 herramientas**: diagnóstico completo, métricas, costo por plugin, caché, auditorías y medición de páginas; ajustes seguros directos; lotes de riesgo moderado con prueba en las páginas clave y vuelta atrás automática.
+- **Fuera del alcance de Claude**: Cloudflare, el firewall, el escudo, Turnstile, la carga condicional de plugins ni nada que no sea Imagina Turbo.
+
+**Criterios de aceptación** (probados en local):
+
+- [x] Cliente que imita a Claude Code paso a paso contra OpenLiteSpeed, con el documento real de `claude.ai`: 38 comprobaciones de descubrimiento, rechazo de clientes y direcciones ajenas, consentimiento, PKCE, código de un solo uso, MCP, herramientas, alcances, lotes, rotación y revocación, sin fallos (dos corridas).
+- [x] Un lote que rompe el sitio (mu-plugin de prueba) se deshace solo y los ajustes vuelven a como estaban; uno correcto se aplica tras medir 8 páginas y se deshace con `revert_change`.
+- [x] 348 pruebas unitarias, PHPStan, PHPCS y el benchmark del loader.
+- [ ] Conectar desde claude.ai (web) y Claude Code contra un sitio real con HTTPS. Comprobar que Cloudflare (Bot Fight Mode, reglas de la zona) deja pasar `160.79.104.0/21` a `/itb-mcp` y `/itb-oauth/`.
+- [ ] Una sesión real «Acelerar mi sitio» en La Tienda del Pintor, revisando qué propone y qué cambia.

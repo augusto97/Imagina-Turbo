@@ -76,6 +76,7 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/firewall/htaccess` | `{action: apply\|remove, confirm}`: respaldo, escritura del bloque al principio, autoprueba (portada, un producto, `/wp-json/`) y restauración si alguna no responde 200. 428 sin `confirm`, 409 en nginx |
 | GET / PUT | `/shield/status` · `/shield/settings` | Escudo: interruptores, intervalos de Heartbeat, límite de filtros, qué requieren los plugins activos (XML-RPC, usuarios), guía de cron. 0.21.0: `facets`, `facets_robots` y `facets_views` (combinaciones de filtros para crawlers); 0.21.1: `facets_scope` (`combos` o `all`) y `facets_empty404` y el estado del robots.txt (si es físico y las reglas para copiarlas); cambiar sus reglas purga `/robots.txt` |
 | GET · PUT · DELETE | `/turnstile` | Turnstile (0.21.0): módulo, claves (la secreta solo con sus últimos 4 caracteres), si pasaron la prueba, formularios, pasarelas exentas y activas, otros plugins de captcha · guardar `{site_key?, secret?, forms?, skip?}` (cambiar una clave apaga los formularios hasta repetir la prueba) · quitar las claves y apagar todo |
+| GET · DELETE | `/connector` · `/connector/connections/{id}` · `/connector/connections` | Conector de Claude (0.22.0): si está activo, su URL, lo que falta (HTTPS, enlaces permanentes), los accesos activos (cliente, usuario, nivel, último uso), los últimos lotes de cambios y la actividad · cortar un acceso · cortar todos. Las rutas del conector (`/itb-mcp`, `/itb-oauth/…`, `/.well-known/…`) están en docs/02, sección 18 |
 | POST | `/turnstile/test` | `{token}` del widget del admin: `siteverify` con la clave secreta guardada, sin fallar abierto. Si pasa, guarda la firma de las claves y recompila |
 | POST | `/shield/test` | Pide como anónimo un asset inexistente, `?author=1`, `xmlrpc.php` y `/wp/v2/users` (y, con la guardia de filtros activa, dos filtros de la tienda como crawler; con el 404 de filtros vacíos, un precio imposible como visitante): estado, cabecera `X-ITB-Shield` y tiempo |
 | GET / PUT | `/tweaks/status` · `/tweaks/settings` | Ajustes rápidos con su riesgo · cambiarlos (encender uno no seguro exige `confirm`, 428), revisiones y autoguardado |
@@ -149,11 +150,27 @@ Todas las rutas del admin envían `litespeed_control_set_nocache` (LSCache, con 
 | `itb_fleet` | Plantilla de flota recibida (tal como llegó), desviaciones, error de la última consulta, última aplicación y resumen para la telemetría |
 | `itb_fleet_snapshots` | Los últimos 10 snapshots de lo que la plantilla puede tocar, antes de cada aplicación |
 | `itb_hub_nonces` | Nonces de las peticiones del hub ya vistas (10 minutos) |
+| `itb_connector_changes` | Conector de Claude (0.22.0): los últimos 20 lotes de cambios con su resultado y la copia de los ajustes de antes, para deshacerlos |
 | `itb_db_version` | Versión del esquema de tablas (autoload = sí, es pequeña) |
 
 ### Tablas (`{prefix}itb_`)
 
 ```sql
+connector_tokens (                    -- 0.22.0, esquema v10: un acceso de Claude por fila
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NOT NULL,   -- quien dio el consentimiento (se revisa su permiso en cada uso)
+  client_id VARCHAR(255) NOT NULL,    -- URL del documento CIMD (claude.ai)
+  client_name VARCHAR(100) NOT NULL,
+  scope VARCHAR(60) NOT NULL,         -- itb.read [itb.adjust]
+  resource VARCHAR(255) NOT NULL,     -- URL del conector (RFC 8707)
+  access_hash CHAR(64) NOT NULL, access_expires INT UNSIGNED NOT NULL,     -- SHA-256, 1 hora
+  refresh_hash CHAR(64) NOT NULL, prev_refresh_hash CHAR(64) NOT NULL DEFAULT '',
+  refresh_expires INT UNSIGNED NOT NULL,                                     -- 30 días desde la última renovación
+  created_at INT UNSIGNED NOT NULL, last_used_at INT UNSIGNED NOT NULL DEFAULT 0,
+  last_ip VARCHAR(45) NOT NULL DEFAULT '', revoked TINYINT(1) NOT NULL DEFAULT 0,
+  KEY access_hash, KEY refresh_hash, KEY prev_refresh_hash
+)
+
 events (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   created_at DATETIME NOT NULL,

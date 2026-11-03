@@ -30,15 +30,15 @@ use ImaginaTurbo\Support\Jobs;
  */
 final class Installer {
 
-	public const DB_VERSION        = 9;
+	public const DB_VERSION        = 10;
 	public const DB_VERSION_OPTION = 'itb_db_version';
 	public const CAPABILITY        = 'itb_manage';
 
 	/** Opciones propias (todas se borran al desinstalar). */
-	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION, AssetRules::OPTION, 'itb_db_audit', 'itb_db_schedule_state', 'itb_fleet', 'itb_fleet_snapshots', 'itb_hub_nonces', 'itb_diag_queries', 'itb_frag_verify', 'itb_zaraz_state', 'itb_zaraz_scan', 'itb_budgets_state', 'itb_image_audit', 'itb_verifier', 'itb_verifier_key', 'itb_turnstile_secret' ];
+	public const OPTIONS = [ Settings::OPTION, self::DB_VERSION_OPTION, 'itb_cf_token', 'itb_cf_state', 'itb_site_key', 'itb_profiler_rollup', 'itb_hub', 'itb_audit_last', 'itb_warm_state', 'itb_purge_state', 'itb_cf_analytics', 'itb_cf_drift', 'itb_cf_firewall', 'itb_cf_challenge', OriginLock::STATE_OPTION, RuleStore::OPTION, RumInsights::OPTION, AssetRules::OPTION, 'itb_db_audit', 'itb_db_schedule_state', 'itb_fleet', 'itb_fleet_snapshots', 'itb_hub_nonces', 'itb_diag_queries', 'itb_frag_verify', 'itb_zaraz_state', 'itb_zaraz_scan', 'itb_budgets_state', 'itb_image_audit', 'itb_verifier', 'itb_verifier_key', 'itb_turnstile_secret', 'itb_connector_changes' ];
 
 	/** Tablas propias sin prefijo. */
-	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots', 'itb_rum_hist', 'itb_rum_events', 'itb_db_backups' ];
+	public const TABLES = [ 'itb_events', 'itb_route_samples', 'itb_metrics_hourly', 'itb_purge_queue', 'itb_cf_snapshots', 'itb_rum_hist', 'itb_rum_events', 'itb_db_backups', 'itb_connector_tokens' ];
 
 	public function __construct(
 		private readonly Settings $settings,
@@ -285,6 +285,32 @@ final class Installer {
   restored_at datetime DEFAULT NULL,
   PRIMARY KEY  (id),
   KEY batch (batch)
+) {$charset};"
+		);
+
+		// Conector de Claude (0.22.0): un acceso por fila. Los tokens solo se guardan como hash.
+		$tokens = $wpdb->prefix . 'itb_connector_tokens';
+		dbDelta(
+			"CREATE TABLE {$tokens} (
+  id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  user_id bigint(20) unsigned NOT NULL,
+  client_id varchar(255) NOT NULL,
+  client_name varchar(100) NOT NULL,
+  scope varchar(60) NOT NULL,
+  resource varchar(255) NOT NULL,
+  access_hash char(64) NOT NULL,
+  access_expires int(10) unsigned NOT NULL,
+  refresh_hash char(64) NOT NULL,
+  prev_refresh_hash char(64) NOT NULL DEFAULT '',
+  refresh_expires int(10) unsigned NOT NULL,
+  created_at int(10) unsigned NOT NULL,
+  last_used_at int(10) unsigned NOT NULL DEFAULT 0,
+  last_ip varchar(45) NOT NULL DEFAULT '',
+  revoked tinyint(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY  (id),
+  KEY access_hash (access_hash),
+  KEY refresh_hash (refresh_hash),
+  KEY prev_refresh_hash (prev_refresh_hash)
 ) {$charset};"
 		);
 

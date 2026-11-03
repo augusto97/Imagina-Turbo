@@ -46,6 +46,7 @@ final class RestRegistrar {
 			new FleetController( $this->container ),
 			new VerifierController( $this->container ),
 			new TurnstileController( $this->container ),
+			new ConnectorController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

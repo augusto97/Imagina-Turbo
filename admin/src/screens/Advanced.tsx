@@ -18,6 +18,7 @@ import { __ } from '@/lib/i18n';
 import { useAction, useStatus } from '@/lib/queries';
 import type { CompileResult, HubStatus, PublicSettings, Safety, SignedCookie, Status, VerifierRun, VerifierStatus } from '@/lib/types';
 import { downloadFile, formatDate, safeHref } from '@/lib/utils';
+import { ConnectorCard } from './ConnectorCard';
 
 export function Advanced() {
 	const { data, isLoading, error } = useStatus();
@@ -49,6 +50,7 @@ export function Advanced() {
 					<SafeModeCard safety={ data.safety } />
 					<ConfigCard status={ data } />
 					<SettingsCard />
+					<ConnectorCard />
 					<AiCard />
 					<ImportExportCard />
 					<LicenseCard status={ data } />

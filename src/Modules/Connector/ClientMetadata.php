@@ -71,8 +71,15 @@ final class ClientMetadata {
 				return $client;
 			}
 		}
+		// Un documento que no se pudo leer no se vuelve a pedir en 10 minutos.
+		$failKey = self::CACHE_PREFIX . 'f_' . md5( $clientId );
+		$failed  = get_transient( $failKey );
+		if ( is_string( $failed ) ) {
+			return $failed;
+		}
 		$doc = null !== self::$fetcher ? ( self::$fetcher )( $clientId ) : self::fetch( $clientId );
 		if ( is_string( $doc ) ) {
+			set_transient( $failKey, $doc, 600 );
 			return $doc;
 		}
 		$client = self::parse( $clientId, $doc );

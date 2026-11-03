@@ -45,6 +45,9 @@ final class Connector {
 	public const REFRESH_TTL = 30 * DAY_IN_SECONDS;
 	public const CODE_TTL    = 600;
 
+	/** Vida máxima de un acceso: después hay que volver a dar permiso, aunque se use a diario. */
+	public const MAX_GRANT_AGE = 180 * DAY_IN_SECONDS;
+
 	/** Accesos activos como máximo (cada conexión desde Claude es uno). */
 	public const MAX_CONNECTIONS = 20;
 
@@ -86,10 +89,28 @@ final class Connector {
 	}
 
 	/**
-	 * HTTP sin cifrar solo para pruebas locales (constante en wp-config.php).
+	 * HTTP sin cifrar solo para pruebas locales: la constante en wp-config.php y, además, un sitio en
+	 * una dirección local. Olvidarla puesta en producción no deja el conector sin cifrar.
 	 */
 	public static function allowHttp(): bool {
-		return defined( 'ITB_CONNECTOR_ALLOW_HTTP' ) && true === ITB_CONNECTOR_ALLOW_HTTP;
+		if ( ! defined( 'ITB_CONNECTOR_ALLOW_HTTP' ) || true !== ITB_CONNECTOR_ALLOW_HTTP ) {
+			return false;
+		}
+		$host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
+		return in_array( $host, [ 'localhost', '127.0.0.1', '::1', '[::1]' ], true ) || 1 === preg_match( '/\.(localhost|local|test)$/', $host );
+	}
+
+	/**
+	 * Límite de uso por clave y ventana (transient; con caché de objetos, en memoria).
+	 */
+	public static function budget( string $key, int $max, int $window ): bool {
+		$slot  = 'itb_cn_' . md5( $key ) . '_' . intdiv( time(), $window );
+		$count = (int) get_transient( $slot );
+		if ( $count >= $max ) {
+			return false;
+		}
+		set_transient( $slot, $count + 1, $window * 2 );
+		return true;
 	}
 
 	/**

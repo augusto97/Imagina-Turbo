@@ -41,6 +41,12 @@ final class ChangeSet {
 
 	private const LOCK = 'itb_connector_lock';
 
+	/** Lotes (y deshacer) por hora: cada uno purga la caché entera. */
+	private const PER_HOUR = 6;
+
+	/** Claves de los ajustes que son mapas: se deshacen por entrada. */
+	private const MAPS = [ 'modules', 'tweaks' ];
+
 	/** Páginas que se miden en cada lote. */
 	private const PAGES = 8;
 
@@ -75,6 +81,13 @@ final class ChangeSet {
 			return [
 				'result' => 'rejected',
 				'error'  => 'Hay otro lote en curso. Espera a que termine.',
+			];
+		}
+		// Cada lote purga la caché entera: como mucho seis lotes (o deshacer) por hora.
+		if ( ! Connector::budget( 'changes', self::PER_HOUR, HOUR_IN_SECONDS ) ) {
+			return [
+				'result' => 'rejected',
+				'error'  => 'Ya se aplicaron varios lotes en la última hora. Espera antes de seguir: cada lote purga la caché del sitio.',
 			];
 		}
 		set_transient( self::LOCK, time(), 180 );
@@ -146,24 +159,26 @@ final class ChangeSet {
 			}
 		}
 
+		// Solo lo que este lote cambió, con el valor de antes y el de después.
+		$undo     = self::undo( $snapshot, $settings->all() );
 		$reverted = '' !== $error || [] !== $reasons;
 		if ( $reverted ) {
-			$this->restore( $snapshot );
+			$this->restore( $undo );
 		}
 		$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: lote de cambios' ) );
 
 		$id = substr( bin2hex( random_bytes( 6 ) ), 0, 12 );
 		$this->remember(
 			[
-				'id'       => $id,
-				'at'       => time(),
-				'summary'  => $summary,
-				'steps'    => $steps,
-				'result'   => $reverted ? 'reverted' : 'applied',
-				'reasons'  => '' !== $error ? [ $error ] : $reasons,
-				'client'   => $grant['client_name'],
-				'user'     => get_current_user_id(),
-				'snapshot' => $snapshot,
+				'id'      => $id,
+				'at'      => time(),
+				'summary' => $summary,
+				'steps'   => $steps,
+				'result'  => $reverted ? 'reverted' : 'applied',
+				'reasons' => '' !== $error ? [ $error ] : $reasons,
+				'client'  => $grant['client_name'],
+				'user'    => get_current_user_id(),
+				'undo'    => $undo,
 			]
 		);
 		$this->container->get( EventLog::class )->warning(
@@ -209,8 +224,11 @@ final class ChangeSet {
 		$list = get_option( self::OPTION, [] );
 		$list = is_array( $list ) ? $list : [];
 		foreach ( $list as $i => $item ) {
-			if ( is_array( $item ) && ( $item['id'] ?? null ) === $id && is_array( $item['snapshot'] ?? null ) ) {
-				$this->restore( $item['snapshot'] );
+			if ( is_array( $item ) && ( $item['id'] ?? null ) === $id && 'applied' === ( $item['result'] ?? '' ) && is_array( $item['undo'] ?? null ) ) {
+				if ( ! Connector::budget( 'changes', self::PER_HOUR, HOUR_IN_SECONDS ) ) {
+					return false;
+				}
+				$this->restore( $item['undo'] );
 				$this->container->get( Purger::class )->purge( PurgeRequest::all( 'Claude: deshacer un lote' ) );
 				$list[ $i ]['result']    = 'undone';
 				$list[ $i ]['undone_at'] = time();
@@ -242,7 +260,7 @@ final class ChangeSet {
 		$out  = [];
 		foreach ( array_reverse( is_array( $list ) ? $list : [] ) as $item ) {
 			if ( is_array( $item ) ) {
-				unset( $item['snapshot'] );
+				unset( $item['undo'], $item['snapshot'] );
 				$out[] = $item;
 			}
 		}
@@ -399,10 +417,85 @@ final class ChangeSet {
 	}
 
 	/**
-	 * @param array<string, mixed> $snapshot Ajustes completos.
+	 * Lo que cambió entre dos estados de los ajustes: por clave, [antes, después]. En los mapas
+	 * (módulos y ajustes rápidos) solo las entradas que cambiaron.
+	 *
+	 * @param array<string, mixed> $before Antes.
+	 * @param array<string, mixed> $after  Después.
+	 * @return array<string, mixed>
 	 */
-	private function restore( array $snapshot ): void {
-		$this->container->get( Settings::class )->update( $snapshot );
+	public static function undo( array $before, array $after ): array {
+		$out = [];
+		foreach ( array_unique( array_merge( array_keys( $before ), array_keys( $after ) ) ) as $key ) {
+			$was = $before[ $key ] ?? null;
+			$now = $after[ $key ] ?? null;
+			if ( $was === $now ) {
+				continue;
+			}
+			if ( in_array( $key, self::MAPS, true ) && ( is_array( $was ) || null === $was ) && ( is_array( $now ) || null === $now ) ) {
+				$entries = [];
+				foreach ( array_unique( array_merge( array_keys( (array) $was ), array_keys( (array) $now ) ) ) as $entry ) {
+					if ( ( $was[ $entry ] ?? null ) !== ( $now[ $entry ] ?? null ) ) {
+						$entries[ $entry ] = [ $was[ $entry ] ?? null, $now[ $entry ] ?? null ];
+					}
+				}
+				$out[ $key ] = [ 'map' => $entries ];
+				continue;
+			}
+			$out[ $key ] = [ 'value' => [ $was, $now ] ];
+		}
+		return $out;
+	}
+
+	/**
+	 * Cambios que deshacen un lote sobre los ajustes actuales. Una clave que alguien cambió después
+	 * (ya no tiene el valor que dejó el lote) no se toca: deshacer nunca pisa lo que hizo el dueño.
+	 *
+	 * @param array<string, mixed> $undo    Resultado de undo().
+	 * @param array<string, mixed> $current Ajustes actuales.
+	 * @return array<string, mixed>
+	 */
+	public static function restoration( array $undo, array $current ): array {
+		$changes = [];
+		foreach ( $undo as $key => $diff ) {
+			if ( ! is_string( $key ) || ! is_array( $diff ) ) {
+				continue;
+			}
+			if ( isset( $diff['map'] ) && is_array( $diff['map'] ) ) {
+				$map     = is_array( $current[ $key ] ?? null ) ? $current[ $key ] : [];
+				$touched = false;
+				foreach ( $diff['map'] as $entry => $pair ) {
+					if ( is_array( $pair ) && ( $map[ $entry ] ?? null ) === ( $pair[1] ?? null ) ) {
+						if ( null === ( $pair[0] ?? null ) ) {
+							unset( $map[ $entry ] );
+						} else {
+							$map[ $entry ] = $pair[0];
+						}
+						$touched = true;
+					}
+				}
+				if ( $touched ) {
+					$changes[ $key ] = $map;
+				}
+				continue;
+			}
+			$pair = $diff['value'] ?? null;
+			if ( is_array( $pair ) && ( $current[ $key ] ?? null ) === ( $pair[1] ?? null ) ) {
+				$changes[ $key ] = $pair[0] ?? null;
+			}
+		}
+		return $changes;
+	}
+
+	/**
+	 * @param array<string, mixed> $undo Resultado de undo().
+	 */
+	private function restore( array $undo ): void {
+		$settings = $this->container->get( Settings::class );
+		$changes  = self::restoration( $undo, $settings->all() );
+		if ( [] !== $changes ) {
+			$settings->update( $changes );
+		}
 		$this->container->get( ConfigCompiler::class )->compile();
 	}
 

@@ -304,6 +304,75 @@ final class ConnectorTest extends TestCase {
 		$this->assertIsString( ChangeSet::measure( '//otro.example/', false ) );
 	}
 
+	public function test_undo_touches_only_what_the_change_set_changed(): void {
+		$before = [
+			'spec_eagerness' => 'conservative',
+			'shield_facets'  => false,
+			'modules'        => [
+				'rum'       => true,
+				'firewall'  => false,
+				'turnstile' => false,
+			],
+			'tweaks'         => [ 'emojis' => true ],
+		];
+		$after  = $before;
+
+		$after['spec_eagerness']   = 'moderate';
+		$after['modules']['rum']   = false;
+		$after['tweaks']['embeds'] = true;
+		$undo                      = ChangeSet::undo( $before, $after );
+		$this->assertSame( [ 'spec_eagerness', 'modules', 'tweaks' ], array_keys( $undo ) );
+		$this->assertSame( [ 'rum' ], array_keys( $undo['modules']['map'] ), 'solo la entrada que cambió' );
+
+		// Después, el dueño activa el firewall y Turnstile y cambia la anticipación: deshacer no lo pisa.
+		$current                         = $after;
+		$current['modules']['firewall']  = true;
+		$current['modules']['turnstile'] = true;
+		$current['shield_facets']        = true;
+		$current['spec_eagerness']       = 'eager';
+		$changes                         = ChangeSet::restoration( $undo, $current );
+		$this->assertArrayNotHasKey( 'spec_eagerness', $changes, 'el dueño lo cambió después: se respeta' );
+		$this->assertArrayNotHasKey( 'shield_facets', $changes );
+		$this->assertSame(
+			[
+				'rum'       => true,
+				'firewall'  => true,
+				'turnstile' => true,
+			],
+			$changes['modules']
+		);
+		$this->assertSame( [ 'emojis' => true ], $changes['tweaks'], 'la entrada que añadió el lote se quita' );
+
+		// Deshacer en el mismo momento devuelve exactamente lo de antes.
+		$this->assertSame( 'conservative', ChangeSet::restoration( $undo, $after )['spec_eagerness'] ?? null );
+	}
+
+	public function test_rest_special_params_and_budget(): void {
+		$this->assertSame(
+			[ 'spec_mode' => 'prefetch' ],
+			Tools::changes(
+				[
+					'spec_mode' => 'prefetch',
+					'_method'   => 'DELETE',
+					'_fields'   => 'x',
+					'_envelope' => 1,
+					'context'   => 'edit',
+					'id'        => 'shield',
+				]
+			)
+		);
+		$many = [];
+		for ( $i = 0; $i < 50; $i++ ) {
+			$many[ 'key_' . chr( 97 + intdiv( $i, 26 ) ) . chr( 97 + $i % 26 ) ] = $i;
+		}
+		$this->assertCount( 30, Tools::changes( $many ) );
+
+		$this->assertTrue( Connector::budget( 'prueba', 2, 60 ) );
+		$this->assertTrue( Connector::budget( 'prueba', 2, 60 ) );
+		$this->assertFalse( Connector::budget( 'prueba', 2, 60 ) );
+		$this->assertTrue( Connector::budget( 'otra', 2, 60 ) );
+	}
+
 	private function server(): McpServer {
 		$wpdb         = \Mockery::mock( \wpdb::class );
 		$wpdb->prefix = 'wp_';

@@ -77,9 +77,28 @@ final class OAuthServer {
 		Connector::noStore();
 		if ( ! headers_sent() ) {
 			header( 'X-Frame-Options: DENY' );
-			header( "Content-Security-Policy: frame-ancestors 'none'" );
+			// Página sin recursos externos ni scripts: nada que inyectar, nada que enmarcar.
+			header( "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'" );
+			header( 'Referrer-Policy: no-referrer' );
+		}
+		if ( ! Connector::budget( 'authorize|' . RumCollector::clientIp( $_SERVER ), 30, 60 ) ) {
+			self::page( __( 'Demasiados intentos', 'imagina-turbo' ), '<p>' . esc_html__( 'Espera un minuto y vuelve a intentarlo.', 'imagina-turbo' ) . '</p>', 429 );
 		}
 		$p = self::params( $_GET ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- parámetros de OAuth; el POST verifica su nonce.
+
+		$problems = Connector::problems();
+		if ( [] !== $problems ) {
+			self::page( __( 'El conector no está listo', 'imagina-turbo' ), '<p>' . implode( '</p><p>', array_map( 'esc_html', $problems ) ) . '</p>', 503 );
+		}
+		// Primero la sesión: un visitante anónimo no hace que el sitio pida documentos a ningún lado.
+		if ( ! is_user_logged_in() ) {
+			wp_safe_redirect( wp_login_url( self::selfUrl( $p ) ) );
+			exit;
+		}
+		$user = get_current_user_id();
+		if ( ! Connector::userCan( $user ) ) {
+			self::page( __( 'Sin permiso', 'imagina-turbo' ), '<p>' . esc_html__( 'Tu usuario no administra Imagina Turbo en este sitio. Entra con una cuenta de administrador.', 'imagina-turbo' ) . '</p>', 403 );
+		}
 
 		// Antes de redirigir nada: el cliente y su dirección de vuelta.
 		$client = ClientMetadata::load( $p['client_id'] );
@@ -98,18 +117,6 @@ final class OAuthServer {
 		}
 		if ( '' !== $p['resource'] && Connector::canonical( $p['resource'] ) !== Connector::canonical( Connector::resource() ) ) {
 			self::back( $back, $p['state'], 'invalid_target', 'El recurso no es el conector de este sitio.' );
-		}
-		$problems = Connector::problems();
-		if ( [] !== $problems ) {
-			self::page( __( 'El conector no está listo', 'imagina-turbo' ), '<p>' . implode( '</p><p>', array_map( 'esc_html', $problems ) ) . '</p>', 503 );
-		}
-		if ( ! is_user_logged_in() ) {
-			wp_safe_redirect( wp_login_url( self::selfUrl( $p ) ) );
-			exit;
-		}
-		$user = get_current_user_id();
-		if ( ! Connector::userCan( $user ) ) {
-			self::page( __( 'Sin permiso', 'imagina-turbo' ), '<p>' . esc_html__( 'Tu usuario no administra Imagina Turbo en este sitio. Entra con una cuenta de administrador.', 'imagina-turbo' ) . '</p>', 403 );
 		}
 
 		$method = isset( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( sanitize_key( wp_unslash( $_SERVER['REQUEST_METHOD'] ) ) ) : 'GET';

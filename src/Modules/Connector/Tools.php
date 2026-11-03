@@ -62,6 +62,19 @@ final class Tools {
 	/** Texto máximo de una respuesta (Claude recibe JSON; lo demás se recorta con aviso). */
 	private const MAX_TEXT = 60000;
 
+	/** Argumentos de una llamada, en JSON. */
+	private const MAX_INPUT = 16384;
+
+	/** Límites de las herramientas que hacen trabajo de verdad: [veces, segundos]. */
+	private const LIMITS = [
+		'diagnose_site'          => [ 10, 300 ],
+		'measure_page'           => [ 20, 300 ],
+		'run_cacheability_audit' => [ 2, 600 ],
+		'update_settings'        => [ 30, 3600 ],
+		'set_module'             => [ 20, 3600 ],
+		'purge_cache'            => [ 20, 3600 ],
+	];
+
 	public function __construct( private readonly EventLog $events, private readonly ChangeSet $changes ) {
 	}
 
@@ -316,6 +329,16 @@ final class Tools {
 		if ( Connector::SCOPE_ADJUST === $known[ $name ] && ! $adjust ) {
 			return self::fail( 'Esta conexión es de solo lectura. Para hacer ajustes, el dueño del sitio tiene que volver a conectar a Claude eligiendo «Diagnosticar y ajustar».' );
 		}
+		// Las herramientas caras tienen su propio límite (por acceso): ninguna sirve para cargar el servidor.
+		if ( isset( self::LIMITS[ $name ] ) ) {
+			[ $max, $window ] = self::LIMITS[ $name ];
+			if ( ! Connector::budget( $name . '|' . $grant['id'], $max, $window ) ) {
+				return self::fail( sprintf( 'Límite de uso de esta herramienta: %1$d veces cada %2$d minutos. Espera un poco.', $max, max( 1, intdiv( $window, 60 ) ) ) );
+			}
+		}
+		if ( strlen( (string) wp_json_encode( $args ) ) > self::MAX_INPUT ) {
+			return self::fail( 'Entrada demasiado grande.' );
+		}
 		$period = in_array( $args['period'] ?? '', [ '1h', '24h', '48h', '7d', '30d' ], true ) ? (string) $args['period'] : '24h';
 		switch ( $name ) {
 			case 'diagnose_site':
@@ -372,7 +395,7 @@ final class Tools {
 				return self::wrap( $this->changes->apply( is_string( $args['summary'] ?? null ) ? $args['summary'] : '', is_array( $args['steps'] ?? null ) ? array_values( $args['steps'] ) : [], $grant ) );
 			case 'revert_change':
 				$id = is_string( $args['id'] ?? null ) ? $args['id'] : '';
-				return $this->changes->revert( $id, $grant ) ? self::wrap( [ 'reverted' => $id ] ) : self::fail( 'No hay un lote con ese id.' );
+				return $this->changes->revert( $id, $grant ) ? self::wrap( [ 'reverted' => $id ] ) : self::fail( 'No hay un lote aplicado con ese id (o ya se deshizo, o se alcanzó el límite de lotes por hora).' );
 		}
 		return self::fail( 'Herramienta desconocida.' );
 	}
@@ -475,7 +498,8 @@ final class Tools {
 	public static function changes( mixed $changes ): array {
 		$out = [];
 		foreach ( is_array( $changes ) ? $changes : [] as $key => $value ) {
-			if ( is_string( $key ) && 1 === preg_match( '/^[a-z_]{2,40}$/', $key ) && 'confirm' !== $key ) {
+			// Solo nombres de ajuste: ni confirm ni los parámetros especiales de la REST (_method, _fields…).
+			if ( is_string( $key ) && 1 === preg_match( '/^[a-z][a-z_]{1,39}$/', $key ) && 'confirm' !== $key && 'context' !== $key && 'id' !== $key && count( $out ) < 30 ) {
 				$out[ $key ] = $value;
 			}
 		}

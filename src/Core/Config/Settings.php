@@ -84,6 +84,8 @@ final class Settings {
 			// Ajustes manuales de las reglas (0.23.0): vacío = los de siempre (EdgeOptions).
 			'firewall_custom'          => [],
 			'cache_custom'             => [],
+			// Cachés del servidor (0.24.0): Varnish y nginx (ServerCaches::settings).
+			'server_cache'             => [],
 			'rum_rate'                 => 0.05,
 			'spec_mode'                => 'prefetch',
 			'spec_eagerness'           => 'moderate',
@@ -409,6 +411,9 @@ final class Settings {
 		}
 		if ( isset( $input['cache_custom'] ) && is_array( $input['cache_custom'] ) ) {
 			$out['cache_custom'] = \ImaginaTurbo\Cloudflare\EdgeOptions::cache( $input['cache_custom'] );
+		}
+		if ( isset( $input['server_cache'] ) && is_array( $input['server_cache'] ) ) {
+			$out['server_cache'] = \ImaginaTurbo\Modules\CacheCoordinator\ServerCaches::settings( $input['server_cache'] );
 		}
 		// Valor elegido para cada ajuste de la zona de Cloudflare (0.21.0); Templates descarta lo que no sea una opción.
 		if ( isset( $input['cf_zone_prefs'] ) && is_array( $input['cf_zone_prefs'] ) ) {

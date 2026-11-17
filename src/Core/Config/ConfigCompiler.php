@@ -25,6 +25,7 @@ use ImaginaTurbo\Hub\HubClient;
 use ImaginaTurbo\Integrations\ImaginaSearch;
 use ImaginaTurbo\Modules\AssetManager\AssetRules;
 use ImaginaTurbo\Modules\CacheCoordinator\AjaxFragments;
+use ImaginaTurbo\Modules\CacheCoordinator\ServerCaches;
 use ImaginaTurbo\Modules\Rum\RumService;
 use ImaginaTurbo\Modules\Turnstile\Turnstile;
 use ImaginaTurbo\Modules\PluginFilter\RuleStore;
@@ -268,7 +269,7 @@ final class ConfigCompiler {
 			'woo'                         => $this->wooConfig( $theme ),
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
-			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( $bypassAll, $coreBypass ) ), $custom ),
+			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( $bypassAll, $coreBypass ) ), $custom, $active ),
 			// Turnstile (0.21.0): solo con el módulo activo y las claves probadas.
 			'turnstile'                   => $this->turnstileConfig( true === ( $modules['turnstile'] ?? false ) ),
 			// Lo que Zaraz reemplaza en el sitio (0.18.0), solo con el módulo Cloudflare activo.
@@ -487,9 +488,10 @@ final class ConfigCompiler {
 	 * @param list<string>              $bypassPaths Rutas que nunca se cachean, de integraciones y páginas dinámicas
 	 *                                               (las del núcleo ya las cubren los tipos de request).
 	 * @param array{bypass_paths: list<string>, bypass_cookies: list<string>, static_ttl: int}|null $custom Exclusiones manuales (0.23.0).
+	 * @param list<string>              $active      Plugins activos (cachés del servidor, 0.24.0).
 	 * @return array<string, mixed>
 	 */
-	private function cacheConfig( array $env, ?array $compat, array $bypassPaths = [], ?array $custom = null ): array {
+	private function cacheConfig( array $env, ?array $compat, array $bypassPaths = [], ?array $custom = null, array $active = [] ): array {
 		$plugin  = $env['cache_plugin'] ?? null;
 		$adapter = match ( $plugin ) {
 			'litespeed-cache' => 'litespeed',
@@ -519,6 +521,8 @@ final class ConfigCompiler {
 			// Exclusiones manuales: además del no-store para el edge, el plugin de caché no guarda esas páginas.
 			'custom_paths'    => $custom['bypass_paths'] ?? [],
 			'custom_cookies'  => $custom['bypass_cookies'] ?? [],
+			// Varnish y nginx delante de WordPress (0.24.0): qué se coordina y con qué plugin.
+			'server_cache'    => ServerCaches::resolve( (array) $this->settings->get( 'server_cache', [] ), $active ),
 		];
 	}
 

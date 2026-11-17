@@ -15,6 +15,7 @@ namespace ImaginaTurbo\Rest;
 use ImaginaTurbo\Modules\CacheCoordinator\Adapters\CacheAdapter;
 use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\CacheCoordinator\NonceRefresh;
+use ImaginaTurbo\Modules\CacheCoordinator\ServerCaches;
 use ImaginaTurbo\Support\RateLimiter;
 
 /**
@@ -61,6 +62,7 @@ final class NonceController {
 
 	public function handle( \WP_REST_Request $request ): \WP_REST_Response {
 		$this->adapter->noCache( 'nonce' );
+		ServerCaches::noCache();
 		if ( ! RateLimiter::allow( 'nonce', RateLimiter::clientIp(), self::PER_MINUTE ) ) {
 			return self::noStore( new \WP_Error( 'itb_rate_limited', __( 'Demasiadas peticiones.', 'imagina-turbo' ), [ 'status' => 429 ] ) );
 		}

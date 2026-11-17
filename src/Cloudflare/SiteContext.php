@@ -29,6 +29,7 @@ final class SiteContext {
 	 * @param list<string>               $varyCookies    Cookies de variación con nombre exacto (moneda, idioma, consentimiento).
 	 * @param bool                       $edgeVariants   Variantes por cookie en el edge (0.18.0): esas cookies ya no impiden la caché.
 	 * @param array<string, string|int>  $zonePrefs      Valor elegido para cada ajuste de la zona, o "keep" para no tocarlo (0.21.0).
+	 * @param array<mixed>               $cacheCustom    Ajustes manuales de la caché (cache_custom, 0.23.0).
 	 */
 	public function __construct(
 		public readonly string $host,
@@ -47,7 +48,15 @@ final class SiteContext {
 		public readonly array $varyCookies = [],
 		public readonly bool $edgeVariants = false,
 		public readonly array $zonePrefs = [],
+		public readonly array $cacheCustom = [],
 	) {
+	}
+
+	/**
+	 * Segundos que los estáticos se guardan en el edge (30 días si no se eligió otro valor).
+	 */
+	public function staticTtl(): int {
+		return EdgeOptions::cache( $this->cacheCustom )['static_ttl'];
 	}
 
 	public static function fromRuntime( ?CompiledConfig $config, Settings $settings, string $matrixFile ): self {
@@ -114,6 +123,7 @@ final class SiteContext {
 			$exact,
 			$variants,
 			Settings::zonePrefs( (array) $settings->get( 'cf_zone_prefs', [] ) ),
+			(array) $settings->get( 'cache_custom', [] ),
 		);
 	}
 

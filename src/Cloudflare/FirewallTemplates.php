@@ -20,6 +20,11 @@
  * - Combinaciones de filtros para crawlers (0.21.0, apagada por defecto): misma definición que la
  *   guardia PHP (EarlyGuard). Usa el operador wildcard, disponible en todos los planes (los regex con
  *   matches son de Business en adelante), y cf.client.bot (bots verificados, todos los planes).
+ * - Ajustes manuales (0.23.0, EdgeOptions): IPs y rutas que se saltan todas las reglas (van en el
+ *   mismo "and not" que los webhooks, sin gastar reglas del plan), la acción de cada regla, escáneres
+ *   añadidos o quitados, países (regla propia, apagada por defecto; los bots verificados siempre pasan
+ *   para no perder posicionamiento) y el límite de peticiones dentro de lo que admite el plan. Sin
+ *   ajustes, cada regla sale exactamente igual que antes: los sitios que ya la aplicaron no ven cambios.
  *
  * @package ImaginaTurbo
  */
@@ -37,7 +42,7 @@ final class FirewallTemplates {
 
 	/** Escáneres conocidos (user agent, en minúsculas). */
 	/** Reglas que solo existen si se activan a mano. */
-	public const OFF_BY_DEFAULT = [ 'facets' ];
+	public const OFF_BY_DEFAULT = [ 'facets', 'countries' ];
 
 	/** Crawlers por user agent (en minúsculas), además de los verificados: igual que EarlyGuard::CRAWLER_UA. */
 	public const CRAWLER_TOKENS = [ 'bot/', 'bot;', 'bot-', 'spider', 'crawl', '+http', 'facebookexternalhit', 'meta-external', 'mediapartners', 'googleother', 'google-inspectiontool', 'slurp' ];
@@ -51,8 +56,16 @@ final class FirewallTemplates {
 	public const BAD_BOTS = [ 'sqlmap', 'nikto', 'nmap', 'masscan', 'zgrab', 'wpscan', 'acunetix', 'nessus', 'netsparker', 'openvas', 'w3af', 'dirbuster', 'gobuster', 'nuclei', 'jorgee', 'zmeu', 'fimap', 'havij' ];
 
 	/**
-	 * @param array<string, bool> $enabled   Reglas activadas (exploits, surface, bots, facets).
+	 * Ajustes manuales normalizados (EdgeOptions::firewall).
+	 *
+	 * @var array{allow_ips: list<string>, allow_paths: list<string>, actions: array<string, string>, bots_extra: list<string>, bots_off: list<string>, countries: list<string>, country_mode: string, rl_requests: int, rl_period: int, rl_timeout: int, rl_paths: list<string>}
+	 */
+	private readonly array $opts;
+
+	/**
+	 * @param array<string, bool> $enabled   Reglas activadas (exploits, surface, bots, facets, countries).
 	 * @param array<string, int>  $challenge Desde cuándo cada ref está en desafío (para pasar a block).
+	 * @param array<mixed>        $custom    Ajustes manuales (firewall_custom, 0.23.0).
 	 */
 	public function __construct(
 		private readonly SiteContext $site,
@@ -63,7 +76,9 @@ final class FirewallTemplates {
 		private readonly ?int $now = null,
 		private readonly bool $facetViews = true,
 		private readonly bool $facetAll = false,
+		array $custom = [],
 	) {
+		$this->opts = EdgeOptions::firewall( $custom );
 	}
 
 	/**
@@ -73,23 +88,29 @@ final class FirewallTemplates {
 		$p    = $this->site->refPrefix;
 		$out  = [];
 		$defs = [
-			'exploits' => [ __( 'Firewall: ataques en la URL', 'imagina-turbo' ), __( 'Recorridos de directorios, inyección SQL y XSS en el query, archivos sensibles (.git, .env, .sql, .bak, phpunit, phpinfo) y métodos TRACE/TRACK/DEBUG.', 'imagina-turbo' ), $this->exploitsExpression() ],
-			'surface'  => [ __( 'Firewall: superficie de WordPress', 'imagina-turbo' ), __( 'Enumeración de usuarios (/?author=), PHP dentro de uploads, readme.html, license.txt y copias de wp-config. XML-RPC también, salvo que un plugin activo lo necesite.', 'imagina-turbo' ), $this->surfaceExpression() ],
-			'bots'     => [ __( 'Firewall: escáneres conocidos', 'imagina-turbo' ), __( 'sqlmap, nikto, wpscan, nuclei y otros escáneres por su user agent.', 'imagina-turbo' ), $this->botsExpression() ],
-			'facets'   => [ __( 'Firewall: combinaciones de filtros para crawlers', 'imagina-turbo' ), $this->facetAll ? __( 'Google, Bing, Meta y cualquier otro crawler que pida una URL con filtros de la tienda (el escudo está en «todos los filtros»): solo ven las URL reales. Las personas no se ven afectadas.', 'imagina-turbo' ) : __( 'Google, Bing, Meta y cualquier otro crawler que pida dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro (y el orden o la vista, si se incluyen en el escudo). Cada filtro por separado sigue abierto. Las personas no se ven afectadas.', 'imagina-turbo' ), $this->facetsExpression() ],
+			'exploits'  => [ __( 'Firewall: ataques en la URL', 'imagina-turbo' ), __( 'Recorridos de directorios, inyección SQL y XSS en el query, archivos sensibles (.git, .env, .sql, .bak, phpunit, phpinfo) y métodos TRACE/TRACK/DEBUG.', 'imagina-turbo' ), $this->exploitsExpression() ],
+			'surface'   => [ __( 'Firewall: superficie de WordPress', 'imagina-turbo' ), __( 'Enumeración de usuarios (/?author=), PHP dentro de uploads, readme.html, license.txt y copias de wp-config. XML-RPC también, salvo que un plugin activo lo necesite.', 'imagina-turbo' ), $this->surfaceExpression() ],
+			'bots'      => [ __( 'Firewall: escáneres conocidos', 'imagina-turbo' ), __( 'sqlmap, nikto, wpscan, nuclei y otros escáneres por su user agent.', 'imagina-turbo' ), $this->botsExpression() ],
+			'facets'    => [ __( 'Firewall: combinaciones de filtros para crawlers', 'imagina-turbo' ), $this->facetAll ? __( 'Google, Bing, Meta y cualquier otro crawler que pida una URL con filtros de la tienda (el escudo está en «todos los filtros»): solo ven las URL reales. Las personas no se ven afectadas.', 'imagina-turbo' ) : __( 'Google, Bing, Meta y cualquier otro crawler que pida dos filtros de la tienda a la vez, varios valores de un filtro o el precio con otro filtro (y el orden o la vista, si se incluyen en el escudo). Cada filtro por separado sigue abierto. Las personas no se ven afectadas.', 'imagina-turbo' ), $this->facetsExpression() ],
+			'countries' => [ __( 'Firewall: países', 'imagina-turbo' ), $this->countriesDescription(), $this->countriesExpression() ],
 		];
 		foreach ( $defs as $id => [ $title, $description, $expression ] ) {
 			if ( ! ( $this->enabled[ $id ] ?? ! in_array( $id, self::OFF_BY_DEFAULT, true ) ) ) {
 				continue;
 			}
 			$ref    = $p . 'fw-' . $id;
-			$action = $this->action( $ref );
+			$action = $this->action( $ref, $id );
 			$out[]  = [
 				'rule'        => new Rule( Phases::WAF, $ref, Rule::DESCRIPTION_PREFIX . $title, $expression, $action ),
 				'risk'        => 'moderate',
 				'title'       => $title,
-				'description' => $description . ' ' . ( 'block' === $action ? __( 'Tras 7 días en desafío, pasa a bloqueo.', 'imagina-turbo' ) : __( 'Entra en modo desafío (managed challenge) durante 7 días.', 'imagina-turbo' ) ),
-				'blocked'     => strlen( $expression ) > Templates::MAX_EXPRESSION ? __( 'La expresión no cabe en una regla.', 'imagina-turbo' ) : '',
+				'description' => $description . ' ' . $this->actionNote( $id, $action ) . $this->exceptionsNote(),
+				'blocked'     => match ( true ) {
+					'bots' === $id && [] === $this->botList() => __( 'La lista de escáneres está vacía: agrega alguno o apaga la regla.', 'imagina-turbo' ),
+					'countries' === $id && [] === $this->opts['countries'] => __( 'Elige al menos un país.', 'imagina-turbo' ),
+					strlen( $expression ) > Templates::MAX_EXPRESSION => __( 'La expresión no cabe en una regla: quita excepciones o escáneres.', 'imagina-turbo' ),
+					default => '',
+				},
 			];
 		}
 
@@ -99,9 +120,7 @@ final class FirewallTemplates {
 				'rule'        => $rule,
 				'risk'        => 'moderate',
 				'title'       => __( 'Límite de peticiones: login y checkout', 'imagina-turbo' ),
-				'description' => 'free' === $this->limits->plan()
-					? __( 'Más de 5 peticiones en 10 s por IP a wp-login.php, al login personalizado o al checkout por bloques: bloqueo de 10 s (lo máximo en Free). Protege de fuerza bruta y de card testing. En Free no se puede cubrir el checkout clásico (?wc-ajax=checkout): queda para la pasarela, CrowdSec y la guardia PHP.', 'imagina-turbo' )
-					: __( 'Más de 5 peticiones en 10 s por IP a wp-login.php, al login personalizado o al checkout (por bloques y clásico): bloqueo de 10 minutos. Protege de fuerza bruta y de card testing.', 'imagina-turbo' ),
+				'description' => $this->rateLimitDescription(),
 				'blocked'     => '',
 			];
 		}
@@ -109,12 +128,109 @@ final class FirewallTemplates {
 	}
 
 	/**
-	 * Desafío los primeros 7 días; después, bloqueo.
+	 * Acción de la regla. Automática (la de siempre): desafío los primeros 7 días y después bloqueo.
+	 * Con una acción elegida (0.23.0), esa siempre. Países: desafío salvo que se elija otra cosa.
 	 */
-	public function action( string $ref ): string {
+	public function action( string $ref, string $id = '' ): string {
+		$mode = $this->opts['actions'][ $id ] ?? ( 'countries' === $id ? 'challenge' : 'auto' );
+		if ( 'challenge' === $mode ) {
+			return 'managed_challenge';
+		}
+		if ( 'block' === $mode ) {
+			return 'block';
+		}
 		$since = $this->challenge[ $ref ] ?? 0;
 		$now   = $this->now ?? time();
 		return $since > 0 && $now - $since >= self::TEST_DAYS * DAY_IN_SECONDS ? 'block' : 'managed_challenge';
+	}
+
+	private function actionNote( string $id, string $action ): string {
+		$mode = $this->opts['actions'][ $id ] ?? ( 'countries' === $id ? 'challenge' : 'auto' );
+		if ( 'challenge' === $mode ) {
+			return __( 'Siempre en desafío (managed challenge): una persona pasa, un bot no.', 'imagina-turbo' );
+		}
+		if ( 'block' === $mode ) {
+			return __( 'Bloqueo directo, sin periodo de prueba.', 'imagina-turbo' );
+		}
+		return 'block' === $action ? __( 'Tras 7 días en desafío, pasa a bloqueo.', 'imagina-turbo' ) : __( 'Entra en modo desafío (managed challenge) durante 7 días.', 'imagina-turbo' );
+	}
+
+	private function exceptionsNote(): string {
+		$ips   = count( $this->opts['allow_ips'] );
+		$paths = count( $this->opts['allow_paths'] );
+		if ( 0 === $ips + $paths ) {
+			return '';
+		}
+		/* translators: 1: número de IPs o rangos, 2: número de rutas. */
+		return ' ' . sprintf( __( 'Excepciones: %1$d IPs o rangos y %2$d rutas.', 'imagina-turbo' ), $ips, $paths );
+	}
+
+	/**
+	 * Escáneres de la lista de siempre que siguen activos, más los añadidos a mano.
+	 *
+	 * @return list<string>
+	 */
+	public function botList(): array {
+		$list = array_values( array_diff( self::BAD_BOTS, $this->opts['bots_off'] ) );
+		return array_values( array_unique( array_merge( $list, $this->opts['bots_extra'] ) ) );
+	}
+
+	/**
+	 * Países: los elegidos («listed») o todos menos ellos («others»). Los bots verificados (Google,
+	 * Bing…) siempre pasan: bloquearlos sacaría el sitio de los buscadores en esos países.
+	 */
+	public function countriesExpression(): string {
+		$set = '{' . implode( ' ', array_map( [ Templates::class, 'quote' ], [] === $this->opts['countries'] ? [ 'XX' ] : $this->opts['countries'] ) ) . '}';
+		$geo = 'others' === $this->opts['country_mode'] ? 'not ip.src.country in ' . $set : 'ip.src.country in ' . $set;
+		return $this->wrap( [ '(' . $geo . ' and not cf.client.bot)' ] );
+	}
+
+	private function countriesDescription(): string {
+		$list = [] === $this->opts['countries'] ? '—' : implode( ', ', $this->opts['countries'] );
+		return 'others' === $this->opts['country_mode']
+			/* translators: %s: códigos de país. */
+			? sprintf( __( 'Visitas desde cualquier país salvo %s. Google, Bing y los demás bots verificados siempre pasan.', 'imagina-turbo' ), $list )
+			/* translators: %s: códigos de país. */
+			: sprintf( __( 'Visitas desde %s. Google, Bing y los demás bots verificados siempre pasan.', 'imagina-turbo' ), $list );
+	}
+
+	/**
+	 * Valores del límite de peticiones dentro de lo que admite el plan.
+	 *
+	 * @return array{requests: int, period: int, timeout: int, ip: bool}
+	 */
+	public function rateLimitValues(): array {
+		$rl       = $this->limits->ratelimit();
+		$ints     = static fn( mixed $v ): array => is_array( $v ) ? array_values( array_filter( array_map( 'intval', $v ), static fn( int $n ): bool => $n > 0 ) ) : [];
+		$periods  = $ints( $rl['periods'] ?? null );
+		$timeouts = $ints( $rl['mitigation_timeouts'] ?? null );
+		$periods  = [] === $periods ? [ 10 ] : $periods;
+		$timeouts = [] === $timeouts ? [ 10 ] : $timeouts;
+		$fallback = 'free' === $this->limits->plan() ? 10 : 600;
+		return [
+			'requests' => $this->opts['rl_requests'],
+			'period'   => EdgeOptions::pick( $periods, $this->opts['rl_period'] ),
+			'timeout'  => EdgeOptions::pick( $timeouts, 0 === $this->opts['rl_timeout'] ? $fallback : $this->opts['rl_timeout'] ),
+			'ip'       => in_array( 'ip', is_array( $rl['fields'] ?? null ) ? $rl['fields'] : [], true ),
+		];
+	}
+
+	private function rateLimitDescription(): string {
+		$v    = $this->rateLimitValues();
+		$text = sprintf(
+			/* translators: 1: peticiones, 2: segundos, 3: duración del bloqueo. */
+			__( 'Más de %1$d peticiones en %2$d s por IP al login, al checkout y a las rutas añadidas: bloqueo de %3$s. Protege de fuerza bruta y de card testing.', 'imagina-turbo' ),
+			$v['requests'],
+			$v['period'],
+			$v['timeout'] >= 60 ? sprintf( /* translators: %d: minutos. */ _n( '%d minuto', '%d minutos', intdiv( $v['timeout'], 60 ), 'imagina-turbo' ), intdiv( $v['timeout'], 60 ) ) : $v['timeout'] . ' s'
+		);
+		if ( 'free' === $this->limits->plan() ) {
+			$text .= ' ' . __( 'En Free solo se pueden usar 10 s y no se cubre el checkout clásico (?wc-ajax=checkout): queda para la pasarela, CrowdSec y la guardia PHP.', 'imagina-turbo' );
+		}
+		if ( [] !== $this->opts['allow_ips'] && ! $v['ip'] ) {
+			$text .= ' ' . __( 'Las IPs de las excepciones no se pueden excluir de esta regla en tu plan (Cloudflare solo deja mirar la ruta).', 'imagina-turbo' );
+		}
+		return $text;
 	}
 
 	public function exploitsExpression(): string {
@@ -156,7 +272,8 @@ final class FirewallTemplates {
 	}
 
 	public function botsExpression(): string {
-		$parts = array_map( static fn( string $bot ): string => 'lower(http.user_agent) contains ' . Templates::quote( $bot ), self::BAD_BOTS );
+		$list  = $this->botList();
+		$parts = array_map( static fn( string $bot ): string => 'lower(http.user_agent) contains ' . Templates::quote( $bot ), [] === $list ? [ 'imagina-turbo-sin-escaneres' ] : $list );
 		return $this->wrap( $parts );
 	}
 
@@ -202,12 +319,21 @@ final class FirewallTemplates {
 		foreach ( $this->site->paths['login'] ?? [] as $login ) {
 			$paths[] = $home . '/' . trim( $login, '/' );
 		}
+		// Rutas añadidas a mano (0.23.0), tal como se ven en la URL.
+		foreach ( $this->opts['rl_paths'] as $path ) {
+			$paths[] = $path;
+		}
 		$paths  = array_values( array_unique( $paths ) );
 		$byPath = 'http.request.uri.path in {' . implode( ' ', array_map( [ Templates::class, 'quote' ], $paths ) ) . '}';
 		$free   = 'free' === $this->limits->plan();
+		$values = $this->rateLimitValues();
 		$expr   = $free
 			? '(' . $byPath . ')'
 			: sprintf( '(http.host eq %1$s and (%2$s or (http.request.uri.path eq %3$s and http.request.uri.query contains "wc-ajax=checkout")))', Templates::quote( $this->site->host ), $byPath, Templates::quote( $home . '/' ) );
+		// Las IPs de las excepciones, solo donde el plan deja mirar la IP en esta fase (Business+).
+		if ( $values['ip'] && [] !== $this->opts['allow_ips'] ) {
+			$expr = '(' . $expr . ' and not ip.src in {' . implode( ' ', $this->opts['allow_ips'] ) . '})';
+		}
 		return new Rule(
 			Phases::RATELIMIT,
 			$ref,
@@ -218,9 +344,9 @@ final class FirewallTemplates {
 			true,
 			[
 				'characteristics'     => [ 'cf.colo.id', 'ip.src' ],
-				'period'              => 10,
-				'requests_per_period' => 5,
-				'mitigation_timeout'  => $free ? 10 : 600,
+				'period'              => $values['period'],
+				'requests_per_period' => $values['requests'],
+				'mitigation_timeout'  => $values['timeout'],
 			]
 		);
 	}
@@ -231,7 +357,23 @@ final class FirewallTemplates {
 	 * @param list<string> $parts Condiciones.
 	 */
 	private function wrap( array $parts ): string {
-		return sprintf( '(http.host eq %1$s and not %2$s and (%3$s))', Templates::quote( $this->site->host ), $this->webhooks(), implode( ' or ', $parts ) );
+		return sprintf( '(http.host eq %1$s and not %2$s and (%3$s))', Templates::quote( $this->site->host ), $this->excluded(), implode( ' or ', $parts ) );
+	}
+
+	/**
+	 * Lo que ninguna regla del firewall toca: webhooks de pasarelas y, desde 0.23.0, las IPs y rutas
+	 * de las excepciones. Sin excepciones es exactamente webhooks().
+	 */
+	public function excluded(): string {
+		$parts = [];
+		if ( [] !== $this->opts['allow_ips'] ) {
+			$parts[] = 'ip.src in {' . implode( ' ', $this->opts['allow_ips'] ) . '}';
+		}
+		foreach ( $this->opts['allow_paths'] as $path ) {
+			$parts[] = sprintf( '(http.request.uri.path eq %1$s or starts_with(http.request.uri.path, %2$s))', Templates::quote( $path ), Templates::quote( $path . '/' ) );
+		}
+		$webhooks = $this->webhooks();
+		return [] === $parts ? $webhooks : '(' . substr( $webhooks, 1, -1 ) . ' or ' . implode( ' or ', $parts ) . ')';
 	}
 
 	/**

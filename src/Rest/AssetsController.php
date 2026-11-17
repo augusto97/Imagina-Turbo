@@ -102,6 +102,36 @@ final class AssetsController extends Controller {
 				],
 			]
 		);
+		// Editar (0.23.0): los mismos campos; la regla vuelve a prueba si cambia algo más que la nota.
+		$this->route(
+			'/assets/rules/' . self::ID,
+			'PUT',
+			[ $this, 'update' ],
+			[
+				'handle'     => [
+					'type'      => 'string',
+					'required'  => true,
+					'maxLength' => 100,
+				],
+				'type'       => [
+					'type'     => 'string',
+					'enum'     => [ 'js', 'css' ],
+					'required' => true,
+				],
+				'mode'       => [
+					'type'     => 'string',
+					'enum'     => [ 'never', 'only' ],
+					'required' => true,
+				],
+				'templates'  => $list,
+				'ids'        => $list,
+				'post_types' => $list,
+				'note'       => [
+					'type'      => 'string',
+					'maxLength' => 200,
+				],
+			]
+		);
 		$confirm = [
 			'confirm' => [
 				'type'    => 'boolean',
@@ -375,6 +405,50 @@ final class AssetsController extends Controller {
 			]
 		);
 		return $this->ok( $this->status(), 201 );
+	}
+
+	/**
+	 * Cambia una regla (0.23.0). Si solo cambia la nota, conserva su estado; si cambia el asset o los
+	 * lugares, vuelve a prueba sin verificar (otra vez con la previsualización antes de activarla).
+	 */
+	public function update( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$id  = (string) $request->get_param( 'id' );
+		$old = $this->rules()->all()[ $id ] ?? null;
+		if ( null === $old ) {
+			return $this->error( 'itb_asset_rule', __( 'La regla no existe.', 'imagina-turbo' ), 404 );
+		}
+		$handle = (string) $request->get_param( 'handle' );
+		if ( AssetManagerModule::protectedHandle( $handle ) ) {
+			return $this->error( 'itb_asset_protected', __( 'Ese asset no se puede quitar (barra de administración o de Imagina Turbo).', 'imagina-turbo' ), 400 );
+		}
+		$rule = AssetRules::normalize(
+			[
+				'handle'      => $handle,
+				'type'        => $request->get_param( 'type' ),
+				'mode'        => $request->get_param( 'mode' ),
+				'templates'   => (array) ( $request->get_param( 'templates' ) ?? [] ),
+				'ids'         => (array) ( $request->get_param( 'ids' ) ?? [] ),
+				'post_types'  => (array) ( $request->get_param( 'post_types' ) ?? [] ),
+				'note'        => (string) ( $request->get_param( 'note' ) ?? '' ),
+				'status'      => 'testing',
+				'verified_by' => 0,
+				'verified_at' => 0,
+				'created_at'  => $old['created_at'],
+			]
+		);
+		if ( null === $rule ) {
+			return $this->error( 'itb_asset_rule', __( 'Regla no válida. "Solo aquí" necesita al menos una plantilla, página o tipo de contenido.', 'imagina-turbo' ), 400 );
+		}
+		if ( $rule['id'] === $id ) {
+			// Mismo asset y mismos lugares: solo la nota.
+			$old['note'] = $rule['note'];
+			return $this->store( $old, 'rule_edited', __( 'Nota de la regla de assets cambiada.', 'imagina-turbo' ), false );
+		}
+		if ( isset( $this->rules()->all()[ $rule['id'] ] ) ) {
+			return $this->error( 'itb_asset_exists', __( 'Ya hay otra regla igual.', 'imagina-turbo' ), 409 );
+		}
+		$this->rules()->delete( $id );
+		return $this->store( $rule, 'rule_edited', __( 'Regla de assets editada: vuelve a prueba (solo se aplica con la previsualización).', 'imagina-turbo' ), 'active' === $old['status'] );
 	}
 
 	public function activate( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {

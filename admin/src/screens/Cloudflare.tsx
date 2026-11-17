@@ -23,6 +23,7 @@ export const ACTIONS: Record<CfAction, { label: string; tone: 'neutral' | 'green
 	none: { label: __( 'Sin cambios' ), tone: 'neutral' },
 	drifted: { label: __( 'Modificada a mano' ), tone: 'amber' },
 	blocked: { label: __( 'Bloqueado' ), tone: 'neutral' },
+	unmanaged: { label: __( 'Gestionada por ti' ), tone: 'neutral' },
 };
 
 export const RISK_LABELS = { safe: __( 'Seguro' ), moderate: __( 'Moderado' ), invasive: __( 'Invasivo' ) };
@@ -359,7 +360,7 @@ function PlanCard( { status }: { status: CfStatus } ) {
 	const [ selected, setSelected ] = useState<string[] | null>( null );
 	const [ confirm, setConfirm ] = useState( false );
 	const apply = useAction( ( ids: string[] ) => api<CfApplyResult>( 'cloudflare/apply', 'POST', { ids, confirm: true } ) );
-	const pending = ( data?.changes ?? [] ).filter( ( c ) => c.action !== 'none' && c.action !== 'blocked' );
+	const pending = ( data?.changes ?? [] ).filter( ( c ) => c.action !== 'none' && c.action !== 'blocked' && c.action !== 'unmanaged' );
 	const chosen = selected ?? pending.filter( ( c ) => c.action !== 'drifted' && c.risk === 'safe' ).map( ( c ) => c.id );
 	const toggle = ( id: string ) => setSelected( chosen.includes( id ) ? chosen.filter( ( x ) => x !== id ) : [ ...chosen, id ] );
 	const canApply = status.enabled && ! status.guard.blocked;
@@ -389,7 +390,7 @@ function PlanCard( { status }: { status: CfStatus } ) {
 				{ data && (
 					<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-2 itb:p-0">
 						{ data.changes.map( ( c ) => (
-							<ChangeRow key={ c.id } change={ c } checked={ chosen.includes( c.id ) } onToggle={ () => toggle( c.id ) } disabled={ ! canApply || c.action === 'none' || c.action === 'blocked' } />
+							<ChangeRow key={ c.id } change={ c } checked={ chosen.includes( c.id ) } onToggle={ () => toggle( c.id ) } disabled={ ! canApply || c.action === 'none' || c.action === 'blocked' || c.action === 'unmanaged' } />
 						) ) }
 					</ul>
 				) }
@@ -435,8 +436,11 @@ function PlanCard( { status }: { status: CfStatus } ) {
 
 export function ChangeRow( { change, checked, onToggle, disabled }: { change: CfChange; checked: boolean; onToggle: () => void; disabled: boolean } ) {
 	const a = ACTIONS[ change.action ];
+	// Reglas propias que cambiaste en Cloudflare: el plugin puede dejar de gestionarlas (0.23.0).
+	const canManage = change.kind === 'rule' && change.ref !== '' && ( change.action === 'drifted' || change.action === 'unmanaged' );
 	return (
 		<li className="itb:rounded-md itb:border itb:border-zinc-200 itb:p-3">
+			{ canManage && <ManageRule change={ change } /> }
 			<label className="itb:flex itb:cursor-pointer itb:items-start itb:gap-2">
 				<input type="checkbox" className="itb:mt-0.5 itb:shrink-0" checked={ checked && ! disabled } disabled={ disabled } onChange={ onToggle } aria-label={ change.title } />
 				<span className="itb:min-w-0 itb:flex-1">
@@ -446,7 +450,7 @@ export function ChangeRow( { change, checked, onToggle, disabled }: { change: Cf
 						<RiskBadge risk={ change.risk } label={ RISK_LABELS[ change.risk ] } />
 					</span>
 					<span className="itb:mt-0.5 itb:block itb:text-xs itb:text-zinc-500">{ change.reason || change.description }</span>
-					{ change.action !== 'none' && change.action !== 'blocked' && (
+					{ change.action !== 'none' && change.action !== 'blocked' && change.action !== 'unmanaged' && (
 						<details className="itb:mt-1 itb:text-xs">
 							<summary className="itb:cursor-pointer itb:text-zinc-600">{ __( 'Ver lo que se enviará' ) }</summary>
 							<div className="itb:mt-1 itb:grid itb:gap-2 itb:md:grid-cols-2">
@@ -458,6 +462,42 @@ export function ChangeRow( { change, checked, onToggle, disabled }: { change: Cf
 				</span>
 			</label>
 		</li>
+	);
+}
+
+function ManageRule( { change }: { change: CfChange } ) {
+	const client = useQueryClient();
+	const managed = change.action === 'unmanaged';
+	const [ open, setOpen ] = useState( false );
+	const act = useAction( () => api<CfPlan>( 'cloudflare/rules/manage', 'POST', { ref: change.ref, managed } ) );
+	return (
+		<div className="itb:float-right itb:ml-2">
+			<Button size="sm" variant="outline" disabled={ act.isPending } onClick={ () => setOpen( true ) }>
+				{ managed ? __( 'Volver a gestionar' ) : __( 'Dejar de gestionar' ) }
+			</Button>
+			{ act.error && <span className="itb:block itb:text-xs itb:text-red-700">{ act.error.message }</span> }
+			<ConfirmDialog
+				open={ open }
+				onOpenChange={ setOpen }
+				title={ managed ? __( '¿Volver a gestionar esta regla?' ) : __( '¿Dejar de gestionar esta regla?' ) }
+				description={
+					managed
+						? __( 'Imagina Turbo vuelve a compararla con lo que recomienda. Si sigue distinta, aparece como «Modificada a mano» y no se sobrescribe salvo que la elijas.' )
+						: __( 'La regla queda como la dejaste en Cloudflare: Imagina Turbo no la cambia, no la borra y no la vuelve a crear. «Quitar todo lo de Imagina Turbo» sí la quita. No se toca nada en Cloudflare ahora.' )
+				}
+				confirmLabel={ managed ? __( 'Volver a gestionar' ) : __( 'Dejar de gestionar' ) }
+				pending={ act.isPending }
+				onConfirm={ () =>
+					act.mutate( undefined, {
+						onSettled: () => setOpen( false ),
+						onSuccess: ( plan ) => {
+							client.setQueryData( [ 'cf-plan' ], plan );
+							void client.invalidateQueries( { queryKey: [ 'firewall' ] } );
+						},
+					} )
+				}
+			/>
+		</div>
 	);
 }
 

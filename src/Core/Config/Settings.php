@@ -81,6 +81,9 @@ final class Settings {
 			'turnstile_skip'           => [],
 			'turnstile_verified'       => '',
 			'firewall_ratelimit'       => true,
+			// Ajustes manuales de las reglas (0.23.0): vacío = los de siempre (EdgeOptions).
+			'firewall_custom'          => [],
+			'cache_custom'             => [],
 			'rum_rate'                 => 0.05,
 			'spec_mode'                => 'prefetch',
 			'spec_eagerness'           => 'moderate',
@@ -208,6 +211,9 @@ final class Settings {
 	 */
 	public const IMPORT_KEEP = [ 'tag_prefix', 'profiler_intensive_until', 'ai_write', 'fleet_remote', 'hub_url', 'turnstile_verified' ];
 
+	/** Partes de firewall_custom que una importación nunca cambia (0.23.0): dejan pasar tráfico. */
+	public const IMPORT_KEEP_FIREWALL = [ 'allow_ips', 'allow_paths' ];
+
 	/**
 	 * Importa ajustes exportados. Lanza si el formato no es válido.
 	 *
@@ -227,6 +233,15 @@ final class Settings {
 		$settings = $payload['settings'];
 		foreach ( self::IMPORT_KEEP as $key ) {
 			unset( $settings[ $key ] );
+		}
+		// Las excepciones del firewall (IPs y rutas que se lo saltan) son de este sitio: un archivo de otro
+		// sitio, o uno preparado por alguien, no las cambia (0.23.0). El resto de sus ajustes sí se importa.
+		if ( is_array( $settings['firewall_custom'] ?? null ) ) {
+			$current = $this->get( 'firewall_custom', [] );
+			$current = is_array( $current ) ? $current : [];
+			foreach ( self::IMPORT_KEEP_FIREWALL as $key ) {
+				$settings['firewall_custom'][ $key ] = $current[ $key ] ?? [];
+			}
 		}
 		$skipped = [];
 		if ( null !== $risky && is_array( $settings['modules'] ?? null ) ) {
@@ -387,6 +402,13 @@ final class Settings {
 		}
 		if ( isset( $input['turnstile_verified'] ) && is_string( $input['turnstile_verified'] ) ) {
 			$out['turnstile_verified'] = 1 === preg_match( '/^[a-f0-9]{16}$/', $input['turnstile_verified'] ) ? $input['turnstile_verified'] : '';
+		}
+		// Ajustes manuales de las reglas del firewall y de la caché (0.23.0).
+		if ( isset( $input['firewall_custom'] ) && is_array( $input['firewall_custom'] ) ) {
+			$out['firewall_custom'] = \ImaginaTurbo\Cloudflare\EdgeOptions::firewall( $input['firewall_custom'] );
+		}
+		if ( isset( $input['cache_custom'] ) && is_array( $input['cache_custom'] ) ) {
+			$out['cache_custom'] = \ImaginaTurbo\Cloudflare\EdgeOptions::cache( $input['cache_custom'] );
 		}
 		// Valor elegido para cada ajuste de la zona de Cloudflare (0.21.0); Templates descarta lo que no sea una opción.
 		if ( isset( $input['cf_zone_prefs'] ) && is_array( $input['cf_zone_prefs'] ) ) {

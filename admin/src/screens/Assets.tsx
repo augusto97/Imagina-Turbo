@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Lightbulb, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { ExternalLink, Lightbulb, Pencil, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { PageHeader } from '@/components/common';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +32,8 @@ interface Draft {
 	ids: string;
 	post_types: string[];
 	note: string;
+	/** Regla que se edita (0.23.0); sin él, se crea una nueva. */
+	editId?: string;
 }
 
 export function Assets() {
@@ -55,7 +57,13 @@ export function Assets() {
 				<div className="itb:flex itb:flex-col itb:gap-4">
 					{ ! data.enabled && <EnableCard status={ data } /> }
 					<PreviewCard status={ data } />
-					<RulesCard status={ data } />
+					<RulesCard
+						status={ data }
+						onEdit={ ( r ) => {
+							setDraft( { handle: r.handle, type: r.type, mode: r.mode, templates: r.templates, ids: r.ids.join( ', ' ), post_types: r.post_types, note: r.note, editId: r.id } );
+							window.setTimeout( () => document.getElementById( 'itb-asset-draft' )?.scrollIntoView( { behavior: 'smooth', block: 'start' } ), 50 );
+						} }
+					/>
 					{ draft && <DraftCard status={ data } draft={ draft } onChange={ setDraft } onClose={ () => setDraft( null ) } /> }
 					<InspectCard status={ data } onRule={ setDraft } />
 					<SuggestionsCard status={ data } onRule={ setDraft } />
@@ -145,7 +153,7 @@ function places( rule: Pick<AssetRule, 'templates' | 'ids' | 'post_types'> ): st
 	return parts.join( ' · ' ) || '—';
 }
 
-function RulesCard( { status }: { status: AssetsStatus } ) {
+function RulesCard( { status, onEdit }: { status: AssetsStatus; onEdit: ( r: AssetRule ) => void } ) {
 	return (
 		<Card>
 			<CardHeader>
@@ -155,14 +163,14 @@ function RulesCard( { status }: { status: AssetsStatus } ) {
 			<CardContent className="itb:flex itb:flex-col itb:gap-2 itb:text-[13px]">
 				{ status.rules.length === 0 && <p className="itb:m-0 itb:text-zinc-500">{ __( 'Todavía no hay reglas. Inspecciona una página o analiza el sitio para ver sugerencias.' ) }</p> }
 				{ status.rules.map( ( r ) => (
-					<RuleRow key={ r.id } rule={ r } />
+					<RuleRow key={ r.id } rule={ r } onEdit={ () => onEdit( r ) } />
 				) ) }
 			</CardContent>
 		</Card>
 	);
 }
 
-function RuleRow( { rule }: { rule: AssetRule } ) {
+function RuleRow( { rule, onEdit }: { rule: AssetRule; onEdit: () => void } ) {
 	const client = useQueryClient();
 	const [ confirm, setConfirm ] = useState< 'activate' | 'delete' | null >( null );
 	const act = useAction( ( { path, method, body }: { path: string; method: 'POST' | 'DELETE'; body?: unknown } ) => api<AssetsStatus>( path, method, body ) );
@@ -194,6 +202,10 @@ function RuleRow( { rule }: { rule: AssetRule } ) {
 							{ __( 'Desactivar' ) }
 						</Button>
 					) }
+					<Button size="sm" variant="outline" onClick={ onEdit } disabled={ act.isPending }>
+						<Pencil aria-hidden />
+						{ __( 'Editar' ) }
+					</Button>
 					<Button size="sm" variant="ghost" onClick={ () => setConfirm( 'delete' ) } disabled={ act.isPending } aria-label={ __( 'Eliminar' ) }>
 						<Trash2 aria-hidden />
 					</Button>
@@ -222,20 +234,24 @@ function RuleRow( { rule }: { rule: AssetRule } ) {
 
 function DraftCard( { status, draft, onChange, onClose }: { status: AssetsStatus; draft: Draft; onChange: ( d: Draft ) => void; onClose: () => void } ) {
 	const client = useQueryClient();
-	const create = useAction( () =>
-		api<AssetsStatus>( 'assets/rules', 'POST', {
-			...draft,
+	const editing = draft.editId !== undefined;
+	const create = useAction( () => {
+		const { editId, ...fields } = draft;
+		const body = {
+			...fields,
 			ids: draft.ids
 				.split( /[\s,]+/ )
 				.map( ( s ) => parseInt( s, 10 ) )
 				.filter( ( n ) => n > 0 ),
-		} )
-	);
+		};
+		return editing ? api<AssetsStatus>( `assets/rules/${ editId ?? '' }`, 'PUT', body ) : api<AssetsStatus>( 'assets/rules', 'POST', body );
+	} );
 	const toggle = ( list: string[], value: string ) => ( list.includes( value ) ? list.filter( ( v ) => v !== value ) : [ ...list, value ] );
 	return (
-		<Card>
+		<Card id="itb-asset-draft">
 			<CardHeader>
-				<CardTitle>{ __( 'Nueva regla (en prueba)' ) }</CardTitle>
+				<CardTitle>{ editing ? __( 'Editar regla' ) : __( 'Nueva regla (en prueba)' ) }</CardTitle>
+				{ editing && <CardDescription>{ __( 'Si cambias el asset o los lugares, la regla vuelve a prueba: revísala otra vez con la previsualización antes de activarla. Cambiar solo la nota no la toca.' ) }</CardDescription> }
 			</CardHeader>
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
 				<div className="itb:grid itb:gap-3 itb:md:grid-cols-3">
@@ -302,8 +318,8 @@ function DraftCard( { status, draft, onChange, onClose }: { status: AssetsStatus
 							} )
 						}
 					>
-						<Plus aria-hidden />
-						{ __( 'Crear en prueba' ) }
+						{ editing ? <Pencil aria-hidden /> : <Plus aria-hidden /> }
+						{ editing ? __( 'Guardar' ) : __( 'Crear en prueba' ) }
 					</Button>
 					<Button size="sm" variant="ghost" onClick={ onClose }>
 						{ __( 'Cancelar' ) }

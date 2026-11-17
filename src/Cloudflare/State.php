@@ -149,6 +149,33 @@ final class State {
 	}
 
 	/**
+	 * Reglas propias que el usuario gestiona en el panel de Cloudflare (0.23.0): ref => desde cuándo. El
+	 * plan no las cambia, no las borra ni las vuelve a crear.
+	 *
+	 * @return array<string, int>
+	 */
+	public function unmanaged(): array {
+		$s   = get_option( self::OPTION, [] );
+		$out = [];
+		foreach ( is_array( $s ) && is_array( $s['unmanaged'] ?? null ) ? $s['unmanaged'] : [] as $ref => $since ) {
+			if ( is_string( $ref ) && is_int( $since ) ) {
+				$out[ $ref ] = $since;
+			}
+		}
+		return $out;
+	}
+
+	public function setManaged( string $ref, bool $managed ): void {
+		$list = $this->unmanaged();
+		if ( $managed ) {
+			unset( $list[ $ref ] );
+		} else {
+			$list[ $ref ] = $list[ $ref ] ?? time();
+		}
+		$this->update( [ 'unmanaged' => $list ] );
+	}
+
+	/**
 	 * Lo que el plugin tiene en la zona: reglas propias aplicadas y ajustes cambiados. Sin llamar a
 	 * la API (se usa en la pantalla de plugins para avisar antes de desactivar).
 	 *

@@ -7,7 +7,9 @@
  * - existe y cambió desde nuestro último cambio (hash de la regla devuelta por la API) → "modificada
  *   a mano": no se sobrescribe sin que el usuario la elija;
  * - existe y difiere de lo deseado → modificar; si no, sin cambios;
- * - existe pero ya no se recomienda (o su requisito dejó de cumplirse) → eliminar.
+ * - existe pero ya no se recomienda (o su requisito dejó de cumplirse) → eliminar;
+ * - el usuario dejó de gestionarla con el plugin (0.23.0) → "gestionada por ti": ni se cambia, ni se
+ *   borra, ni se vuelve a crear, hasta que la vuelva a gestionar.
  * Las reglas del cliente nunca se tocan.
  *
  * @package ImaginaTurbo
@@ -49,6 +51,7 @@ final class Planner {
 		}
 
 		$desiredRefs = [];
+		$unmanaged   = $this->state->unmanaged();
 		foreach ( $this->rules as $item ) {
 			$rule                      = $item['rule'];
 			$desiredRefs[ $rule->ref ] = true;
@@ -73,6 +76,11 @@ final class Planner {
 				continue;
 			}
 			$current = self::findByRef( $phase['rules'], $rule->ref );
+
+			if ( isset( $unmanaged[ $rule->ref ] ) ) {
+				$changes[] = $base + self::unmanagedChange( $current );
+				continue;
+			}
 
 			if ( '' !== $item['blocked'] ) {
 				$changes[] = $base + ( null === $current ? [
@@ -129,6 +137,20 @@ final class Planner {
 			foreach ( $zone['phases'][ $phase ]['rules'] ?? [] as $raw ) {
 				$ref = is_string( $raw['ref'] ?? null ) ? $raw['ref'] : '';
 				if ( '' === $ref || ! str_starts_with( $ref, $this->refPrefix ) || isset( $desiredRefs[ $ref ] ) ) {
+					continue;
+				}
+				if ( isset( $unmanaged[ $ref ] ) ) {
+					$changes[] = [
+						'id'          => 'rule:' . $ref,
+						'kind'        => 'rule',
+						'title'       => is_string( $raw['description'] ?? null ) ? $raw['description'] : $ref,
+						'description' => '',
+						'risk'        => 'safe',
+						'desired'     => null,
+						'phase'       => $phase,
+						'ref'         => $ref,
+						'setting'     => '',
+					] + self::unmanagedChange( $raw );
 					continue;
 				}
 				$changes[] = [
@@ -204,6 +226,22 @@ final class Planner {
 			] );
 		}
 		return $changes;
+	}
+
+	/**
+	 * Regla que el usuario gestiona en el panel de Cloudflare.
+	 *
+	 * @param array<string, mixed>|null $current Regla en la zona (null si ya no está).
+	 * @return array{action: string, reason: string, current: array<string, mixed>|null}
+	 */
+	private static function unmanagedChange( ?array $current ): array {
+		return [
+			'action'  => 'unmanaged',
+			'reason'  => null === $current
+				? __( 'La gestionas tú y ya no está en la zona: Imagina Turbo no la vuelve a crear.', 'imagina-turbo' )
+				: __( 'La gestionas tú en el panel de Cloudflare: Imagina Turbo no la cambia ni la borra.', 'imagina-turbo' ),
+			'current' => $current,
+		];
 	}
 
 	/**

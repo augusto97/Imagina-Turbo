@@ -56,7 +56,11 @@ final class Templates {
 			'rule'        => new Rule( Phases::CACHE, $p . 'cache-static', Rule::DESCRIPTION_PREFIX . 'Assets estáticos', $this->staticExpression(), 'set_cache_settings', $this->staticParameters() ),
 			'risk'        => 'safe',
 			'title'       => __( 'Caché de assets estáticos', 'imagina-turbo' ),
-			'description' => __( 'CSS, JS, imágenes, fuentes y videos del sitio se guardan 30 días en el edge (los errores, 10 minutos). El navegador sigue las cabeceras del sitio.', 'imagina-turbo' ),
+			'description' => sprintf(
+				/* translators: %s: duración (30 días, 1 año…). */
+				__( 'CSS, JS, imágenes, fuentes y videos del sitio se guardan %s en el edge (los errores, 10 minutos). El navegador sigue las cabeceras del sitio.', 'imagina-turbo' ),
+				self::duration( $this->site->staticTtl() )
+			),
 			'blocked'     => '',
 		];
 
@@ -274,7 +278,8 @@ final class Templates {
 			'cache'       => true,
 			'edge_ttl'    => [
 				'mode'            => 'override_origin',
-				'default'         => self::STATIC_TTL,
+				// 30 días salvo que se elija otro valor (0.23.0): mismo cuerpo de siempre si no se toca.
+				'default'         => $this->site->staticTtl(),
 				'status_code_ttl' => [
 					[
 						'status_code_range' => [
@@ -423,6 +428,17 @@ final class Templates {
 	/**
 	 * Cadena del lenguaje de reglas: entre comillas dobles, con \ y " escapados.
 	 */
+	/**
+	 * Duración legible de los TTL que se pueden elegir.
+	 */
+	public static function duration( int $seconds ): string {
+		return match ( true ) {
+			$seconds >= YEAR_IN_SECONDS => __( '1 año', 'imagina-turbo' ),
+			$seconds >= DAY_IN_SECONDS => sprintf( /* translators: %d: días. */ _n( '%d día', '%d días', intdiv( $seconds, DAY_IN_SECONDS ), 'imagina-turbo' ), intdiv( $seconds, DAY_IN_SECONDS ) ),
+			default => sprintf( /* translators: %d: horas. */ _n( '%d hora', '%d horas', max( 1, intdiv( $seconds, HOUR_IN_SECONDS ) ), 'imagina-turbo' ), max( 1, intdiv( $seconds, HOUR_IN_SECONDS ) ) ),
+		};
+	}
+
 	public static function quote( string $value ): string {
 		return '"' . str_replace( [ '\\', '"' ], [ '\\\\', '\\"' ], $value ) . '"';
 	}

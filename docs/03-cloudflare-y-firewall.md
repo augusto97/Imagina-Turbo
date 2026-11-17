@@ -102,6 +102,8 @@ and not (http.request.uri.path eq "/mi-cuenta" or starts_with(http.request.uri.p
 
 ### 4.2 `itb-cache-static` — assets
 
+Desde 0.23.0 el tiempo en el edge se elige en Caché → Exclusiones: 1 día, 7 días, 30 días (por defecto, mismo cuerpo de siempre) o 1 año. Todas las opciones superan el mínimo de cualquier plan (2 h en Free).
+
 - Expresión: extensión en `{"css" "js" "jpg" "jpeg" "png" "gif" "webp" "avif" "svg" "woff" "woff2" "ttf" "ico" "mp4" "webm" "pdf"}` (usar `http.request.uri.path.extension`; verificar disponibilidad del campo, alternativa `ends_with`).
 - `edge_ttl: override_origin 30 días`, `browser_ttl: respect_origin`.
 - *Implementado:* con `status_code_ttl` 400–499 → 600 s y 500–599 → 0 (un 404 de un asset que aparece después no queda guardado 30 días).
@@ -232,6 +234,38 @@ En Free hay una sola regla, con características y periodos limitados (típicame
 - En planes superiores agregar reglas para búsquedas (`?s=`), combinaciones de filtros y `?add-to-cart=`.
 
 **Implementado en la fase 4**: una regla `itb-rl-login`, objeto `ratelimit` en la regla (no en `action_parameters`), `characteristics: [cf.colo.id, ip.src]` (`cf.colo.id` es obligatorio), 5 peticiones en 10 s. Free: expresión solo con ruta y bloqueo de 10 s; Pro o superior: host, checkout clásico (`?wc-ajax=checkout`) y bloqueo de 10 minutos. El login personalizado (WPS Hide Login y otros) se toma de las rutas detectadas.
+
+### Ajustes manuales de las reglas (0.23.0, `Cloudflare\EdgeOptions`)
+
+Las reglas siguen saliendo de plantillas, pero el dueño ajusta sus valores en la pantalla Firewall. Nunca se escribe una expresión a mano: son valores validados que las plantillas ponen entre comillas (`Templates::quote`) o como IP normalizada. Sin ajustes, cada regla sale **idéntica** a la de antes (mismo hash), así que los sitios que ya la aplicaron no ven cambios pendientes.
+
+Verificado en la documentación de Cloudflare el 2026-11-17:
+
+- `ip.src in {203.0.113.0/24 203.0.113.1}`: IPs y rangos CIDR sin comillas (operadores del lenguaje de reglas).
+- `ip.src.country`: código ISO 3166-1 alfa-2. Bloquear países con reglas personalizadas está disponible en todos los planes (las IP Access rules por país son de Enterprise). Para permitir solo algunos, la documentación usa `(not ip.src.country in {"US" "MX"})`.
+- Límite de peticiones por plan: Free solo mira la ruta y el bot verificado, con 10 s de ventana y de bloqueo; Pro hasta 1 min y 1 h; Business hasta 10 min y 1 día, con IP de origen y user agent en la expresión. Los valores exactos están en `data/cloudflare-limits.json`.
+- Edge TTL mínimo: Free 2 h, Pro 1 h, Business y Enterprise 1 s.
+
+Qué se puede ajustar:
+
+| Ajuste | Cómo entra en la regla | Límites |
+|---|---|---|
+| Excepciones de IP | `ip.src in {…}` dentro del mismo `and not (…)` que los webhooks, en todas las reglas personalizadas. En el límite de peticiones solo si el plan deja mirar la IP en esa fase (Business o superior); en Free y Pro la pantalla lo avisa | Hasta 30. Rangos de como mucho /16 (IPv4) y /32 (IPv6). Se guardan como dirección de red |
+| Excepciones de ruta | `(http.request.uri.path eq "/x" or starts_with(http.request.uri.path, "/x/"))`, también en el `and not` | Hasta 20, tal como se ven en la URL. Nunca `/` |
+| Acción por regla | `auto` (desafío 7 días y después bloqueo, lo de siempre), `challenge` (siempre `managed_challenge`) o `block` | Ataques, superficie, escáneres, filtros y países |
+| Escáneres | Se quitan de la lista los desmarcados y se suman los propios (en minúsculas, `contains`). Lista vacía: la regla no se propone | Hasta 30 propios. Se rechaza un texto que aparezca en navegadores comunes, en Googlebot, Bingbot, Facebook, WhatsApp, WordPress o en los user agents del propio plugin |
+| Países (`itb-fw-countries`, apagada por defecto) | `(ip.src.country in {…} and not cf.client.bot)` o `(not ip.src.country in {…} and not cf.client.bot)`: los bots verificados siempre pasan, para no perder posicionamiento. Acción por defecto: desafío | Hasta 60 códigos (más `T1`, Tor). Ocupa una de las 5 reglas de Free |
+| Límite de peticiones | Peticiones (2–1000), ventana y bloqueo: el mayor valor que admite el plan sin pasar del elegido. Rutas extra exactas en el mismo `http.request.uri.path in {…}` | Hasta 10 rutas |
+
+Protecciones:
+
+- **No te bloquees a ti mismo**: al guardar, si la regla de países está encendida con bloqueo (o automático) y dejaría fuera a quien guarda (su país según `CF-IPCountry`, que solo se cree si el request viene de los rangos de Cloudflare, y su IP fuera de las excepciones), se rechaza con 409 y se explica cómo evitarlo.
+- **Nada se descarta en silencio**: una entrada no válida devuelve 400 con la lista y no se guarda nada.
+- **Importar no abre el firewall**: una importación de ajustes nunca cambia las excepciones de IP ni de ruta. La flota y el conector de Claude no tocan estos ajustes.
+
+### Reglas gestionadas a mano (0.23.0)
+
+Una regla propia que alguien cambió en el panel de Cloudflare aparece como «Modificada a mano» y no se sobrescribe salvo que se elija. Ahora además se puede **dejar de gestionar** (`POST /cloudflare/rules/manage`): el plan la muestra como «Gestionada por ti» y no la cambia, no la borra (aunque ya no se recomiende) y no la vuelve a crear si se borra en Cloudflare. No se toca la zona en ese momento. «Volver a gestionar» la compara otra vez con lo recomendado (si sigue distinta, vuelve a «Modificada a mano»). «Quitar todo lo de Imagina Turbo» sí la quita, con snapshot previo, y vacía la lista. La flota no las aplica (no son `create`, `update`, `drifted` ni `blocked`).
 
 ### Capa 2 — Cerrar el origen
 

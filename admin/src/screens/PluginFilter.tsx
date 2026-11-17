@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FlaskConical, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { FlaskConical, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { PageHeader } from '@/components/common';
 import { Badge } from '@/components/ui/badge';
@@ -28,6 +28,8 @@ interface Draft {
 	plugins: string[];
 	allMethods: boolean | null;
 	probes: FilterProbe[];
+	/** Regla que se edita (0.23.0); sin él, se crea una nueva. */
+	editId?: string;
 }
 
 export function PluginFilter() {
@@ -51,7 +53,13 @@ export function PluginFilter() {
 				<div className="itb:flex itb:flex-col itb:gap-4">
 					{ ! data.enabled && <EnableCard status={ data } /> }
 					{ data.faults_pending && <Notice level="warning">{ __( 'Hubo un error fatal en un request filtrado: la regla se desactiva en el próximo request de admin.' ) }</Notice> }
-					<RulesCard status={ data } />
+					<RulesCard
+						status={ data }
+						onEdit={ ( r ) => {
+							setDraft( { key: r.key, plugins: r.plugins, allMethods: r.all_methods, probes: r.probes, editId: r.id } );
+							window.setTimeout( () => document.getElementById( 'itb-filter-draft' )?.scrollIntoView( { behavior: 'smooth', block: 'start' } ), 50 );
+						} }
+					/>
 					{ draft ? (
 						<DraftCard status={ data } draft={ draft } onChange={ setDraft } onClose={ () => setDraft( null ) } />
 					) : (
@@ -113,7 +121,7 @@ function pluginName( status: FilterStatus, file: string ): string {
 	return status.plugins.find( ( p ) => p.file === file )?.name ?? file;
 }
 
-function RulesCard( { status }: { status: FilterStatus } ) {
+function RulesCard( { status, onEdit }: { status: FilterStatus; onEdit: ( r: FilterRule ) => void } ) {
 	return (
 		<Card>
 			<CardHeader>
@@ -123,14 +131,14 @@ function RulesCard( { status }: { status: FilterStatus } ) {
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
 				{ status.rules.length === 0 && <p className="itb:m-0 itb:text-zinc-500">{ __( 'Todavía no hay reglas. Empieza por un candidato.' ) }</p> }
 				{ status.rules.map( ( r ) => (
-					<RuleRow key={ r.id } rule={ r } status={ status } />
+					<RuleRow key={ r.id } rule={ r } status={ status } onEdit={ () => onEdit( r ) } />
 				) ) }
 			</CardContent>
 		</Card>
 	);
 }
 
-function RuleRow( { rule, status }: { rule: FilterRule; status: FilterStatus } ) {
+function RuleRow( { rule, status, onEdit }: { rule: FilterRule; status: FilterStatus; onEdit: () => void } ) {
 	const client = useQueryClient();
 	const [ running, setRunning ] = useState( false );
 	const [ runError, setRunError ] = useState( '' );
@@ -191,6 +199,10 @@ function RuleRow( { rule, status }: { rule: FilterRule; status: FilterStatus } )
 							{ __( 'Desactivar' ) }
 						</Button>
 					) }
+					<Button size="sm" variant="outline" disabled={ running || ! status.enabled } onClick={ onEdit }>
+						<Pencil aria-hidden />
+						{ __( 'Editar' ) }
+					</Button>
 					<Button size="sm" variant="outline" aria-label={ __( 'Eliminar' ) } onClick={ () => setConfirmDelete( true ) }>
 						<Trash2 aria-hidden />
 					</Button>
@@ -287,26 +299,38 @@ function CandidatesCard( { status, onPick, onNew }: { status: FilterStatus; onPi
 
 function DraftCard( { status, draft, onChange, onClose }: { status: FilterStatus; draft: Draft; onChange: ( d: Draft ) => void; onClose: () => void } ) {
 	const client = useQueryClient();
+	const editing = draft.editId !== undefined;
 	const create = useAction( () =>
-		api<FilterRule>( 'plugin-filter/rules', 'POST', {
-			key: draft.key.trim(),
-			plugins: draft.plugins,
-			...( draft.allMethods === null ? {} : { all_methods: draft.allMethods } ),
-			...( draft.probes.length > 0 ? { probes: draft.probes } : {} ),
-		} )
+		editing
+			? api<FilterRule>( `plugin-filter/rules/${ draft.editId ?? '' }`, 'PUT', {
+					plugins: draft.plugins,
+					...( draft.allMethods === null ? {} : { all_methods: draft.allMethods } ),
+					probes: draft.probes,
+			  } )
+			: api<FilterRule>( 'plugin-filter/rules', 'POST', {
+					key: draft.key.trim(),
+					plugins: draft.plugins,
+					...( draft.allMethods === null ? {} : { all_methods: draft.allMethods } ),
+					...( draft.probes.length > 0 ? { probes: draft.probes } : {} ),
+			  } )
 	);
 	const toggle = ( file: string ) => onChange( { ...draft, plugins: draft.plugins.includes( file ) ? draft.plugins.filter( ( p ) => p !== file ) : [ ...draft.plugins, file ] } );
 	const writes = draft.allMethods ?? ( draft.key.startsWith( 'WcAjax' ) || draft.key.startsWith( 'AdminAjax' ) );
 	return (
-		<Card>
+		<Card id="itb-filter-draft">
 			<CardHeader>
-				<CardTitle>{ __( 'Nueva regla' ) }</CardTitle>
-				<CardDescription>{ __( 'Se guarda en prueba y se ejecuta el experimento. Si las respuestas cambian, la regla no se activa y verás la diferencia.' ) }</CardDescription>
+				<CardTitle>{ editing ? __( 'Editar regla' ) : __( 'Nueva regla' ) }</CardTitle>
+				<CardDescription>
+					{ editing
+						? __( 'Al guardar, la regla vuelve a prueba con la evidencia a cero: lo que se demostró era para la versión anterior. Mientras tanto no se aplica a los visitantes.' )
+						: __( 'Se guarda en prueba y se ejecuta el experimento. Si las respuestas cambian, la regla no se activa y verás la diferencia.' ) }
+				</CardDescription>
 			</CardHeader>
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
 				<label className="itb:flex itb:flex-col itb:gap-1">
 					<span className="itb:font-medium">{ __( 'Endpoint' ) }</span>
-					<Input value={ draft.key } onChange={ ( e ) => onChange( { ...draft, key: e.target.value } ) } placeholder="WcAjax:get_refreshed_fragments · AdminAjax:accion · Rest:namespace/v1" aria-label={ __( 'Endpoint' ) } />
+					<Input value={ draft.key } readOnly={ editing } onChange={ ( e ) => onChange( { ...draft, key: e.target.value } ) } placeholder="WcAjax:get_refreshed_fragments · AdminAjax:accion · Rest:namespace/v1" aria-label={ __( 'Endpoint' ) } />
+					{ editing && <span className="itb:text-xs itb:text-zinc-500">{ __( 'El endpoint no se cambia: para otro endpoint, crea otra regla.' ) }</span> }
 				</label>
 				<fieldset className="itb:m-0 itb:border-0 itb:p-0">
 					<legend className="itb:mb-1 itb:font-medium">{ __( 'Plugins que no se cargan' ) }</legend>
@@ -343,7 +367,7 @@ function DraftCard( { status, draft, onChange, onClose }: { status: FilterStatus
 						}
 					>
 						<FlaskConical aria-hidden />
-						{ create.isPending ? __( 'Creando…' ) : __( 'Crear y probar' ) }
+						{ create.isPending ? __( 'Guardando…' ) : editing ? __( 'Guardar y volver a probar' ) : __( 'Crear y probar' ) }
 					</Button>
 					<Button size="sm" variant="outline" onClick={ onClose }>
 						{ __( 'Cancelar' ) }

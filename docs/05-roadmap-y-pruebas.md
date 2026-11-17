@@ -730,3 +730,20 @@ Dos auditorías independientes del conector (OAuth y herramientas), sin hallazgo
 - [x] 50 comprobaciones de punta a punta. Entre ellas: vuelta ajena rechazada, código reutilizado que revoca, scripts, revisiones y base de datos rechazados, lote interrumpido recuperado y cambio de rol que corta el acceso. Al terminar no queda bloqueo ni lote pendiente.
 - [x] La prueba encontró un error y quedó corregido: un lote rechazado por el límite por hora dejaba tomado el bloqueo.
 - [x] 352 pruebas unitarias, PHPStan, PHPCS y el benchmark del loader.
+
+## Versión 0.23.0 (ajustes manuales y purga visible)
+
+Lo que antes solo se podía aplicar tal como venía ahora se ajusta a mano, con valores validados (docs/02, sección 19; docs/03, sección 6):
+
+- Firewall: acción por regla, regla de países, límite de peticiones ajustable por plan, excepciones de IP y de ruta, lista de escáneres editable. Protección para no bloquearse a uno mismo por país.
+- Caché: rutas y cookies que nunca se cachean (servidor y edge) y TTL de los estáticos en Cloudflare.
+- Editar reglas de carga condicional y de assets (vuelven a prueba).
+- Dejar de gestionar una regla modificada a mano en Cloudflare, y volver a gestionarla.
+- Purga visible: botón en todas las pantallas del admin y menú «Turbo» en la barra de WordPress («Purgar esta página», «Purgar toda la caché»).
+
+**Criterios de aceptación**:
+
+- [x] Sin ajustes, cada regla del firewall y de la caché sale con el mismo hash que antes (los sitios que ya las aplicaron no ven cambios). 363 pruebas unitarias (11 nuevas: validación de IPs, rutas, user agents y países, excepciones, acciones, países, límite por plan, bloqueo propio, TTL, importación y reglas gestionadas a mano), PHPStan nivel 8 y PHPCS.
+- [x] Interfaz con la REST simulada en Chromium: 25 comprobaciones (lo que envía cada pantalla, error de validación visible, «Dejar de gestionar», purga desde la cabecera, edición de reglas, sin desborde en móvil y sin errores de JavaScript).
+- [ ] En un WordPress real: guardar el firewall con excepciones y aplicarlo en Cloudflare (que `dry_run` acepte las expresiones con `ip.src` y `ip.src.country`), excluir una ruta y ver `no-store` y que LiteSpeed no la guarda, editar una regla de plugins y una de assets, «Dejar de gestionar» con una regla cambiada en el panel, y purgar desde la barra de WordPress. No se pudo hacer en esta sesión: el entorno no permitió descargar WordPress.
+

@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Rest;
 
+use ImaginaTurbo\Cloudflare\EdgeOptions;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
@@ -66,6 +67,8 @@ final class CacheController extends Controller {
 				'warm'          => [ 'type' => 'boolean' ],
 				'fragments'     => [ 'type' => 'boolean' ],
 				'edge_variants' => [ 'type' => 'boolean' ],
+				// Exclusiones manuales y TTL de los estáticos en el edge (0.23.0), validados con EdgeOptions.
+				'custom'        => [ 'type' => 'object' ],
 				'confirm'       => [
 					'type'    => 'boolean',
 					'default' => false,
@@ -135,8 +138,8 @@ final class CacheController extends Controller {
 		}
 		$queue = $this->container->get( PurgeQueueRepository::class )->counts();
 		return [
-			'enabled'      => $enabled,
-			'settings'     => [
+			'enabled'        => $enabled,
+			'settings'       => [
 				'mode'          => $settings->get( 'cache_mode', 'sync' ),
 				'edge_ttl'      => $settings->get( 'cache_edge_ttl', DAY_IN_SECONDS ),
 				'swr'           => $settings->get( 'cache_swr', DAY_IN_SECONDS ),
@@ -145,39 +148,45 @@ final class CacheController extends Controller {
 				'warm'          => $settings->get( 'cache_warm', true ),
 				'fragments'     => $settings->get( 'cache_fragments', false ),
 				'edge_variants' => $settings->get( 'cache_edge_variants', false ),
+				'custom'        => EdgeOptions::cache( (array) $settings->get( 'cache_custom', [] ) ),
+			],
+			'custom_options' => [
+				'static_ttls' => EdgeOptions::STATIC_TTLS,
+				'max_paths'   => EdgeOptions::MAX_CACHE_PATHS,
+				'max_cookies' => EdgeOptions::MAX_CACHE_COOKIES,
 			],
 			// Cookies de variación de los plugins activos (moneda, idioma, consentimiento): hoy impiden la caché
 			// del HTML en el edge; con variantes, van en la llave (0.18.0).
-			'vary_cookies' => array_values( array_filter( (array) ( null !== Runtime::$config ? Runtime::$config->get( 'vary_cookies', [] ) : [] ), 'is_string' ) ),
-			'fragments'    => [
+			'vary_cookies'   => array_values( array_filter( (array) ( null !== Runtime::$config ? Runtime::$config->get( 'vary_cookies', [] ) : [] ), 'is_string' ) ),
+			'fragments'      => [
 				'available' => FragmentCache::available(),
 				'ajax'      => AjaxFragments::KNOWN[ (string) get_template() ] ?? [],
 				'verify'    => is_array( get_option( FragmentVerifier::OPTION ) ) ? get_option( FragmentVerifier::OPTION ) : null,
 			],
-			'adapter'      => [
+			'adapter'        => [
 				'id'             => $compiled['adapter'],
 				'server'         => $compiled['server'],
 				'headers_on_hit' => $adapter->headersOnHit(),
 				'edge_html'      => $compiled['edge_html'],
 				'verified'       => 'litespeed' !== $compiled['adapter'] || 'openlitespeed' === $compiled['server'],
 			],
-			'edge'         => [
+			'edge'           => [
 				'available'     => $this->container->get( EdgePurger::class )->available(),
 				'supports_tags' => $this->container->get( EdgePurger::class )->supportsTags(),
 			],
-			'tags'         => [
+			'tags'           => [
 				'prefix' => $this->container->get( TagBuilder::class )->prefix(),
 			],
-			'queue'        => [
+			'queue'          => [
 				'tags' => $queue[ PurgeQueueRepository::KIND_TAG ],
 				'urls' => $queue[ PurgeQueueRepository::KIND_URL ],
 				'all'  => $queue[ PurgeQueueRepository::KIND_ALL ] > 0,
 				'warm' => $queue[ PurgeQueueRepository::KIND_WARM ],
 			],
 			// Objeto aunque esté vacío: [] en JSON tiene métodos de arreglo en JavaScript (last.at).
-			'last'         => (object) PurgeWorker::lastState(),
-			'warmer'       => $this->container->get( Warmer::class )->state(),
-			'sitemaps'     => $compiled['sitemaps'],
+			'last'           => (object) PurgeWorker::lastState(),
+			'warmer'         => $this->container->get( Warmer::class )->state(),
+			'sitemaps'       => $compiled['sitemaps'],
 		];
 	}
 
@@ -198,6 +207,18 @@ final class CacheController extends Controller {
 			}
 		}
 		$settings = $this->container->get( Settings::class );
+		$custom   = $request->get_param( 'custom' );
+		$added    = [];
+		if ( is_array( $custom ) ) {
+			// Nada se descarta en silencio: si una entrada no vale, no se guarda nada y se dice cuál.
+			$problems = EdgeOptions::problems( $custom, 'cache' );
+			if ( [] !== $problems ) {
+				return $this->error( 'itb_cache_custom', implode( ' · ', $problems ), 400 );
+			}
+			$before                  = EdgeOptions::cache( (array) $settings->get( 'cache_custom', [] ) );
+			$changes['cache_custom'] = EdgeOptions::cache( $custom );
+			$added                   = array_values( array_diff( $changes['cache_custom']['bypass_paths'], $before['bypass_paths'] ) );
+		}
 		// Emitir cabeceras al edge es el paso sensible del módulo: se confirma explícitamente (regla 3).
 		if ( 'headers' === ( $changes['cache_mode'] ?? null ) && 'headers' !== $settings->get( 'cache_mode', 'sync' ) && true !== $request->get_param( 'confirm' ) ) {
 			return $this->error( 'itb_confirm', __( 'Confirma que verificaste el sitio antes de emitir cabeceras para el edge.', 'imagina-turbo' ), 428 );
@@ -218,6 +239,19 @@ final class CacheController extends Controller {
 		}
 		if ( 'wp-rocket' === CacheModule::settings()['adapter'] ) {
 			WpRocketAdapter::flushHtaccess();
+		}
+		// Una ruta recién excluida puede tener copias guardadas: se purgan esas URLs.
+		if ( [] !== $added ) {
+			// Las rutas son las de la URL (con el subdirectorio, si lo hay): se unen al origen del sitio.
+			$origin = (string) preg_replace( '#^(https?://[^/]+).*$#i', '$1', home_url() );
+			$urls   = [];
+			foreach ( $added as $path ) {
+				$urls[] = $origin . $path;
+				$urls[] = $origin . $path . '/';
+			}
+			$purger = $this->container->get( Purger::class );
+			$purger->purge( new PurgeRequest( [], $urls, false, 'cache_exclusions' ) );
+			$purger->flushToQueue();
 		}
 		$this->container->get( EventLog::class )->log(
 			'cache_coordinator',

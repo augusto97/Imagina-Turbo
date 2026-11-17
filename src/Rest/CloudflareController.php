@@ -65,6 +65,22 @@ final class CloudflareController extends Controller {
 				],
 			]
 		);
+		$this->route(
+			'/cloudflare/rules/manage',
+			\WP_REST_Server::CREATABLE,
+			[ $this, 'manage' ],
+			[
+				'ref'     => [
+					'type'     => 'string',
+					'pattern'  => '^[a-z0-9_\\-]{1,80}$',
+					'required' => true,
+				],
+				'managed' => [
+					'type'     => 'boolean',
+					'required' => true,
+				],
+			]
+		);
 		$this->route( '/cloudflare/zone', \WP_REST_Server::READABLE, [ $this, 'zone' ] );
 		$this->route( '/cloudflare/plan', \WP_REST_Server::READABLE, [ $this, 'plan' ] );
 		$this->route(
@@ -329,6 +345,20 @@ final class CloudflareController extends Controller {
 		}
 		$ids = array_values( array_filter( (array) $request->get_param( 'ids' ), 'is_string' ) );
 		return $this->ok( $this->service()->apply( $ids ) );
+	}
+
+	/**
+	 * Gestionar o no una regla propia (0.23.0). No escribe en Cloudflare: no pide confirmación ni el
+	 * módulo activo, solo la conexión.
+	 */
+	public function manage( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		if ( ! $this->connected() ) {
+			return $this->notConnected();
+		}
+		if ( ! $this->service()->setManaged( (string) $request->get_param( 'ref' ), true === $request->get_param( 'managed' ) ) ) {
+			return $this->error( 'itb_cf_ref', __( 'Esa regla no es de Imagina Turbo.', 'imagina-turbo' ), 400 );
+		}
+		return $this->ok( $this->service()->plan() );
 	}
 
 	public function restore( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {

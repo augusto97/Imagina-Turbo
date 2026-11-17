@@ -10,6 +10,7 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Core;
 
 use ImaginaTurbo\Admin\AssetsLoader;
+use ImaginaTurbo\Admin\AdminBarPurge;
 use ImaginaTurbo\Admin\Menu;
 use ImaginaTurbo\Cloudflare\Client as CloudflareClient;
 use ImaginaTurbo\Cloudflare\CloudflareService;
@@ -236,7 +237,12 @@ final class Plugin {
 			$this->registerRecompileTriggers();
 		}
 
+		// Purgar desde la barra de WordPress (0.23.0). La clase solo se carga si WordPress dibuja la barra:
+		// para un visitante anónimo es un add_action y nada más.
+		add_action( 'admin_bar_menu', fn( \WP_Admin_Bar $bar ) => ( new AdminBarPurge( $this->container ) )->menu( $bar ), 100 );
+
 		if ( is_admin() ) {
+			( new AdminBarPurge( $this->container ) )->registerAdmin();
 			$this->container->get( Menu::class )->register();
 			add_action( 'admin_init', [ $this, 'adminMaintenance' ] );
 			add_filter( 'plugin_action_links_' . $this->basename, [ $this, 'actionLinks' ] );
@@ -558,6 +564,7 @@ final class Plugin {
 					'ratelimit' => (bool) $c->get( Settings::class )->get( 'firewall_ratelimit', true ),
 					'views'     => (bool) $c->get( Settings::class )->get( 'shield_facets_views', true ),
 					'all'       => 'all' === $c->get( Settings::class )->get( 'shield_facets_scope', 'combos' ),
+					'custom'    => (array) $c->get( Settings::class )->get( 'firewall_custom', [] ),
 				]
 			);
 		};

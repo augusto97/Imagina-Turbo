@@ -36,7 +36,7 @@ final class CloudflareService {
 	];
 
 	/**
-	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool, views?: bool, all?: bool} $firewall Ajustes del firewall.
+	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool, views?: bool, all?: bool, custom?: array<mixed>} $firewall Ajustes del firewall.
 	 */
 	public function __construct(
 		private readonly TokenVault $vault,
@@ -312,7 +312,8 @@ final class CloudflareService {
 				$this->challengeSince( $zone ),
 				null,
 				false !== ( $this->firewall['views'] ?? true ),
-				true === ( $this->firewall['all'] ?? false )
+				true === ( $this->firewall['all'] ?? false ),
+				is_array( $this->firewall['custom'] ?? null ) ? $this->firewall['custom'] : []
 			);
 			$rules    = array_merge( $rules, $firewall->rules() );
 			if ( 'free' === $limits->plan() ) {
@@ -349,6 +350,27 @@ final class CloudflareService {
 	 */
 	public function restore( int $snapshotId ): array {
 		return $this->applier()->restore( $snapshotId );
+	}
+
+	/**
+	 * Deja de gestionar una regla propia (el usuario la maneja en el panel de Cloudflare) o vuelve a
+	 * gestionarla (0.23.0). No toca la zona: solo cambia lo que el plan propone para esa regla.
+	 */
+	public function setManaged( string $ref, bool $managed ): bool {
+		if ( 1 !== preg_match( '/^[a-z0-9_\-]{1,80}$/', $ref ) || ! str_starts_with( $ref, $this->site->refPrefix ) ) {
+			return false;
+		}
+		$this->state->setManaged( $ref, $managed );
+		$this->events->info(
+			'cloudflare',
+			$managed ? 'rule_managed' : 'rule_unmanaged',
+			$managed ? __( 'Imagina Turbo vuelve a gestionar una regla de Cloudflare.', 'imagina-turbo' ) : __( 'Regla de Cloudflare marcada como gestionada a mano: el plugin no la cambia ni la borra.', 'imagina-turbo' ),
+			[
+				'user' => get_current_user_id(),
+				'ref'  => $ref,
+			]
+		);
+		return true;
 	}
 
 	/**

@@ -333,6 +333,14 @@ export interface CacheSettings {
 	warm: boolean;
 	fragments: boolean;
 	edge_variants: boolean;
+	custom: CacheCustom;
+}
+
+/** Exclusiones manuales de la caché y TTL de los estáticos en el edge (0.23.0). */
+export interface CacheCustom {
+	bypass_paths: string[];
+	bypass_cookies: string[];
+	static_ttl: number;
 }
 
 export interface FragmentPageResult {
@@ -356,6 +364,7 @@ export interface CacheStatus {
 	sitemaps: string[];
 	fragments: { available: boolean; ajax: string[]; verify: { at: number; pass: boolean; pages: FragmentPageResult[]; error: string } | null };
 	vary_cookies: string[];
+	custom_options: { static_ttls: number[]; max_paths: number; max_cookies: number };
 	result?: Record<string, unknown>;
 }
 
@@ -366,7 +375,7 @@ export interface InspectResult {
 	cookies: string[];
 }
 
-export type CfAction = 'create' | 'update' | 'delete' | 'none' | 'drifted' | 'blocked';
+export type CfAction = 'create' | 'update' | 'delete' | 'none' | 'drifted' | 'blocked' | 'unmanaged';
 
 export interface CfStatus {
 	available: boolean;
@@ -417,6 +426,9 @@ export interface CfChange {
 	reason: string;
 	current: unknown;
 	desired: unknown;
+	phase: string;
+	ref: string;
+	setting: string;
 }
 
 export interface CfPlan {
@@ -533,9 +545,39 @@ export interface HtaccessResult {
 	restored: boolean;
 }
 
+export type FirewallRuleId = 'exploits' | 'surface' | 'bots' | 'facets' | 'countries';
+
+export type FirewallAction = 'auto' | 'challenge' | 'block';
+
+/** Ajustes manuales de las reglas del firewall (0.23.0). */
+export interface FirewallCustom {
+	allow_ips: string[];
+	allow_paths: string[];
+	actions: Partial<Record<FirewallRuleId, FirewallAction>>;
+	bots_extra: string[];
+	bots_off: string[];
+	countries: string[];
+	country_mode: 'listed' | 'others';
+	rl_requests: number;
+	rl_period: number;
+	rl_timeout: number;
+	rl_paths: string[];
+}
+
+export interface FirewallOptions {
+	bad_bots: string[];
+	plan: string;
+	periods: number[];
+	timeouts: number[];
+	ratelimit_ip: boolean;
+	limits: { ips: number; paths: number; bots: number; countries: number; rl_paths: number; requests: [ number, number ] };
+	client: { ip: string; country: string };
+}
+
 export interface FirewallStatus {
 	enabled: boolean;
-	settings: { rules: { exploits: boolean; surface: boolean; bots: boolean; facets: boolean }; ratelimit: boolean };
+	settings: { rules: Record<FirewallRuleId, boolean>; ratelimit: boolean; custom: FirewallCustom };
+	options: FirewallOptions;
 	cloudflare: { connected: boolean; module_enabled: boolean; plan: string; waf_permission: boolean | null };
 	changes: CfChange[];
 	notes: string[];

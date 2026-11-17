@@ -61,6 +61,28 @@ final class PluginFilterController extends Controller {
 				],
 			]
 		);
+		// Editar (0.23.0): mismos campos salvo el endpoint, que es la identidad de la regla.
+		$this->route(
+			'/plugin-filter/rules/' . self::ID,
+			'PUT',
+			[ $this, 'update' ],
+			[
+				'plugins'     => [
+					'type'     => 'array',
+					'items'    => [
+						'type'      => 'string',
+						'maxLength' => 200,
+					],
+					'required' => true,
+					'maxItems' => 100,
+				],
+				'all_methods' => [ 'type' => 'boolean' ],
+				'probes'      => [
+					'type'     => 'array',
+					'maxItems' => 5,
+				],
+			]
+		);
 		$this->route( '/plugin-filter/rules/' . self::ID . '/step', \WP_REST_Server::CREATABLE, [ $this, 'step' ] );
 		$this->route( '/plugin-filter/rules/' . self::ID . '/recheck', \WP_REST_Server::CREATABLE, [ $this, 'recheck' ] );
 		$this->route( '/plugin-filter/rules/' . self::ID . '/disable', \WP_REST_Server::CREATABLE, [ $this, 'disable' ] );
@@ -122,10 +144,30 @@ final class PluginFilterController extends Controller {
 	}
 
 	public function create( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		return $this->save( (string) $request->get_param( 'key' ), $request, null );
+	}
+
+	/**
+	 * Cambia los plugins, los métodos o las peticiones de prueba de una regla (0.23.0). Vuelve a prueba
+	 * con la evidencia a cero: lo que se demostró era para la regla de antes.
+	 */
+	public function update( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
+		$rule = $this->store()->get( (string) $request->get_param( 'id' ) );
+		if ( null === $rule ) {
+			return $this->error( 'itb_filter_rule', __( 'La regla no existe.', 'imagina-turbo' ), 404 );
+		}
+		return $this->save( $rule['key'], $request, $rule );
+	}
+
+	/**
+	 * Crea o reemplaza la regla de un endpoint y la deja en prueba.
+	 *
+	 * @param array<string, mixed>|null $existing Regla que se edita (null al crear).
+	 */
+	private function save( string $key, \WP_REST_Request $request, ?array $existing ): \WP_REST_Response|\WP_Error {
 		if ( null === Runtime::$config || ! Runtime::$config->moduleEnabled( 'plugin_filter' ) ) {
 			return $this->error( 'itb_filter_disabled', __( 'Activa la carga condicional para probar reglas.', 'imagina-turbo' ), 409 );
 		}
-		$key     = (string) $request->get_param( 'key' );
 		$blocked = RulePolicy::blockedReason( $key );
 		if ( '' !== $blocked ) {
 			return $this->error( 'itb_filter_key', $blocked, 400 );
@@ -154,7 +196,8 @@ final class PluginFilterController extends Controller {
 				'all_methods' => is_bool( $allMethods ) ? $allMethods : RulePolicy::defaultAllMethods( $key ),
 				'probes'      => $probes,
 				'status'      => 'testing',
-				'created_at'  => time(),
+				'created_at'  => is_int( $existing['created_at'] ?? null ) ? $existing['created_at'] : time(),
+				'updated_at'  => time(),
 			]
 		);
 		if ( null === $rule ) {
@@ -169,12 +212,13 @@ final class PluginFilterController extends Controller {
 		Runtime::$config = CompiledConfig::load( $compiled['file'] ) ?? Runtime::$config;
 		$this->container->get( EventLog::class )->info(
 			'plugin_filter',
-			'experiment',
-			__( 'Experimento de carga condicional creado.', 'imagina-turbo' ),
+			null === $existing ? 'experiment' : 'edited',
+			null === $existing ? __( 'Experimento de carga condicional creado.', 'imagina-turbo' ) : __( 'Regla de carga condicional editada: vuelve a prueba.', 'imagina-turbo' ),
 			[
 				'user'     => get_current_user_id(),
 				'endpoint' => $key,
 				'plugins'  => $plugins,
+				'before'   => $existing['plugins'] ?? null,
 			]
 		);
 		return $this->ok( $this->present( $rule, $active, $self ) );

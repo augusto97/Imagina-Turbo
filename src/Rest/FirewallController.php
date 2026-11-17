@@ -14,8 +14,10 @@ declare(strict_types=1);
 namespace ImaginaTurbo\Rest;
 
 use ImaginaTurbo\Cloudflare\CloudflareService;
+use ImaginaTurbo\Cloudflare\EdgeOptions;
 use ImaginaTurbo\Cloudflare\FirewallTemplates;
 use ImaginaTurbo\Cloudflare\Phases;
+use ImaginaTurbo\Cloudflare\PlanLimits;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Environment\Detector;
@@ -24,6 +26,7 @@ use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
 use ImaginaTurbo\Modules\Firewall\HtaccessWriter;
 use ImaginaTurbo\Modules\Firewall\OriginLock;
+use ImaginaTurbo\Modules\Rum\RumCollector;
 use ImaginaTurbo\Repository\SampleRepository;
 
 /**
@@ -31,7 +34,7 @@ use ImaginaTurbo\Repository\SampleRepository;
  */
 final class FirewallController extends Controller {
 
-	public const RULES = [ 'exploits', 'surface', 'bots', 'facets' ];
+	public const RULES = [ 'exploits', 'surface', 'bots', 'facets', 'countries' ];
 
 	/** Rangos oficiales de Cloudflare (para cerrar el origen). */
 	public const CF_IPS_URL = 'https://www.cloudflare.com/ips/';
@@ -112,7 +115,10 @@ final class FirewallController extends Controller {
 			'settings'   => [
 				'rules'     => $rules,
 				'ratelimit' => (bool) $settings->get( 'firewall_ratelimit', true ),
+				'custom'    => EdgeOptions::firewall( (array) $settings->get( 'firewall_custom', [] ) ),
 			],
+			// Lo que la pantalla necesita para los ajustes manuales (0.23.0).
+			'options'    => $this->options( is_string( $cf['zone']['plan'] ?? null ) ? $cf['zone']['plan'] : '' ),
 			'cloudflare' => [
 				'connected'      => null !== $cf['zone'],
 				'module_enabled' => $cf['enabled'],
@@ -136,13 +142,57 @@ final class FirewallController extends Controller {
 		];
 	}
 
-	public function update( \WP_REST_Request $request ): \WP_REST_Response {
+	/**
+	 * Escáneres de la lista, opciones del límite de peticiones en el plan y quién está guardando.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function options( string $plan ): array {
+		$limits           = PlanLimits::fromFile( '' === $plan ? 'free' : $plan, Runtime::$pluginDir . '/data/cloudflare-limits.json' );
+		$rl               = $limits->ratelimit();
+		$ints             = static fn( mixed $v ): array => is_array( $v ) ? array_values( array_map( 'intval', $v ) ) : [];
+		[ $ip, $country ] = self::visitor();
+		return [
+			'bad_bots'     => FirewallTemplates::BAD_BOTS,
+			'plan'         => $limits->plan(),
+			'periods'      => $ints( $rl['periods'] ?? null ),
+			'timeouts'     => $ints( $rl['mitigation_timeouts'] ?? null ),
+			'ratelimit_ip' => in_array( 'ip', is_array( $rl['fields'] ?? null ) ? $rl['fields'] : [], true ),
+			'limits'       => [
+				'ips'       => EdgeOptions::MAX_IPS,
+				'paths'     => EdgeOptions::MAX_PATHS,
+				'bots'      => EdgeOptions::MAX_BOTS,
+				'countries' => EdgeOptions::MAX_COUNTRIES,
+				'rl_paths'  => EdgeOptions::MAX_RL_PATHS,
+				'requests'  => [ EdgeOptions::RL_REQUESTS_MIN, EdgeOptions::RL_REQUESTS_MAX ],
+			],
+			'client'       => [
+				'ip'      => $ip,
+				'country' => $country,
+			],
+		];
+	}
+
+	/**
+	 * IP y país de quien usa el admin. El país lo pone Cloudflare (CF-IPCountry) y solo se cree si el
+	 * request viene de sus rangos.
+	 *
+	 * @return array{0: string, 1: string}
+	 */
+	private static function visitor(): array {
+		$ip      = RumCollector::clientIp( $_SERVER );
+		$remote  = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		$country = isset( $_SERVER['HTTP_CF_IPCOUNTRY'] ) && RumCollector::fromCloudflare( $remote ) ? strtoupper( sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_IPCOUNTRY'] ) ) ) : '';
+		return [ $ip, EdgeOptions::country( $country ) ?? '' ];
+	}
+
+	public function update( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
 		$settings = $this->container->get( Settings::class );
 		$changes  = [];
 		$rules    = $request->get_param( 'rules' );
+		$current  = $settings->get( 'firewall_rules', [] );
+		$current  = is_array( $current ) ? $current : [];
 		if ( is_array( $rules ) ) {
-			$current = $settings->get( 'firewall_rules', [] );
-			$current = is_array( $current ) ? $current : [];
 			foreach ( self::RULES as $id ) {
 				if ( is_bool( $rules[ $id ] ?? null ) ) {
 					$current[ $id ] = $rules[ $id ];
@@ -152,6 +202,26 @@ final class FirewallController extends Controller {
 		}
 		if ( is_bool( $request->get_param( 'ratelimit' ) ) ) {
 			$changes['firewall_ratelimit'] = $request->get_param( 'ratelimit' );
+		}
+		$custom = $request->get_param( 'custom' );
+		if ( is_array( $custom ) ) {
+			// Nada se descarta en silencio: si una entrada no vale, no se guarda nada y se dice cuál.
+			$problems = EdgeOptions::problems( $custom, 'firewall' );
+			if ( [] !== $problems ) {
+				return $this->error( 'itb_firewall_custom', implode( ' · ', $problems ), 400 );
+			}
+			$changes['firewall_custom'] = EdgeOptions::firewall( $custom );
+		}
+		// Encender la regla de países o cambiar sus opciones nunca deja fuera a quien guarda.
+		$opts             = $changes['firewall_custom'] ?? EdgeOptions::firewall( (array) $settings->get( 'firewall_custom', [] ) );
+		[ $ip, $country ] = self::visitor();
+		if ( true === ( $current['countries'] ?? false ) && EdgeOptions::locksOut( $opts, $country, $ip ) ) {
+			return $this->error(
+				'itb_firewall_lockout',
+				/* translators: %s: código de país. */
+				sprintf( __( 'Con esta regla de países te bloquearías a ti mismo: estás en %s. Agrega tu país a la lista, tu IP a las excepciones o usa «Desafío».', 'imagina-turbo' ), $country ),
+				409
+			);
 		}
 		$settings->update( $changes );
 		$this->container->get( ConfigCompiler::class )->compile();

@@ -1,10 +1,13 @@
-import { Activity, Blocks, Cloud, Database, FastForward, FileCode2, Gauge, Network, Layers, ScrollText, Settings2, Shield, ShoppingCart, SlidersHorizontal, Zap } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Activity, Blocks, Cloud, Database, FastForward, FileCode2, Gauge, Network, Layers, ScrollText, Settings2, Shield, ShoppingCart, SlidersHorizontal, Trash2, Zap } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { ConfirmDialog } from './ui/dialog';
+import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { type Route, useRouter } from '@/lib/router';
-import { useStatus } from '@/lib/queries';
+import { useAction, useStatus } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 
 const items: { route: Route; label: string; icon: typeof Gauge }[] = [
@@ -67,14 +70,51 @@ export function Layout( { children }: { children: ReactNode } ) {
 				</p>
 			</aside>
 			<main className="itb:min-w-0 itb:flex-1 itb:p-5 itb:md:p-8">
-				{ ( safeMode || killed ) && (
-					<div className="itb:mb-5 itb:flex itb:flex-wrap itb:gap-2">
-						{ safeMode && <Badge tone="red">{ __( 'Modo seguro activo' ) }</Badge> }
-						{ killed && <Badge tone="amber">{ __( 'Kill switch activo' ) }</Badge> }
-					</div>
-				) }
+				<div className="itb:mx-auto itb:mb-4 itb:flex itb:max-w-6xl itb:flex-wrap itb:items-center itb:justify-end itb:gap-2">
+					{ safeMode && <Badge tone="red">{ __( 'Modo seguro activo' ) }</Badge> }
+					{ killed && <Badge tone="amber">{ __( 'Kill switch activo' ) }</Badge> }
+					<span className="itb:flex-1" />
+					<PurgeButton />
+				</div>
 				<div className="itb:mx-auto itb:max-w-6xl">{ children }</div>
 			</main>
 		</div>
+	);
+}
+
+/**
+ * Purgar toda la caché desde cualquier pantalla (0.23.0). Una URL o un tag, en la pantalla Caché.
+ */
+function PurgeButton() {
+	const [ open, setOpen ] = useState( false );
+	const [ done, setDone ] = useState( false );
+	const purge = useAction( () => api( 'cache/purge', 'POST', { type: 'all', value: '', confirm: true } ) );
+	return (
+		<>
+			{ done && <span className="itb:text-xs itb:text-emerald-700">{ __( 'Caché purgada.' ) }</span> }
+			{ purge.error && <span className="itb:text-xs itb:text-red-700">{ purge.error.message }</span> }
+			<Button size="sm" variant="outline" disabled={ purge.isPending } onClick={ () => setOpen( true ) }>
+				<Trash2 aria-hidden />
+				{ __( 'Purgar caché' ) }
+			</Button>
+			<ConfirmDialog
+				open={ open }
+				onOpenChange={ setOpen }
+				title={ __( '¿Purgar toda la caché?' ) }
+				description={ __( 'Se purgan el plugin de caché del servidor y, si está conectado, Cloudflare. Las páginas se vuelven a generar hasta que el recalentado las llene de nuevo; en un sitio con tráfico, la carga del servidor sube unos minutos. Para una sola URL, usa la pantalla Caché o la barra de WordPress en esa página («Turbo → Purgar esta página»).' ) }
+				confirmLabel={ __( 'Purgar todo' ) }
+				destructive
+				pending={ purge.isPending }
+				onConfirm={ () =>
+					purge.mutate( undefined, {
+						onSuccess: () => {
+							setDone( true );
+							window.setTimeout( () => setDone( false ), 6000 );
+						},
+						onSettled: () => setOpen( false ),
+					} )
+				}
+			/>
+		</>
 	);
 }

@@ -9,6 +9,7 @@ declare(strict_types=1);
 
 namespace ImaginaTurbo\Core\Config;
 
+use ImaginaTurbo\Cloudflare\EdgeOptions;
 use ImaginaTurbo\Compat\Matrix;
 use ImaginaTurbo\Compat\MatrixException;
 use ImaginaTurbo\Compat\Resolver;
@@ -225,6 +226,15 @@ final class ConfigCompiler {
 
 		$bypassCookies   = $compat['bypass_cookies'] ?? [ 'wordpress_logged_in_', 'wp-postpass_', 'comment_author_' ];
 		$bypassCookies[] = 'itb_bypass';
+		// Exclusiones manuales (0.23.0): rutas y cookies que nunca se cachean, ni en el servidor ni en el edge.
+		$custom        = EdgeOptions::cache( (array) $this->settings->get( 'cache_custom', [] ) );
+		$bypassCookies = array_merge( $bypassCookies, $custom['bypass_cookies'] );
+		// Se escriben como se ven en la URL; el frontend compara rutas relativas a la portada.
+		$home = rtrim( $this->sitePaths->homePath(), '/' );
+		if ( '' !== $home ) {
+			$custom['bypass_paths'] = array_values( array_map( static fn( string $p ): string => str_starts_with( $p, $home . '/' ) ? substr( $p, strlen( $home ) ) : $p, $custom['bypass_paths'] ) );
+		}
+		$bypassAll = array_values( array_unique( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'], $custom['bypass_paths'] ) ) );
 
 		$data = [
 			'v'                           => CompiledConfig::FORMAT_VERSION,
@@ -244,7 +254,7 @@ final class ConfigCompiler {
 			'imagina_search'              => ImaginaSearch::config( $active ),
 			'tags'                        => [ 'prefix' => (string) $this->settings->get( 'tag_prefix', '' ) ],
 			'bypass_cookies'              => array_values( array_unique( $bypassCookies ) ),
-			'bypass_paths'                => array_values( array_unique( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ) ),
+			'bypass_paths'                => $bypassAll,
 			'vary_cookies'                => $compat['vary_cookies'] ?? [],
 			'require_cookie_before_cache' => $compat['require_cookie_before_cache'] ?? [],
 			'cart_cookies'                => $compat['cart_cookies'] ?? [],
@@ -258,7 +268,7 @@ final class ConfigCompiler {
 			'woo'                         => $this->wooConfig( $theme ),
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
-			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ), $coreBypass ) ) ),
+			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( $bypassAll, $coreBypass ) ), $custom ),
 			// Turnstile (0.21.0): solo con el módulo activo y las claves probadas.
 			'turnstile'                   => $this->turnstileConfig( true === ( $modules['turnstile'] ?? false ) ),
 			// Lo que Zaraz reemplaza en el sitio (0.18.0), solo con el módulo Cloudflare activo.
@@ -284,7 +294,7 @@ final class ConfigCompiler {
 			'database'                    => [ 'as_retention' => true === ( $modules['database'] ?? false ) ? (int) $this->settings->get( 'db_as_retention', 0 ) : 0 ],
 			// Plazo del JS retrasado de LiteSpeed Cache sin interacción (0.14.7; 0 = solo al interactuar).
 			'lsdelay'                     => [ 't' => (int) $this->settings->get( 'lsdelay_timeout', 0 ) ],
-			'speculation'                 => $this->speculationConfig( $dynamic['paths'], array_merge( $compat['bypass_paths'] ?? [], $dynamic['bypass'] ) ),
+			'speculation'                 => $this->speculationConfig( $dynamic['paths'], $bypassAll ),
 			'hints'                       => [
 				'lcp'       => (bool) $this->settings->get( 'hints_lcp', true ),
 				'facades'   => (bool) $this->settings->get( 'hints_facades', true ),
@@ -476,9 +486,10 @@ final class ConfigCompiler {
 	 * @param array<string, mixed>|null $compat      Reglas de la matriz.
 	 * @param list<string>              $bypassPaths Rutas que nunca se cachean, de integraciones y páginas dinámicas
 	 *                                               (las del núcleo ya las cubren los tipos de request).
+	 * @param array{bypass_paths: list<string>, bypass_cookies: list<string>, static_ttl: int}|null $custom Exclusiones manuales (0.23.0).
 	 * @return array<string, mixed>
 	 */
-	private function cacheConfig( array $env, ?array $compat, array $bypassPaths = [] ): array {
+	private function cacheConfig( array $env, ?array $compat, array $bypassPaths = [], ?array $custom = null ): array {
 		$plugin  = $env['cache_plugin'] ?? null;
 		$adapter = match ( $plugin ) {
 			'litespeed-cache' => 'litespeed',
@@ -505,6 +516,9 @@ final class ConfigCompiler {
 			'sitemaps'        => $compat['sitemaps'] ?? [],
 			'preload_exclude' => $compat['preload_exclude'] ?? [],
 			'bypass_paths'    => array_values( array_unique( $bypassPaths ) ),
+			// Exclusiones manuales: además del no-store para el edge, el plugin de caché no guarda esas páginas.
+			'custom_paths'    => $custom['bypass_paths'] ?? [],
+			'custom_cookies'  => $custom['bypass_cookies'] ?? [],
 		];
 	}
 

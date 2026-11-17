@@ -50,7 +50,7 @@ final class HeaderEmitter {
 	private array $listed = [];
 
 	/**
-	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>, edge_variants?: bool} $settings Ajustes compilados.
+	 * @param array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, edge_html: bool, bypass_paths: list<string>, edge_variants?: bool, custom_paths?: list<string>, custom_cookies?: list<string>} $settings Ajustes compilados.
 	 * @param list<string>                                                                               $bypassCookies Prefijos de cookies que impiden la caché.
 	 * @param callable(): void                                                                           $onCacheable   Se llama si la respuesta es cacheable (refresco de nonces).
 	 * @param list<string>                                                                               $cartCookies   Prefijos de cookies de carrito: esa respuesta tampoco la guarda el plugin de caché.
@@ -83,6 +83,18 @@ final class HeaderEmitter {
 		return $this->verdict;
 	}
 
+	/**
+	 * La página está en una exclusión manual: una ruta o una cookie elegidas en el admin.
+	 */
+	private function customExclusion( string $reason ): bool {
+		$paths   = $this->settings['custom_paths'] ?? [];
+		$cookies = $this->settings['custom_cookies'] ?? [];
+		if ( 'bypass_path' === $reason && [] !== $paths ) {
+			return Cacheability::pathBypassed( $this->request->path, '', $paths );
+		}
+		return 'cookie' === $reason && [] !== $cookies && self::hasCookie( array_map( 'strval', array_keys( $_COOKIE ) ), $cookies );
+	}
+
 	public function provisional(): void {
 		if ( 'headers' === $this->settings['mode'] && $this->settings['edge_html'] && ! headers_sent() ) {
 			header( self::HEADER . ': no-store', true );
@@ -112,6 +124,10 @@ final class HeaderEmitter {
 		// en ningún nivel: LSCache, con sus valores por defecto, la guardaría como pública.
 		if ( ! $this->verdict['cacheable'] && 'cookie' === $this->verdict['reason'] && self::hasCookie( array_map( 'strval', array_keys( $_COOKIE ) ), $this->cartCookies ) ) {
 			$this->adapter->noCache( 'cart' );
+		}
+		// Exclusiones manuales (0.23.0): tampoco se guardan en el plugin de caché del servidor.
+		if ( ! $this->verdict['cacheable'] && $this->customExclusion( $this->verdict['reason'] ) ) {
+			$this->adapter->noCache( 'excluded' );
 		}
 
 		$tags           = $this->verdict['cacheable'] ? $this->tags->tags( TagBuilder::namesForCurrentQuery() ) : [];

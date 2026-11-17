@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/dialog';
 import { Notice, Skeleton } from '@/components/ui/feedback';
-import { Input, Select } from '@/components/ui/input';
+import { Input, Select, Textarea } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { api, ApiError } from '@/lib/api';
 import { config } from '@/lib/config';
@@ -69,6 +69,7 @@ export function Cache() {
 						<QueueCard status={ data } onDone={ onDone } />
 						<PurgeCard status={ data } onDone={ onDone } />
 					</div>
+					<ExclusionsCard status={ data } onDone={ onDone } />
 					<FragmentsCard status={ data } onDone={ onDone } />
 					{ data.vary_cookies.length > 0 && <VariantsCard status={ data } onDone={ onDone } /> }
 					<InspectCard />
@@ -293,7 +294,7 @@ function PurgeCard( { status, onDone }: { status: CacheStatus; onDone: ( s: Cach
 		<Card>
 			<CardHeader>
 				<CardTitle>{ __( 'Purga manual' ) }</CardTitle>
-				<CardDescription>{ __( 'Purga el plugin de caché y, si está conectado, el edge. Lo purgado se recalienta.' ) }</CardDescription>
+				<CardDescription>{ __( 'Purga el plugin de caché y, si está conectado, el edge. Lo purgado se recalienta. También desde la barra de WordPress: «Turbo → Purgar esta página» o «Purgar toda la caché».' ) }</CardDescription>
 			</CardHeader>
 			<CardContent>
 				<div className="itb:flex itb:flex-wrap itb:gap-2">
@@ -311,7 +312,7 @@ function PurgeCard( { status, onDone }: { status: CacheStatus; onDone: ( s: Cach
 							aria-label={ __( 'Qué purgar' ) }
 						/>
 					) }
-					<Button size="sm" className="itb:h-9" variant={ type === 'all' ? 'destructive' : 'default' } disabled={ ! status.enabled || purge.isPending || ( type !== 'all' && value.trim() === '' ) } onClick={ run }>
+					<Button size="sm" className="itb:h-9" variant={ type === 'all' ? 'destructive' : 'default' } disabled={ ( type === 'tag' && ! status.enabled ) || purge.isPending || ( type !== 'all' && value.trim() === '' ) } onClick={ run }>
 						<Trash2 aria-hidden />
 						{ __( 'Purgar' ) }
 					</Button>
@@ -329,6 +330,75 @@ function PurgeCard( { status, onDone }: { status: CacheStatus; onDone: ( s: Cach
 				pending={ purge.isPending }
 				onConfirm={ () => purge.mutate( { type: 'all', value: '', confirm: true }, { onSuccess: onDone, onSettled: () => setConfirmAll( false ) } ) }
 			/>
+		</Card>
+	);
+}
+
+const TTL_NAMES: Record<number, string> = { 86400: __( '1 día' ), 604800: __( '7 días' ), 2592000: __( '30 días' ), 31536000: __( '1 año' ) };
+
+const listOf = ( text: string ): string[] =>
+	text
+		.split( /[\n,]+/ )
+		.map( ( l ) => l.trim() )
+		.filter( Boolean );
+
+/**
+ * Exclusiones manuales (0.23.0): rutas y cookies que nunca se cachean y cuánto guarda el edge los estáticos.
+ */
+function ExclusionsCard( { status, onDone }: { status: CacheStatus; onDone: ( s: CacheStatus ) => void } ) {
+	const custom = status.settings.custom;
+	const [ paths, setPaths ] = useState( custom.bypass_paths.join( '\n' ) );
+	const [ cookies, setCookies ] = useState( custom.bypass_cookies.join( '\n' ) );
+	const [ ttl, setTtl ] = useState( custom.static_ttl );
+	useEffect( () => {
+		setPaths( custom.bypass_paths.join( '\n' ) );
+		setCookies( custom.bypass_cookies.join( '\n' ) );
+		setTtl( custom.static_ttl );
+	}, [ custom ] );
+	const next = { bypass_paths: listOf( paths ), bypass_cookies: listOf( cookies ), static_ttl: ttl };
+	const dirty = JSON.stringify( next ) !== JSON.stringify( custom );
+	const save = useAction( () => api<CacheStatus>( 'cache/settings', 'PUT', { custom: next } ) );
+	const adapter = status.adapter.id === 'litespeed' ? 'LiteSpeed Cache → Caché → Excluir («Do Not Cache Cookies»)' : status.adapter.id === 'wp-rocket' ? 'WP Rocket → Reglas avanzadas («Never Cache Cookies»)' : '';
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Exclusiones' ) }</CardTitle>
+				<CardDescription>{ __( 'Páginas que nunca se guardan en caché, ni en el servidor ni en Cloudflare, y cuánto tiempo guarda Cloudflare los archivos estáticos.' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:grid itb:gap-4 itb:text-[13px] itb:md:grid-cols-3">
+				<label className="itb:flex itb:min-w-0 itb:flex-col itb:gap-1">
+					<span className="itb:font-medium">{ __( 'Rutas (una por línea)' ) }</span>
+					<Textarea className="itb:min-h-24 itb:font-mono itb:text-xs" value={ paths } onChange={ ( e ) => setPaths( e.target.value ) } placeholder={ '/cotizador\n/precios-mayoristas' } />
+					<span className="itb:text-xs itb:text-zinc-500">{ `${ __( 'Tal como se ven en la URL; incluye todo lo que hay debajo. Al guardar se purgan. Máximo' ) } ${ status.custom_options.max_paths }.` }</span>
+				</label>
+				<label className="itb:flex itb:min-w-0 itb:flex-col itb:gap-1">
+					<span className="itb:font-medium">{ __( 'Cookies (una por línea)' ) }</span>
+					<Textarea className="itb:min-h-24 itb:font-mono itb:text-xs" value={ cookies } onChange={ ( e ) => setCookies( e.target.value ) } placeholder="mi_plugin_sesion" />
+					<span className="itb:text-xs itb:text-zinc-500">
+						{ `${ __( 'Quien tenga una cookie que empiece así no recibe páginas de Cloudflare ni guarda la suya. Máximo' ) } ${ status.custom_options.max_cookies }.` }
+						{ adapter && ` ${ __( 'Agrégala también en' ) } ${ adapter }: ${ __( 'el servidor puede tener una copia guardada de antes.' ) }` }
+					</span>
+				</label>
+				<label className="itb:flex itb:min-w-0 itb:flex-col itb:gap-1">
+					<span className="itb:font-medium">{ __( 'Estáticos en Cloudflare' ) }</span>
+					<Select value={ ttl } onChange={ ( e ) => setTtl( Number( e.target.value ) ) }>
+						{ status.custom_options.static_ttls.map( ( t ) => (
+							<option key={ t } value={ t }>
+								{ `${ TTL_NAMES[ t ] ?? `${ t } s` }${ t === 2592000 ? ` (${ __( 'recomendado' ) })` : '' }` }
+							</option>
+						) ) }
+					</Select>
+					<span className="itb:text-xs itb:text-zinc-500">{ __( 'CSS, JS, imágenes y fuentes. Se aplica en la pantalla Cloudflare (regla «Caché de assets estáticos»).' ) }</span>
+				</label>
+				<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-3 itb:md:col-span-3">
+					<Button size="sm" disabled={ ! dirty || save.isPending } onClick={ () => save.mutate( undefined, { onSuccess: onDone } ) }>
+						{ save.isPending ? __( 'Guardando…' ) : __( 'Guardar exclusiones' ) }
+					</Button>
+					{ dirty && <span className="itb:text-xs itb:text-amber-700">{ __( 'Hay cambios sin guardar.' ) }</span> }
+					{ ! status.enabled && <span className="itb:text-xs itb:text-zinc-500">{ __( 'Las exclusiones funcionan con el coordinador de caché activo.' ) }</span> }
+				</div>
+				{ save.error && <Notice level="error" className="itb:md:col-span-3">{ save.error.message }</Notice> }
+			</CardContent>
 		</Card>
 	);
 }

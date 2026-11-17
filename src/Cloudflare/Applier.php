@@ -266,6 +266,10 @@ final class Applier {
 				$result['applied'][] = 'phase:' . $phase;
 			}
 		}
+		// Sin reglas propias en la zona, ya no hay ninguna que gestionar a mano.
+		if ( [] === $result['failed'] ) {
+			$this->state->update( [ 'unmanaged' => [] ] );
+		}
 		foreach ( $this->state->originals() as $id => $original ) {
 			if ( ! $original['active'] ) {
 				continue;

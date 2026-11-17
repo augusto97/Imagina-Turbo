@@ -22,6 +22,7 @@ use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Config\SitePaths;
 use ImaginaTurbo\Core\Environment\Detector;
+use ImaginaTurbo\Core\Environment\HostingProfile;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Request\RequestClassifier;
 use ImaginaTurbo\Core\Request\RequestType;
@@ -251,6 +252,8 @@ final class Plugin {
 		}
 		if ( RequestType::Cron === $type ) {
 			add_action( 'init', [ $this, 'notifySafeMode' ], 20 );
+			// Saber si wp-cron.php corre de verdad (0.25.0): con DISABLE_WP_CRON y sin tarea del sistema, nada avisa.
+			add_action( 'init', [ HostingProfile::class, 'noteCron' ], 30 );
 		}
 
 		// Store API y wc-ajax responden por sesión (carrito, direcciones). LSCache, con sus valores por
@@ -344,6 +347,12 @@ final class Plugin {
 		$this->container->get( SampleRepository::class )->deleteOlderThan( SampleRepository::RETENTION_HOURS );
 		$this->container->get( MetricsRepository::class )->deleteOlderThan( MetricsRepository::RETENTION_DAYS );
 		$this->container->get( RumRepository::class )->deleteOlderThan( RumRepository::RETENTION_DAYS );
+		// Una vez al día, la prueba de peticiones del sitio a sí mismo (0.25.0): mantiene vigente su alerta.
+		try {
+			HostingProfile::loopback();
+		} catch ( \Throwable $e ) {
+			$this->container->get( EventLog::class )->warning( 'hosting', 'loopback_failed', $e->getMessage() );
+		}
 	}
 
 	/**
@@ -604,7 +613,7 @@ final class Plugin {
 						}
 					}
 				}
-				return new Warmer( $c->get( PurgeQueueRepository::class ), $cache['preload_exclude'], $block, $cache['sitemaps'] );
+				return new Warmer( $c->get( PurgeQueueRepository::class ), $cache['preload_exclude'], $block, $cache['sitemaps'], HostingProfile::compiledShared() );
 			}
 		);
 		$c->set(

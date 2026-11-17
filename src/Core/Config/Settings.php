@@ -86,6 +86,8 @@ final class Settings {
 			'cache_custom'             => [],
 			// Cachés del servidor (0.24.0): Varnish y nginx (ServerCaches::settings).
 			'server_cache'             => [],
+			// Perfil de hosting (0.25.0): auto (detectado), shared o dedicated.
+			'hosting_profile'          => 'auto',
 			'rum_rate'                 => 0.05,
 			'spec_mode'                => 'prefetch',
 			'spec_eagerness'           => 'moderate',
@@ -411,6 +413,9 @@ final class Settings {
 		}
 		if ( isset( $input['cache_custom'] ) && is_array( $input['cache_custom'] ) ) {
 			$out['cache_custom'] = \ImaginaTurbo\Cloudflare\EdgeOptions::cache( $input['cache_custom'] );
+		}
+		if ( isset( $input['hosting_profile'] ) && in_array( $input['hosting_profile'], \ImaginaTurbo\Core\Environment\HostingProfile::PROFILES, true ) ) {
+			$out['hosting_profile'] = $input['hosting_profile'];
 		}
 		if ( isset( $input['server_cache'] ) && is_array( $input['server_cache'] ) ) {
 			$out['server_cache'] = \ImaginaTurbo\Modules\CacheCoordinator\ServerCaches::settings( $input['server_cache'] );

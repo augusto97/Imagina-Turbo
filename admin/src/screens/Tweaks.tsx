@@ -222,6 +222,8 @@ function CopyLine( { text }: { text: string } ) {
 }
 
 function CronCard( { status }: { status: ShieldStatus } ) {
+	const cron = status.cron;
+	const minutes = cron.last > 0 ? Math.round( ( Date.now() / 1000 - cron.last ) / 60 ) : -1;
 	return (
 		<Card>
 			<CardHeader>
@@ -229,21 +231,32 @@ function CronCard( { status }: { status: ShieldStatus } ) {
 				<CardDescription>{ __( 'WP-Cron se dispara con visitas: con caché en el edge casi no llegan visitas al servidor y las tareas se atrasan. Mejor un cron real cada 5 minutos.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
-				{ status.cron.disabled ? (
-					<Notice level="success">{ __( 'DISABLE_WP_CRON está activo. Comprueba que exista la tarea del sistema.' ) }</Notice>
+				{ cron.disabled ? (
+					minutes >= 0 && minutes <= 30 ? (
+						<Notice level="success">{ `${ __( 'DISABLE_WP_CRON está activo y wp-cron.php corrió hace' ) } ${ minutes } ${ __( 'min: la tarea del sistema funciona.' ) }` }</Notice>
+					) : (
+						<Notice level="warning">{ minutes < 0 ? __( 'DISABLE_WP_CRON está activo pero todavía no se vio correr wp-cron.php. Comprueba que exista la tarea del sistema.' ) : `${ __( 'DISABLE_WP_CRON está activo pero wp-cron.php no corre desde hace' ) } ${ minutes } ${ __( 'min. Revisa la tarea del sistema.' ) }` }</Notice>
+					)
 				) : (
 					<Notice level="info">{ __( 'WP-Cron corre con las visitas. Agrega la tarea y después define DISABLE_WP_CRON en wp-config.php (Imagina Turbo no edita ese archivo).' ) }</Notice>
 				) }
+				{ cron.panel && <Notice level="info">{ cron.steps }</Notice> }
 				<div className="itb:flex itb:flex-col itb:gap-1">
-					<span className="itb:text-xs itb:font-medium">{ __( 'Con WP-CLI (recomendado)' ) }</span>
-					<CopyLine text={ status.cron.wp_cli } />
+					<span className="itb:text-xs itb:font-medium">{ __( 'Con PHP (recomendado en hosting compartido: no pasa por la red ni por Cloudflare)' ) }</span>
+					<CopyLine text={ cron.php } />
+				</div>
+				<div className="itb:flex itb:flex-col itb:gap-1">
+					<span className="itb:text-xs itb:font-medium">{ __( 'Con WP-CLI' ) }</span>
+					<CopyLine text={ cron.wp_cli } />
 				</div>
 				<div className="itb:flex itb:flex-col itb:gap-1">
 					<span className="itb:text-xs itb:font-medium">{ __( 'Con curl' ) }</span>
-					<CopyLine text={ status.cron.command } />
+					<CopyLine text={ cron.command } />
 				</div>
 				<CopyLine text="define( 'DISABLE_WP_CRON', true );" />
 				<ul className="itb:m-0 itb:list-disc itb:pl-5 itb:text-xs itb:text-zinc-600">
+					<li>{ __( 'cPanel: Avanzado → Trabajos de cron (Cron Jobs) → «Una vez cada cinco minutos». En el campo Comando, pega solo lo que va después de «*/5 * * * *».' ) }</li>
+					<li>{ __( 'Si el hosting usa otra versión de PHP para la línea de comandos, cambia «php» por la ruta que indique el panel (por ejemplo /usr/local/bin/php).' ) }</li>
 					<li>{ __( 'ServerAvatar: Aplicación → Cron Jobs → agregar, con el usuario del sistema de la aplicación.' ) }</li>
 					<li>{ __( 'Plesk: Herramientas y configuración → Tareas programadas (o el dominio → Tareas programadas).' ) }</li>
 				</ul>

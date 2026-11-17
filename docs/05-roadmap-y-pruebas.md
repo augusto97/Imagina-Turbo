@@ -764,3 +764,18 @@ Verificado antes de implementar: el código de Proxy Cache Purge 5.2.0, Nginx He
 - [x] Interfaz con la REST simulada: 30 comprobaciones (5 nuevas de la tarjeta: avisos, detección, prueba y guardar el modo directo).
 - [ ] En un servidor real con Varnish (Cloudways con Breeze, o Proxy Cache Purge) y en uno con caché de nginx y Nginx Helper: editar un producto, purgar desde la pantalla y desde la barra, y comprobar con `X-Varnish`/`X-Cache` que la copia se renueva antes que la de Cloudflare.
 
+## Versión 0.25.0 (perfil de hosting compartido)
+
+Para los sitios de clientes en hosting compartido con cPanel (docs/02, sección 20):
+
+- Detección del hosting compartido (cPanel, DirectAdmin, CloudLinux, restricciones de PHP) con ajuste manual, en Diagnóstico → Hosting.
+- Recalentado que no mira la carga de todo el servidor, va más despacio y se pausa ante un 508, 503 o 429 (en cualquier hosting).
+- Alertas de cron: WP-Cron que depende de visitas con el HTML en Cloudflare, y tarea del sistema que no corre. Comando con PHP y pasos de cPanel en Ajustes rápidos.
+- Prueba del sitio llamándose a sí mismo, con qué queda limitado y qué pedir al hosting.
+
+**Criterios de aceptación**:
+
+- [x] 373 pruebas unitarias (4 nuevas con 72 comprobaciones: detección por rutas, kernel y restricciones; perfil efectivo; comandos y alertas de cron; clasificación de respuestas; recalentado ante 508 y 503 con la cola real en memoria), PHPStan nivel 8 y PHPCS.
+- [x] Interfaz con la REST simulada: 8 comprobaciones de la tarjeta Hosting y las 30 anteriores sin cambios.
+- [ ] En un cPanel compartido real: que la detección acierte, crear la tarea con el comando PHP y ver «corrió hace N min», y la prueba de loopback con y sin ModSecurity bloqueando.
+

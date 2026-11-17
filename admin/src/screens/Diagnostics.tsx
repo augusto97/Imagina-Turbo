@@ -12,7 +12,7 @@ import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
 import { useRouter } from '@/lib/router';
-import type { AuditReport, ImageAuditReport, ImageItem, Period, PerVisitReport, PhaseCost, PlatformCheck, PlatformReport, PluginCost, ProfilerSummary, RouteCost, Sampling, WorkersReport } from '@/lib/types';
+import type { AuditReport, HostingProfileSetting, HostingStatus, ImageAuditReport, ImageItem, Period, PerVisitReport, PhaseCost, PlatformCheck, PlatformReport, PluginCost, ProfilerSummary, RouteCost, Sampling, WorkersReport } from '@/lib/types';
 import { cn, formatDate, safeHref } from '@/lib/utils';
 
 const PERIODS: { value: Period; label: string }[] = [
@@ -131,6 +131,7 @@ export function Diagnostics() {
 							<WorkersCard />
 						</>
 					) }
+					<HostingCard />
 					<PlatformCard />
 					<ImagesCard />
 					<div className="itb:grid itb:gap-4 itb:xl:grid-cols-2">
@@ -600,6 +601,127 @@ function WorkersCard() {
 								) ) }
 							</tbody>
 						</table>
+					</>
+				) }
+			</CardContent>
+		</Card>
+	);
+}
+
+const PANELS: Record<string, string> = { cpanel: 'cPanel', directadmin: 'DirectAdmin', plesk: 'Plesk' };
+const CHECK_NAMES: Record<string, string> = { home: __( 'Portada' ), rest: __( 'API REST' ), ajax: 'admin-ajax', cron: 'WP-Cron' };
+
+/**
+ * Perfil de hosting (0.25.0): compartido o VPS, cron y peticiones del sitio a sí mismo.
+ */
+function HostingCard() {
+	const client = useQueryClient();
+	const { data, isLoading, error } = useQuery( { queryKey: [ 'hosting' ], queryFn: () => api<HostingStatus>( 'hosting' ) } );
+	const save = useAction( ( profile: HostingProfileSetting ) => api<HostingStatus>( 'hosting', 'PUT', { profile } ) );
+	const test = useAction( () => api<HostingStatus>( 'hosting/loopback', 'POST' ) );
+	const done = ( s: HostingStatus ) => client.setQueryData( [ 'hosting' ], s );
+	const d = data?.detected;
+	const lb = data?.loopback;
+	const failed = lb?.checks.filter( ( c ) => c.status !== 'ok' ) ?? [];
+	const minutes = data && data.cron.last > 0 ? Math.round( ( Date.now() / 1000 - data.cron.last ) / 60 ) : -1;
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Hosting' ) }</CardTitle>
+				<CardDescription>{ __( 'Qué tipo de servidor hay y si el sitio puede hacer lo que Imagina Turbo necesita: llamarse a sí mismo y ejecutar WP-Cron. En un hosting compartido (cPanel, CloudLinux) el recalentado va más despacio y se pausa si el hosting lo frena.' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-4 itb:text-[13px]">
+				{ isLoading && <Skeleton className="itb:h-24" /> }
+				{ error && <Notice level="error">{ error.message }</Notice> }
+				{ data && d && (
+					<>
+						<div className="itb:grid itb:gap-4 itb:md:grid-cols-2">
+							<dl className="itb:m-0">
+								<KeyValue label={ __( 'Servidor' ) }>{ data.server || '—' }</KeyValue>
+								<KeyValue label={ __( 'Panel' ) }>{ d.panel ? PANELS[ d.panel ] : '—' }</KeyValue>
+								<KeyValue label="CloudLinux">{ d.cloudlinux ? __( 'Sí' ) : __( 'No detectado' ) }</KeyValue>
+								<KeyValue label={ __( 'Detectado' ) }>{ d.shared ? __( 'Hosting compartido' ) : __( 'VPS o dedicado' ) }</KeyValue>
+							</dl>
+							<div className="itb:flex itb:flex-col itb:gap-2">
+								<label className="itb:flex itb:flex-col itb:gap-1">
+									<span className="itb:font-medium">{ __( 'Perfil' ) }</span>
+									<Select value={ data.setting } disabled={ save.isPending } onChange={ ( e ) => save.mutate( e.target.value as HostingProfileSetting, { onSuccess: done } ) }>
+										<option value="auto">{ `${ __( 'Automático' ) } (${ data.effective === 'shared' ? __( 'compartido' ) : __( 'VPS o dedicado' ) })` }</option>
+										<option value="shared">{ __( 'Hosting compartido' ) }</option>
+										<option value="dedicated">{ __( 'VPS o dedicado' ) }</option>
+									</Select>
+								</label>
+								<span className="itb:text-xs itb:text-zinc-500">{ __( 'Corrígelo si la detección se equivoca (por ejemplo, un VPS con cPanel).' ) }</span>
+								{ save.error && <Notice level="error">{ save.error.message }</Notice> }
+							</div>
+						</div>
+						{ ( d.signals.length > 0 || d.restrictions.length > 0 ) && (
+							<ul className="itb:m-0 itb:list-disc itb:pl-5 itb:text-xs itb:text-zinc-600">
+								{ [ ...d.signals, ...d.restrictions ].map( ( x ) => (
+									<li key={ x }>{ x }</li>
+								) ) }
+							</ul>
+						) }
+						{ data.warmer.limited_at > Date.now() / 1000 - 86400 && (
+							<Notice level="info">{ `${ __( 'El hosting frenó el recalentado' ) } (HTTP ${ data.warmer.limited_code }) ${ formatDate( data.warmer.limited_at, config.locale ) }. ${ __( 'Se pausó y se reanuda solo.' ) }` }</Notice>
+						) }
+
+						<div className="itb:flex itb:flex-col itb:gap-2">
+							<span className="itb:font-medium">WP-Cron</span>
+							{ data.cron.disabled ? (
+								<Notice level={ minutes >= 0 && minutes <= 30 ? 'success' : 'warning' }>
+									{ minutes >= 0 && minutes <= 30
+										? `${ __( 'Lo ejecuta la tarea del sistema: corrió hace' ) } ${ minutes } min.`
+										: minutes < 0
+										? __( 'DISABLE_WP_CRON está activo y todavía no se vio correr wp-cron.php. Comprueba la tarea del sistema.' )
+										: `${ __( 'DISABLE_WP_CRON está activo y wp-cron.php no corre desde hace' ) } ${ minutes } min.` }
+								</Notice>
+							) : (
+								<Notice level={ data.cron.edge ? 'warning' : 'info' }>
+									{ data.cron.edge
+										? __( 'Corre con las visitas, pero Cloudflare sirve el HTML y casi no llegan: crea la tarea del sistema (Ajustes rápidos → Cron del sistema).' )
+										: __( 'Corre con las visitas. Con poco tráfico o con el HTML en Cloudflare conviene una tarea del sistema (Ajustes rápidos → Cron del sistema).' ) }
+									{ ` ${ data.cron.steps }` }
+								</Notice>
+							) }
+						</div>
+
+						<div className="itb:flex itb:flex-col itb:gap-2">
+							<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-3">
+								<span className="itb:font-medium">{ __( 'El sitio llamándose a sí mismo' ) }</span>
+								<Button size="sm" variant="outline" disabled={ test.isPending } onClick={ () => test.mutate( undefined, { onSuccess: done } ) }>
+									{ test.isPending ? __( 'Probando…' ) : __( 'Probar ahora' ) }
+								</Button>
+								{ lb && <span className="itb:text-xs itb:text-zinc-500">{ `${ __( 'Última prueba' ) }: ${ formatDate( lb.at, config.locale ) }` }</span> }
+							</div>
+							{ test.error && <Notice level="error">{ test.error.message }</Notice> }
+							{ ! lb && <span className="itb:text-xs itb:text-zinc-500">{ __( 'Pide la portada, la API REST, admin-ajax y wp-cron.php como un visitante, igual que el recalentado y los experimentos. Se repite sola una vez al día.' ) }</span> }
+							{ lb && (
+								<ul className="itb:m-0 itb:flex itb:list-none itb:flex-col itb:gap-1 itb:p-0">
+									{ lb.checks.map( ( c ) => (
+										<li key={ c.id } className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+											<Badge tone={ c.status === 'ok' ? 'green' : c.status === 'limit' || c.status === 'busy' || c.status === 'redirect' ? 'amber' : 'red' }>{ c.status === 'ok' ? __( 'Bien' ) : c.code ? `HTTP ${ c.code }` : __( 'Sin conexión' ) }</Badge>
+											<span className="itb:font-medium">{ CHECK_NAMES[ c.id ] ?? c.id }</span>
+											<span className="itb:text-xs itb:text-zinc-500">{ `${ c.message } ${ c.ms } ms` }</span>
+										</li>
+									) ) }
+								</ul>
+							) }
+							{ failed.length > 0 && (
+								<Notice level="warning">
+									<div className="itb:flex itb:flex-col itb:gap-1">
+										<span className="itb:font-medium">{ __( 'Qué queda limitado' ) }</span>
+										{ failed.map( ( c ) => (
+											<span key={ c.id }>{ `${ CHECK_NAMES[ c.id ] ?? c.id }: ${ data.affects[ c.id ] }` }</span>
+										) ) }
+										<span className="itb:mt-1 itb:font-medium">{ __( 'Qué hacer' ) }</span>
+										{ [ ...new Set( failed.map( ( c ) => data.advice[ c.status ] ).filter( Boolean ) ) ].map( ( a ) => (
+											<span key={ a }>{ a }</span>
+										) ) }
+									</div>
+								</Notice>
+							) }
+						</div>
 					</>
 				) }
 			</CardContent>

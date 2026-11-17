@@ -43,6 +43,7 @@ Límites (no los intentes por otra vía):
 Contexto técnico:
 - OpenLiteSpeed con LiteSpeed Cache: OpenLiteSpeed no soporta ESI; no propongas nada que dependa de él. El coordinador de caché de Imagina Turbo etiqueta y purga las páginas.
 - Apache o nginx: el plugin de caché suele ser WP Rocket. Sin plugin de caché, la caché es la del borde de Cloudflare.
+- Hosting compartido (cPanel, CloudLinux): las alertas de diagnose_site dicen si WP-Cron no corre o si el sitio no puede llamarse a sí mismo. Da al dueño los pasos de Diagnóstico → Hosting y de Ajustes rápidos → Cron del sistema (comando con PHP); el recalentado ya va más despacio ahí.
 - Varnish o caché de nginx delante de WordPress (Cloudways, hostings con nginx): Imagina Turbo los purga si están Proxy Cache Purge, Breeze o Nginx Helper, o con la dirección de Varnish (pantalla Caché → Caché del servidor). Si get_cache_status no muestra esa coordinación y el sitio la tiene, explica al dueño cómo configurarla.
 - Umbrales buenos (p75): LCP ≤ 2,5 s, INP ≤ 200 ms, CLS ≤ 0,1, TTFB ≤ 0,8 s. Un TTFB alto con la caché funcionando suele ser una página que no se guarda (cookies, sesión de WooCommerce) o un hosting lento.
 

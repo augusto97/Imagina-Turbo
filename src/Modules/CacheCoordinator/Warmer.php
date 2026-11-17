@@ -7,6 +7,11 @@
  * núcleos × 0,7. Respeta las exclusiones de precarga de la matriz (trampas de crawler, enlaces que
  * no son páginas) y nunca pide carrito, checkout, cuenta, login ni URLs con acciones.
  *
+ * Límites del hosting (0.25.0): un 508 (CloudLinux: «Resource Limit Is Reached»), un 503 o un 429 de
+ * la propia página detienen el lote y lo pausan (15 minutos; 30 en compartido) en vez de seguir
+ * empujando. En un hosting compartido la carga del servidor es la de todas las cuentas y no se mira:
+ * lotes de 3 URLs, separados 30 s, y una página que tarde más de 3 s ya pausa el recalentado.
+ *
  * @package ImaginaTurbo
  */
 
@@ -39,6 +44,18 @@ final class Warmer {
 	 */
 	public const SLOW_MS = 5000;
 
+	/** Hosting compartido: lote, umbral de lentitud y espera entre lotes. */
+	public const SHARED_BATCH = 3;
+
+	public const SHARED_SLOW_MS = 3000;
+
+	public const SHARED_GAP = 30;
+
+	/** Respuestas con las que el servidor dice que no puede más: se pausa. */
+	public const LIMIT_CODES = [ 429, 503, 508 ];
+
+	public const LIMIT_PAUSE = 900;
+
 	/** Parámetros que nunca se recalientan (acciones, no páginas). */
 	private const BAD_QUERY = [ 'add-to-cart', 'remove_item', '_wpnonce', 'action', 'wc-ajax', 'preview', 's', 'replytocom' ];
 
@@ -52,6 +69,7 @@ final class Warmer {
 		private readonly array $patterns,
 		private readonly array $paths,
 		private readonly array $sitemaps,
+		private readonly bool $shared = false,
 	) {
 	}
 
@@ -92,7 +110,7 @@ final class Warmer {
 	 * Un lote. Devuelve cuántas URLs pidió.
 	 */
 	public function run( ?float $load = null, ?int $cores = null ): int {
-		$load  = $load ?? self::load();
+		$load  = $this->shared ? null : ( $load ?? self::load() );
 		$cores = $cores ?? self::cores();
 		if ( null !== $load && self::overloaded( $load, $cores ) ) {
 			$this->saveState(
@@ -105,11 +123,12 @@ final class Warmer {
 			return 0;
 		}
 
-		$rows   = $this->queue->drain( [ PurgeQueueRepository::KIND_WARM ], self::BATCH );
-		$done   = 0;
-		$errors = 0;
-		$ms     = 0.0;
-		$slow   = false;
+		$rows    = $this->queue->drain( [ PurgeQueueRepository::KIND_WARM ], $this->shared ? self::SHARED_BATCH : self::BATCH );
+		$done    = 0;
+		$errors  = 0;
+		$ms      = 0.0;
+		$slow    = false;
+		$limited = 0;
 		foreach ( $rows as $row ) {
 			$start    = microtime( true );
 			$response = wp_remote_get(
@@ -124,16 +143,37 @@ final class Warmer {
 				]
 			);
 			$took     = ( microtime( true ) - $start ) * 1000;
-			$ms      += $took;
+			$code     = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+			// El servidor dice que no puede más: esta URL vuelve a la cola con el resto.
+			if ( in_array( $code, self::LIMIT_CODES, true ) ) {
+				$limited = $code;
+				break;
+			}
+			$ms += $took;
 			++$done;
-			$code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
 			if ( $code < 200 || $code >= 400 ) {
 				++$errors;
 			}
-			if ( self::slow( $took ) ) {
+			if ( self::slow( $took, $this->shared ) ) {
 				$slow = true;
 				break;
 			}
+		}
+		if ( 0 !== $limited ) {
+			$this->queue->add( PurgeQueueRepository::KIND_WARM, array_column( array_slice( $rows, $done ), 'item' ) );
+			$state = $this->state();
+			$this->saveState(
+				[
+					'last_run'     => time(),
+					'warmed'       => $state['warmed'] + $done,
+					'errors'       => $state['errors'] + $errors,
+					'paused_at'    => time(),
+					'limited_at'   => time(),
+					'limited_code' => $limited,
+				]
+			);
+			self::schedule( Jobs::WARM, $this->shared ? 2 * self::LIMIT_PAUSE : self::LIMIT_PAUSE );
+			return $done;
 		}
 		if ( $slow ) {
 			// Lo que quedó del lote vuelve a la cola.
@@ -163,7 +203,7 @@ final class Warmer {
 			]
 		);
 		if ( $this->queue->counts()[ PurgeQueueRepository::KIND_WARM ] > 0 ) {
-			self::schedule( Jobs::WARM, 2 );
+			self::schedule( Jobs::WARM, $this->shared ? self::SHARED_GAP : 2 );
 		}
 		return $done;
 	}
@@ -179,19 +219,22 @@ final class Warmer {
 	}
 
 	/**
-	 * @return array{last_run: int, warmed: int, errors: int, avg_ms: int, paused_at: int, load: float, seeded_at: int}
+	 * @return array{last_run: int, warmed: int, errors: int, avg_ms: int, paused_at: int, load: float, seeded_at: int, limited_at: int, limited_code: int, shared: bool}
 	 */
 	public function state(): array {
 		$stored = get_option( self::STATE_OPTION, [] );
 		$stored = is_array( $stored ) ? $stored : [];
 		return [
-			'last_run'  => (int) ( $stored['last_run'] ?? 0 ),
-			'warmed'    => (int) ( $stored['warmed'] ?? 0 ),
-			'errors'    => (int) ( $stored['errors'] ?? 0 ),
-			'avg_ms'    => (int) ( $stored['avg_ms'] ?? 0 ),
-			'paused_at' => (int) ( $stored['paused_at'] ?? 0 ),
-			'load'      => (float) ( $stored['load'] ?? 0 ),
-			'seeded_at' => (int) ( $stored['seeded_at'] ?? 0 ),
+			'last_run'     => (int) ( $stored['last_run'] ?? 0 ),
+			'warmed'       => (int) ( $stored['warmed'] ?? 0 ),
+			'errors'       => (int) ( $stored['errors'] ?? 0 ),
+			'avg_ms'       => (int) ( $stored['avg_ms'] ?? 0 ),
+			'paused_at'    => (int) ( $stored['paused_at'] ?? 0 ),
+			'load'         => (float) ( $stored['load'] ?? 0 ),
+			'seeded_at'    => (int) ( $stored['seeded_at'] ?? 0 ),
+			'limited_at'   => (int) ( $stored['limited_at'] ?? 0 ),
+			'limited_code' => (int) ( $stored['limited_code'] ?? 0 ),
+			'shared'       => $this->shared,
 		];
 	}
 
@@ -233,8 +276,8 @@ final class Warmer {
 		return false;
 	}
 
-	public static function slow( float $ms ): bool {
-		return $ms > self::SLOW_MS;
+	public static function slow( float $ms, bool $shared = false ): bool {
+		return $ms > ( $shared ? self::SHARED_SLOW_MS : self::SLOW_MS );
 	}
 
 	public static function overloaded( ?float $load, int $cores ): bool {

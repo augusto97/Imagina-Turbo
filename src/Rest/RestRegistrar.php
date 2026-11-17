@@ -47,6 +47,7 @@ final class RestRegistrar {
 			new VerifierController( $this->container ),
 			new TurnstileController( $this->container ),
 			new ConnectorController( $this->container ),
+			new HostingController( $this->container ),
 		];
 		foreach ( $controllers as $controller ) {
 			$controller->registerRoutes();

@@ -15,6 +15,7 @@ use ImaginaTurbo\Compat\Resolver;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Environment\Detector;
+use ImaginaTurbo\Core\Environment\HostingProfile;
 use ImaginaTurbo\Core\Environment\OverlapGuard;
 use ImaginaTurbo\Core\Safety\AdminBypassCookie;
 use ImaginaTurbo\Core\Safety\KillSwitch;
@@ -261,6 +262,12 @@ final class Diagnostics {
 		// OPcache lleno, WebP sin entregar, página de acceso en caché.
 		$cloudflare = is_array( $env['cloudflare'] ?? null ) && true === ( $env['cloudflare']['proxied_request'] ?? false );
 		foreach ( EnvironmentChecks::current( $cloudflare ) as $alert ) {
+			$alerts[] = $alert;
+		}
+		// Hosting compartido (0.25.0): cron, peticiones del sitio a sí mismo y recalentado frenado por el hosting.
+		$cache    = \ImaginaTurbo\Modules\CacheCoordinator\CacheModule::settings();
+		$edgeHtml = null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cache_coordinator' ) && 'headers' === $cache['mode'] && $cache['edge_html'];
+		foreach ( HostingProfile::alerts( $edgeHtml, $this->container->get( \ImaginaTurbo\Modules\CacheCoordinator\Warmer::class )->state() ) as $alert ) {
 			$alerts[] = $alert;
 		}
 		if ( true === ( $license['protected'] ?? false ) && false === ( $license['licensed'] ?? null ) ) {

@@ -515,7 +515,7 @@ export interface ShieldStatus {
 	settings: { static: boolean; author: boolean; xmlrpc: boolean; rest_users: boolean; heartbeat: boolean; prefetch: boolean; facets: boolean; facets_views: boolean; facets_robots: boolean; facets_empty404: boolean; facets_scope: 'combos' | 'all'; heartbeat_admin: number; heartbeat_editor: number; filter_limit: number };
 	required: { xmlrpc: boolean; rest_users: boolean };
 	robots: { url: string; physical: boolean; rules: string[] };
-	cron: { disabled: boolean; command: string; wp_cli: string };
+	cron: { disabled: boolean; command: string; wp_cli: string; php: string; last: number; panel: '' | 'cpanel' | 'directadmin' | 'plesk'; steps: string };
 }
 
 export interface ShieldTestCase {
@@ -1055,3 +1055,28 @@ export interface TurnstileStatus {
 	dashboard: string;
 	test?: { ok: boolean; codes: string[] };
 }
+
+/** Perfil de hosting (0.25.0). */
+export type HostingProfileSetting = 'auto' | 'shared' | 'dedicated';
+
+export interface LoopbackCheck {
+	id: 'home' | 'rest' | 'ajax' | 'cron';
+	url: string;
+	status: 'ok' | 'connection' | 'redirect' | 'auth' | 'limit' | 'cloudflare' | 'forbidden' | 'busy' | 'error';
+	code: number;
+	ms: number;
+	message: string;
+}
+
+export interface HostingStatus {
+	detected: { panel: '' | 'cpanel' | 'directadmin' | 'plesk'; cloudlinux: boolean; restrictions: string[]; signals: string[]; shared: boolean };
+	setting: HostingProfileSetting;
+	effective: 'shared' | 'dedicated';
+	server: string;
+	loopback: { at: number; ok: boolean; server_ip: string; checks: LoopbackCheck[] } | null;
+	affects: Record<LoopbackCheck[ 'id' ], string>;
+	advice: Partial<Record<LoopbackCheck[ 'status' ], string>>;
+	cron: { disabled: boolean; last: number; edge: boolean; steps: string };
+	warmer: { shared: boolean; limited_at: number; limited_code: number };
+}
+

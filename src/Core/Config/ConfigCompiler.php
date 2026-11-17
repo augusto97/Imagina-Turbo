@@ -15,6 +15,7 @@ use ImaginaTurbo\Compat\MatrixException;
 use ImaginaTurbo\Compat\Resolver;
 use ImaginaTurbo\Core\EarlyLoader;
 use ImaginaTurbo\Core\Environment\Detector;
+use ImaginaTurbo\Core\Environment\HostingProfile;
 use ImaginaTurbo\Modules\Tweaks\TweakCatalog;
 use ImaginaTurbo\Modules\WooCart\ThemeSelectors;
 use ImaginaTurbo\Core\Environment\OverlapGuard;
@@ -269,6 +270,8 @@ final class ConfigCompiler {
 			'woo'                         => $this->wooConfig( $theme ),
 			'shield'                      => $this->shieldConfig( $compat['requires'] ?? [] ),
 			'tweaks'                      => $this->tweaksConfig(),
+			// Perfil de hosting (0.25.0): el recalentado lo lee en cron.
+			'hosting'                     => HostingProfile::compile( (string) $this->settings->get( 'hosting_profile', 'auto' ) ),
 			'cache'                       => $this->cacheConfig( $env, $compat, array_values( array_diff( $bypassAll, $coreBypass ) ), $custom, $active ),
 			// Turnstile (0.21.0): solo con el módulo activo y las claves probadas.
 			'turnstile'                   => $this->turnstileConfig( true === ( $modules['turnstile'] ?? false ) ),

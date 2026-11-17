@@ -747,3 +747,20 @@ Lo que antes solo se podía aplicar tal como venía ahora se ajusta a mano, con 
 - [x] Interfaz con la REST simulada en Chromium: 25 comprobaciones (lo que envía cada pantalla, error de validación visible, «Dejar de gestionar», purga desde la cabecera, edición de reglas, sin desborde en móvil y sin errores de JavaScript).
 - [ ] En un WordPress real: guardar el firewall con excepciones y aplicarlo en Cloudflare (que `dry_run` acepte las expresiones con `ip.src` y `ip.src.country`), excluir una ruta y ver `no-store` y que LiteSpeed no la guarda, editar una regla de plugins y una de assets, «Dejar de gestionar» con una regla cambiada en el panel, y purgar desde la barra de WordPress. No se pudo hacer en esta sesión: el entorno no permitió descargar WordPress.
 
+## Versión 0.24.0 (Varnish y caché de nginx)
+
+Imagina Turbo coordina también las cachés del servidor que van delante de WordPress (docs/02, módulo 2, «Cachés del servidor»):
+
+- **Varnish**: a través de Proxy Cache Purge o Breeze (Cloudways) si están activos, o enviando `PURGE` a la dirección de Varnish (modo directo, con prueba).
+- **nginx** (FastCGI o Redis): a través de Nginx Helper.
+- Purga antes que Cloudflare y el recalentado, cabeceras para que no guarden lo que no debe guardarse, y su «purgar todo» se replica en el edge.
+- Tarjeta «Caché del servidor» en la pantalla Caché: detección por cabeceras, modo de cada caché, prueba de la dirección y avisos (purga apagada en Nginx Helper, Nginx Helper conectado también a Cloudflare).
+
+Verificado antes de implementar: el código de Proxy Cache Purge 5.2.0, Nginx Helper 3.0.0 y la purga de Varnish de Breeze, la documentación de nginx (`X-Accel-Expires`) y el `builtin.vcl` de Varnish.
+
+**Criterios de aceptación**:
+
+- [x] 369 pruebas unitarias (6 nuevas: direcciones, ajustes y resolución, Proxy Cache Purge y Breeze, modo directo con su petición exacta, Nginx Helper con la purga apagada y sin cargar, y escucha sin bucles), PHPStan nivel 8 y PHPCS.
+- [x] Interfaz con la REST simulada: 30 comprobaciones (5 nuevas de la tarjeta: avisos, detección, prueba y guardar el modo directo).
+- [ ] En un servidor real con Varnish (Cloudways con Breeze, o Proxy Cache Purge) y en uno con caché de nginx y Nginx Helper: editar un producto, purgar desde la pantalla y desde la barra, y comprobar con `X-Varnish`/`X-Cache` que la copia se renueva antes que la de Cloudflare.
+

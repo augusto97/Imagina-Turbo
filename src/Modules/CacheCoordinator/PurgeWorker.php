@@ -3,6 +3,7 @@
  * Vaciado de la cola (Action Scheduler, tras la ventana de agrupación):
  * 1. Si el plugin de caché dejó purgas pendientes (LSCache en cron), se provoca un request PHP para
  *    que las envíe: el origen siempre se purga antes que el edge.
+ * 1b. Cachés del servidor (Varnish, nginx; 0.24.0): también antes del edge y del recalentado.
  * 2. Edge: por tag si el edge los entiende y las páginas los llevan en cada acierto; si no, por URL.
  * 3. Recalentado de lo purgado (o del sitemap completo tras purgar todo).
  *
@@ -36,11 +37,12 @@ final class PurgeWorker {
 		private readonly Warmer $warmer,
 		private readonly EventLog $events,
 		private readonly bool $warm,
+		private readonly ?ServerCaches $servers = null,
 	) {
 	}
 
 	/**
-	 * @return array{tags: int, urls: int, all: bool, edge: string, warm: int}
+	 * @return array{tags: int, urls: int, all: bool, edge: string, warm: int, server?: array{varnish: string, nginx: string}}
 	 */
 	public function run(): array {
 		$rows = $this->queue->drain( [ PurgeQueueRepository::KIND_ALL, PurgeQueueRepository::KIND_TAG, PurgeQueueRepository::KIND_URL ], self::BATCH );
@@ -72,6 +74,24 @@ final class PurgeWorker {
 		}
 
 		$byUrl = UrlResolver::forTags( $tags );
+
+		// Varnish y nginx antes del edge: si no, Cloudflare volvería a guardar la copia vieja del servidor.
+		if ( null !== $this->servers && $this->servers->active() ) {
+			$server            = $this->servers->purge( $all, array_values( array_unique( array_merge( $urls, $byUrl ) ) ) );
+			$summary['server'] = $server;
+			foreach ( $server as $id => $result ) {
+				if ( '' !== $result && 'ok' !== $result && 'all' !== $result ) {
+					$this->events->warning(
+						'cache',
+						'server_purge',
+						/* translators: 1: Varnish o nginx, 2: error. */
+						sprintf( __( 'No se pudo purgar la caché del servidor (%1$s): %2$s', 'imagina-turbo' ), $id, $result ),
+						[ 'server' => $server ]
+					);
+				}
+			}
+		}
+
 		if ( $this->edge->available() ) {
 			$useTags         = $this->edge->supportsTags() && $this->adapter->headersOnHit();
 			$result          = $all

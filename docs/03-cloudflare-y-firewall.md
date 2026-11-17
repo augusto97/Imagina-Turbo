@@ -173,7 +173,7 @@ Sin esto, una visita con la cookie de consentimiento, moneda o idioma (cookies `
 - *Verificado:* error 429 con código 1134 al superar el límite. El endpoint `invalidate_cache` (2026-09-28, marca como viejo y revalida con ETag/Last-Modified) comparte permisos y límites; no se usa todavía porque WordPress rara vez responde 304.
 - *Implementado:* hasta 100 elementos por llamada y como máximo 5 llamadas por vuelta en Free (20 en Pro, 40 en Business; `data/cloudflare-limits.json`). Lo que no entra vuelve a la cola sin repetir lo ya purgado. Solo se purgan URLs del host del sitio. Nunca en dominios de staging ni si el sitio no pertenece a la zona.
 - `purge_everything` solo con confirmación del usuario o en eventos de "todo" (cambio de tema, Elementor CSS global) **y** seguido de recalentado.
-- Sincronizar siempre con el adaptador del plugin de caché (purgar ambos niveles).
+- Sincronizar siempre con el adaptador del plugin de caché (purgar ambos niveles) y, desde 0.24.0, con Varnish o la caché de nginx si los hay (docs/02, módulo 2, «Cachés del servidor»): siempre antes que el edge.
 
 ## 6. Firewall por capas
 

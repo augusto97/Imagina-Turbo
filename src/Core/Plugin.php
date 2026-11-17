@@ -50,6 +50,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\Edge\NullEdgePurger;
 use ImaginaTurbo\Modules\CacheCoordinator\NonceRefresh;
 use ImaginaTurbo\Modules\CacheCoordinator\Purger;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
+use ImaginaTurbo\Modules\CacheCoordinator\ServerCaches;
 use ImaginaTurbo\Modules\CacheCoordinator\TagBuilder;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
 use ImaginaTurbo\Modules\PluginFilter\ExperimentRunner;
@@ -615,7 +616,8 @@ final class Plugin {
 				$c->get( TagBuilder::class ),
 				$c->get( Warmer::class ),
 				$c->get( EventLog::class ),
-				CacheModule::settings()['warm']
+				CacheModule::settings()['warm'],
+				ServerCaches::compiled()
 			)
 		);
 		$c->set(

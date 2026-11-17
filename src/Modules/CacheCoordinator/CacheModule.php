@@ -91,6 +91,10 @@ final class CacheModule implements ModuleInterface {
 		$purger = static fn(): Purger => $container->get( Purger::class );
 		( new PurgeMap( $purger, $settings['purge_all_hooks'] ) )->register();
 		$container->get( CacheAdapter::class )->listen( static fn( PurgeRequest $r ) => $purger()->mirror( $r ) );
+		// Varnish o nginx vaciados enteros por su plugin (0.24.0): también el edge.
+		if ( '' !== $settings['server_cache']['varnish'] || '' !== $settings['server_cache']['nginx'] ) {
+			( new ServerCaches( $settings['server_cache'] ) )->listen( static fn( PurgeRequest $r ) => $purger()->mirror( $r ) );
+		}
 
 		$adapter = $container->get( CacheAdapter::class );
 		if ( $adapter instanceof WpRocketAdapter && in_array( $type, [ RequestType::Admin, RequestType::AdminAjax, RequestType::Cron, RequestType::Cli ], true ) ) {
@@ -101,7 +105,7 @@ final class CacheModule implements ModuleInterface {
 	/**
 	 * Ajustes compilados con valores por defecto.
 	 *
-	 * @return array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, warm: bool, adapter: string, server: string, edge_html: bool, mobile_split: bool, edge_variants: bool, purge_all_hooks: list<string>, sitemaps: list<string>, preload_exclude: list<string>, bypass_paths: list<string>, custom_paths: list<string>, custom_cookies: list<string>}
+	 * @return array{mode: string, edge_ttl: int, swr: int, sie: int, nonce_refresh: bool, warm: bool, adapter: string, server: string, edge_html: bool, mobile_split: bool, edge_variants: bool, purge_all_hooks: list<string>, sitemaps: list<string>, preload_exclude: list<string>, bypass_paths: list<string>, custom_paths: list<string>, custom_cookies: list<string>, server_cache: array{varnish: string, varnish_address: string, nginx: string}}
 	 */
 	public static function settings(): array {
 		$cache = Runtime::$config?->get( 'cache', [] );
@@ -125,6 +129,22 @@ final class CacheModule implements ModuleInterface {
 			'bypass_paths'    => $list( $cache['bypass_paths'] ?? [] ),
 			'custom_paths'    => $list( $cache['custom_paths'] ?? [] ),
 			'custom_cookies'  => $list( $cache['custom_cookies'] ?? [] ),
+			'server_cache'    => self::serverCache( $cache['server_cache'] ?? null ),
+		];
+	}
+
+	/**
+	 * Cachés del servidor de la config compilada (0.24.0).
+	 *
+	 * @return array{varnish: string, varnish_address: string, nginx: string}
+	 */
+	private static function serverCache( mixed $value ): array {
+		$value = is_array( $value ) ? $value : [];
+		$str   = static fn( string $key ): string => is_string( $value[ $key ] ?? null ) ? $value[ $key ] : '';
+		return [
+			'varnish'         => in_array( $str( 'varnish' ), [ 'proxy-cache-purge', 'breeze', 'direct' ], true ) ? $str( 'varnish' ) : '',
+			'varnish_address' => $str( 'varnish_address' ),
+			'nginx'           => 'nginx-helper' === $str( 'nginx' ) ? 'nginx-helper' : '',
 		];
 	}
 }

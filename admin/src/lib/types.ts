@@ -365,7 +365,29 @@ export interface CacheStatus {
 	fragments: { available: boolean; ajax: string[]; verify: { at: number; pass: boolean; pages: FragmentPageResult[]; error: string } | null };
 	vary_cookies: string[];
 	custom_options: { static_ttls: number[]; max_paths: number; max_cookies: number };
+	server_cache: ServerCacheStatus;
 	result?: Record<string, unknown>;
+}
+
+/** Varnish y nginx delante de WordPress (0.24.0). */
+export interface ServerCacheSettings {
+	varnish: 'auto' | 'off' | 'direct';
+	varnish_address: string;
+	nginx: 'auto' | 'off';
+}
+
+export interface ServerCacheStatus {
+	settings: ServerCacheSettings;
+	resolved: { varnish: '' | 'proxy-cache-purge' | 'breeze' | 'direct'; nginx: '' | 'nginx-helper' };
+	plugins: { proxy_cache_purge: boolean; breeze: boolean; nginx_helper: boolean };
+	warnings: string[];
+	detect: { at: number; varnish: boolean; nginx: boolean; headers: Record<string, string>; error: string } | null;
+}
+
+export interface ServerTestResult {
+	ok: boolean;
+	status: number;
+	message: string;
 }
 
 export interface InspectResult {

@@ -13,6 +13,7 @@ use ImaginaTurbo\Cloudflare\EdgeOptions;
 use ImaginaTurbo\Core\Config\ConfigCompiler;
 use ImaginaTurbo\Core\Config\Settings;
 use ImaginaTurbo\Core\Diagnostics;
+use ImaginaTurbo\Core\Environment\Detector;
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Core\Runtime;
 use ImaginaTurbo\Modules\AssetManager\AssetScanner;
@@ -27,6 +28,7 @@ use ImaginaTurbo\Modules\CacheCoordinator\HeaderEmitter;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeRequest;
 use ImaginaTurbo\Modules\CacheCoordinator\PurgeWorker;
 use ImaginaTurbo\Modules\CacheCoordinator\Purger;
+use ImaginaTurbo\Modules\CacheCoordinator\ServerCaches;
 use ImaginaTurbo\Modules\CacheCoordinator\TagBuilder;
 use ImaginaTurbo\Modules\CacheCoordinator\Warmer;
 use ImaginaTurbo\Repository\PurgeQueueRepository;
@@ -69,6 +71,8 @@ final class CacheController extends Controller {
 				'edge_variants' => [ 'type' => 'boolean' ],
 				// Exclusiones manuales y TTL de los estáticos en el edge (0.23.0), validados con EdgeOptions.
 				'custom'        => [ 'type' => 'object' ],
+				// Varnish y nginx (0.24.0): {varnish: auto|off|direct, varnish_address, nginx: auto|off}.
+				'server'        => [ 'type' => 'object' ],
 				'confirm'       => [
 					'type'    => 'boolean',
 					'default' => false,
@@ -109,6 +113,20 @@ final class CacheController extends Controller {
 			]
 		);
 		$this->route( '/cache/fragments/verify', \WP_REST_Server::CREATABLE, [ $this, 'verifyFragments' ] );
+		// Cachés del servidor (0.24.0): detectar por las cabeceras de la portada y probar la dirección de Varnish.
+		$this->route( '/cache/server/detect', \WP_REST_Server::CREATABLE, [ $this, 'detectServer' ] );
+		$this->route(
+			'/cache/server/test',
+			\WP_REST_Server::CREATABLE,
+			[ $this, 'testServer' ],
+			[
+				'address' => [
+					'type'      => 'string',
+					'maxLength' => 60,
+					'required'  => true,
+				],
+			]
+		);
 		$this->route(
 			'/cache/inspect',
 			\WP_REST_Server::CREATABLE,
@@ -155,6 +173,7 @@ final class CacheController extends Controller {
 				'max_paths'   => EdgeOptions::MAX_CACHE_PATHS,
 				'max_cookies' => EdgeOptions::MAX_CACHE_COOKIES,
 			],
+			'server_cache'   => $this->serverStatus(),
 			// Cookies de variación de los plugins activos (moneda, idioma, consentimiento): hoy impiden la caché
 			// del HTML en el edge; con variantes, van en la llave (0.18.0).
 			'vary_cookies'   => array_values( array_filter( (array) ( null !== Runtime::$config ? Runtime::$config->get( 'vary_cookies', [] ) : [] ), 'is_string' ) ),
@@ -218,6 +237,17 @@ final class CacheController extends Controller {
 			$before                  = EdgeOptions::cache( (array) $settings->get( 'cache_custom', [] ) );
 			$changes['cache_custom'] = EdgeOptions::cache( $custom );
 			$added                   = array_values( array_diff( $changes['cache_custom']['bypass_paths'], $before['bypass_paths'] ) );
+		}
+		$server = $request->get_param( 'server' );
+		if ( is_array( $server ) ) {
+			$address = is_string( $server['varnish_address'] ?? null ) ? trim( $server['varnish_address'] ) : '';
+			if ( '' !== $address && null === ServerCaches::address( $address ) ) {
+				return $this->error( 'itb_server_address', __( 'Dirección de Varnish no válida: una IP, opcionalmente con puerto (127.0.0.1:6081 o [::1]:6081).', 'imagina-turbo' ), 400 );
+			}
+			if ( 'direct' === ( $server['varnish'] ?? null ) && '' === $address ) {
+				return $this->error( 'itb_server_address', __( 'El modo directo necesita la dirección de Varnish.', 'imagina-turbo' ), 400 );
+			}
+			$changes['server_cache'] = ServerCaches::settings( $server );
 		}
 		// Emitir cabeceras al edge es el paso sensible del módulo: se confirma explícitamente (regla 3).
 		if ( 'headers' === ( $changes['cache_mode'] ?? null ) && 'headers' !== $settings->get( 'cache_mode', 'sync' ) && true !== $request->get_param( 'confirm' ) ) {
@@ -357,6 +387,58 @@ final class CacheController extends Controller {
 	/**
 	 * Pide una URL como visitante anónimo y muestra las cabeceras de caché que salen del origen.
 	 */
+	/**
+	 * Varnish y nginx: ajustes, qué se coordina, plugins presentes, avisos y la última detección.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function serverStatus(): array {
+		$active   = $this->container->get( Detector::class )->activePlugins();
+		$resolved = CacheModule::settings()['server_cache'];
+		$cf       = null !== Runtime::$config && Runtime::$config->moduleEnabled( 'cloudflare' );
+		$helper   = in_array( ServerCaches::NGINX_HELPER_FILE, $active, true );
+		return [
+			'settings' => ServerCaches::settings( (array) $this->container->get( Settings::class )->get( 'server_cache', [] ) ),
+			'resolved' => [
+				'varnish' => $resolved['varnish'],
+				'nginx'   => $resolved['nginx'],
+			],
+			'plugins'  => [
+				'proxy_cache_purge' => in_array( ServerCaches::PCP_FILE, $active, true ),
+				'breeze'            => in_array( ServerCaches::BREEZE_FILE, $active, true ),
+				'nginx_helper'      => $helper,
+			],
+			'warnings' => array_values(
+				array_filter(
+					[
+						$helper && ! ServerCaches::nginxHelperPurges() ? __( 'Nginx Helper tiene la purga apagada («Enable Purge»): actívala para que Imagina Turbo pueda purgar la caché de nginx.', 'imagina-turbo' ) : '',
+						$helper && $cf && ServerCaches::nginxHelperCloudflare() ? __( 'Nginx Helper también está conectado a Cloudflare y purgaría la zona por su lado. Con el módulo Cloudflare de Imagina Turbo activo, quita la conexión de Cloudflare en Nginx Helper.', 'imagina-turbo' ) : '',
+					]
+				)
+			),
+			'detect'   => ServerCaches::lastDetect(),
+		];
+	}
+
+	public function detectServer(): \WP_REST_Response {
+		ServerCaches::detect();
+		return $this->ok( $this->status() );
+	}
+
+	public function testServer( \WP_REST_Request $request ): \WP_REST_Response {
+		$result = ServerCaches::test( (string) $request->get_param( 'address' ) );
+		$this->container->get( EventLog::class )->info(
+			'cache_coordinator',
+			'server_test',
+			$result['message'],
+			[
+				'user'   => get_current_user_id(),
+				'status' => $result['status'],
+			]
+		);
+		return $this->ok( $result );
+	}
+
 	public function inspect( \WP_REST_Request $request ): \WP_REST_Response|\WP_Error {
 		$url = esc_url_raw( trim( (string) $request->get_param( 'url' ) ) );
 		// Mismo host y mismo puerto que el sitio (0.21.2: con otro puerto se podía consultar un servicio local).

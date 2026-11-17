@@ -13,7 +13,7 @@ import { api, ApiError } from '@/lib/api';
 import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction } from '@/lib/queries';
-import type { CacheSettings, CacheStatus, FragmentPageResult, InspectResult } from '@/lib/types';
+import type { CacheSettings, CacheStatus, FragmentPageResult, InspectResult, ServerCacheSettings, ServerTestResult } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const HOUR = 3600;
@@ -69,6 +69,7 @@ export function Cache() {
 						<QueueCard status={ data } onDone={ onDone } />
 						<PurgeCard status={ data } onDone={ onDone } />
 					</div>
+					<ServerCacheCard status={ data } onDone={ onDone } />
 					<ExclusionsCard status={ data } onDone={ onDone } />
 					<FragmentsCard status={ data } onDone={ onDone } />
 					{ data.vary_cookies.length > 0 && <VariantsCard status={ data } onDone={ onDone } /> }
@@ -330,6 +331,121 @@ function PurgeCard( { status, onDone }: { status: CacheStatus; onDone: ( s: Cach
 				pending={ purge.isPending }
 				onConfirm={ () => purge.mutate( { type: 'all', value: '', confirm: true }, { onSuccess: onDone, onSettled: () => setConfirmAll( false ) } ) }
 			/>
+		</Card>
+	);
+}
+
+const VARNISH_VIA: Record<string, string> = { 'proxy-cache-purge': 'Proxy Cache Purge', breeze: 'Breeze', direct: __( 'Imagina Turbo, directo' ) };
+
+/**
+ * Varnish y nginx delante de WordPress (0.24.0): se purgan junto con el plugin de caché y Cloudflare.
+ */
+function ServerCacheCard( { status, onDone }: { status: CacheStatus; onDone: ( s: CacheStatus ) => void } ) {
+	const server = status.server_cache;
+	const [ form, setForm ] = useState<ServerCacheSettings>( server.settings );
+	const [ test, setTest ] = useState<ServerTestResult | null>( null );
+	useEffect( () => setForm( server.settings ), [ server.settings ] );
+	const dirty = JSON.stringify( form ) !== JSON.stringify( server.settings );
+	const save = useAction( () => api<CacheStatus>( 'cache/settings', 'PUT', { server: form } ) );
+	const detect = useAction( () => api<CacheStatus>( 'cache/server/detect', 'POST' ) );
+	const probe = useAction( () => api<ServerTestResult>( 'cache/server/test', 'POST', { address: form.varnish_address } ) );
+	const d = server.detect;
+	const varnishNote =
+		form.varnish === 'off'
+			? __( 'No se coordina.' )
+			: form.varnish === 'direct'
+			? __( 'Imagina Turbo envía PURGE a esta dirección (VCL compatible con Proxy Cache Purge: PURGE y X-Purge-Method).' )
+			: server.resolved.varnish
+			? `${ __( 'Se coordina con' ) } ${ VARNISH_VIA[ server.resolved.varnish ] }.`
+			: __( 'Sin Proxy Cache Purge ni Breeze activos: no se coordina. Instala el plugin que recomiende tu hosting o usa el modo directo.' );
+	const nginxNote =
+		form.nginx === 'off'
+			? __( 'No se coordina.' )
+			: server.resolved.nginx
+			? __( 'Se coordina con Nginx Helper.' )
+			: __( 'Sin Nginx Helper activo: no se coordina. Para purgar la caché de nginx desde WordPress, instala y configura Nginx Helper (rtCamp).' );
+	return (
+		<Card>
+			<CardHeader>
+				<CardTitle>{ __( 'Caché del servidor (Varnish y nginx)' ) }</CardTitle>
+				<CardDescription>{ __( 'Si delante de WordPress hay Varnish o la caché de nginx, Imagina Turbo la purga junto con el plugin de caché, antes que Cloudflare, y le dice qué páginas no guardar (carrito, exclusiones).' ) }</CardDescription>
+			</CardHeader>
+			<CardContent className="itb:flex itb:flex-col itb:gap-4 itb:text-[13px]">
+				<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-3">
+					<Button size="sm" variant="outline" disabled={ detect.isPending } onClick={ () => detect.mutate( undefined, { onSuccess: onDone } ) }>
+						<Search aria-hidden />
+						{ detect.isPending ? __( 'Revisando…' ) : __( 'Detectar' ) }
+					</Button>
+					<span className="itb:text-zinc-600">
+						{ ! d && __( 'Revisa las cabeceras de la portada para ver qué caché responde delante de PHP.' ) }
+						{ d && d.error && `${ __( 'No se pudo revisar:' ) } ${ d.error }` }
+						{ d && ! d.error && ( d.varnish || d.nginx ) && `${ __( 'Detectado:' ) } ${ [ d.varnish ? 'Varnish' : '', d.nginx ? __( 'caché de nginx' ) : '' ].filter( Boolean ).join( ' + ' ) } (${ formatDate( d.at, config.locale ) })` }
+						{ d && ! d.error && ! d.varnish && ! d.nginx && `${ __( 'No se ve Varnish ni caché de nginx delante de PHP' ) } (${ formatDate( d.at, config.locale ) }).` }
+					</span>
+				</div>
+				{ d && Object.keys( d.headers ).length > 0 && (
+					<details className="itb:text-xs">
+						<summary className="itb:cursor-pointer itb:text-zinc-600">{ __( 'Cabeceras de la portada' ) }</summary>
+						<dl className="itb:m-0 itb:mt-1">
+							{ Object.entries( d.headers ).map( ( [ k, v ] ) => (
+								<KeyValue key={ k } label={ k }>
+									<code className="itb:text-xs">{ v }</code>
+								</KeyValue>
+							) ) }
+						</dl>
+					</details>
+				) }
+				<div className="itb:grid itb:gap-4 itb:md:grid-cols-2">
+					<div className="itb:flex itb:min-w-0 itb:flex-col itb:gap-2">
+						<label className="itb:flex itb:flex-col itb:gap-1">
+							<span className="itb:font-medium">Varnish</span>
+							<Select value={ form.varnish } onChange={ ( e ) => setForm( { ...form, varnish: e.target.value as ServerCacheSettings[ 'varnish' ] } ) }>
+								<option value="auto">{ __( 'Automático (con Proxy Cache Purge o Breeze)' ) }</option>
+								<option value="direct">{ __( 'Directo (Imagina Turbo envía PURGE)' ) }</option>
+								<option value="off">{ __( 'No coordinar' ) }</option>
+							</Select>
+						</label>
+						<span className="itb:text-xs itb:text-zinc-500">{ varnishNote }</span>
+						{ form.varnish === 'direct' && (
+							<div className="itb:flex itb:flex-col itb:gap-1">
+								<span className="itb:text-xs itb:font-medium">{ __( 'Dirección de Varnish (IP y puerto)' ) }</span>
+								<div className="itb:flex itb:gap-2">
+									<Input value={ form.varnish_address } onChange={ ( e ) => setForm( { ...form, varnish_address: e.target.value } ) } placeholder="127.0.0.1:6081" aria-label={ __( 'Dirección de Varnish' ) } />
+									<Button size="sm" className="itb:h-9" variant="outline" disabled={ probe.isPending || form.varnish_address.trim() === '' } onClick={ () => probe.mutate( undefined, { onSuccess: setTest } ) }>
+										{ probe.isPending ? __( 'Probando…' ) : __( 'Probar' ) }
+									</Button>
+								</div>
+								<span className="itb:text-xs itb:text-zinc-500">{ __( 'La prueba purga solo la portada. Las peticiones van directo al servidor, sin pasar por Cloudflare.' ) }</span>
+								{ test && <Notice level={ test.ok ? 'success' : 'warning' }>{ `${ test.message }${ test.status ? ` (HTTP ${ test.status })` : '' }` }</Notice> }
+								{ probe.error && <Notice level="error">{ probe.error.message }</Notice> }
+							</div>
+						) }
+					</div>
+					<div className="itb:flex itb:min-w-0 itb:flex-col itb:gap-2">
+						<label className="itb:flex itb:flex-col itb:gap-1">
+							<span className="itb:font-medium">{ __( 'Caché de nginx (FastCGI o Redis)' ) }</span>
+							<Select value={ form.nginx } onChange={ ( e ) => setForm( { ...form, nginx: e.target.value as ServerCacheSettings[ 'nginx' ] } ) }>
+								<option value="auto">{ __( 'Automático (con Nginx Helper)' ) }</option>
+								<option value="off">{ __( 'No coordinar' ) }</option>
+							</Select>
+						</label>
+						<span className="itb:text-xs itb:text-zinc-500">{ nginxNote }</span>
+					</div>
+				</div>
+				{ server.warnings.map( ( w ) => (
+					<Notice key={ w } level="warning">
+						{ w }
+					</Notice>
+				) ) }
+				<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-3">
+					<Button size="sm" disabled={ ! dirty || save.isPending } onClick={ () => save.mutate( undefined, { onSuccess: onDone } ) }>
+						{ save.isPending ? __( 'Guardando…' ) : __( 'Guardar' ) }
+					</Button>
+					{ dirty && <span className="itb:text-xs itb:text-amber-700">{ __( 'Hay cambios sin guardar.' ) }</span> }
+					{ ! status.enabled && <span className="itb:text-xs itb:text-zinc-500">{ __( 'Las purgas automáticas necesitan el coordinador de caché activo; la purga manual funciona igual.' ) }</span> }
+				</div>
+				{ ( save.error || detect.error ) && <Notice level="error">{ ( save.error ?? detect.error )?.message }</Notice> }
+			</CardContent>
 		</Card>
 	);
 }

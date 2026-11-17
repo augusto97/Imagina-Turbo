@@ -124,10 +124,12 @@ final class HeaderEmitter {
 		// en ningún nivel: LSCache, con sus valores por defecto, la guardaría como pública.
 		if ( ! $this->verdict['cacheable'] && 'cookie' === $this->verdict['reason'] && self::hasCookie( array_map( 'strval', array_keys( $_COOKIE ) ), $this->cartCookies ) ) {
 			$this->adapter->noCache( 'cart' );
+			ServerCaches::noCache();
 		}
 		// Exclusiones manuales (0.23.0): tampoco se guardan en el plugin de caché del servidor.
 		if ( ! $this->verdict['cacheable'] && $this->customExclusion( $this->verdict['reason'] ) ) {
 			$this->adapter->noCache( 'excluded' );
+			ServerCaches::noCache();
 		}
 
 		$tags           = $this->verdict['cacheable'] ? $this->tags->tags( TagBuilder::namesForCurrentQuery() ) : [];

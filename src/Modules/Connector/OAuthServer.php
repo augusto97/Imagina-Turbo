@@ -99,10 +99,11 @@ final class OAuthServer {
 		if ( ! Connector::userCan( $user ) ) {
 			self::page( __( 'Sin permiso', 'imagina-turbo' ), '<p>' . esc_html__( 'Tu usuario no administra Imagina Turbo en este sitio. Entra con una cuenta de administrador.', 'imagina-turbo' ) . '</p>', 403 );
 		}
-		// Una sesión vieja (o una cookie robada) no basta: hay que haber entrado hace poco.
+		// Una sesión vieja (o una cookie robada) no basta: hay que haber entrado hace poco. No se manda al
+		// login con reauth: los plugins que ocultan el login (WPS Hide Login) llevan al escritorio a quien
+		// ya tiene sesión e ignoran a dónde volver. Se cierra la sesión y se entra de nuevo.
 		if ( ! self::recentLogin( $user ) ) {
-			wp_safe_redirect( wp_login_url( self::selfUrl( $p ), true ) );
-			exit;
+			self::page( __( 'Vuelve a iniciar sesión', 'imagina-turbo' ), self::reauthBody( self::reauthUrl( self::selfUrl( $p ) ) ), 200 );
 		}
 
 		// Antes de redirigir nada: el cliente y su dirección de vuelta.
@@ -445,6 +446,23 @@ final class OAuthServer {
 	}
 
 	/**
+	 * Cerrar la sesión y volver al login con la vuelta a /authorize: sin sesión, cualquier plugin de
+	 * login muestra el formulario, y al entrar WordPress vuelve aquí con una sesión nueva.
+	 */
+	public static function reauthUrl( string $self ): string {
+		return wp_logout_url( wp_login_url( $self ) );
+	}
+
+	/**
+	 * Página para volver a entrar.
+	 */
+	public static function reauthBody( string $url ): string {
+		return '<p class="lead">' . esc_html__( 'Para dar acceso a Claude hay que haber iniciado sesión hace menos de 2 horas.', 'imagina-turbo' ) . '</p>'
+			. '<p>' . esc_html__( 'Se cerrará tu sesión y volverás a entrar con tu usuario y contraseña; después verás la pantalla para dar acceso.', 'imagina-turbo' ) . '</p>'
+			. '<div class="actions"><a class="primary" href="' . esc_url( $url ) . '">' . esc_html__( 'Volver a iniciar sesión', 'imagina-turbo' ) . '</a></div>';
+	}
+
+	/**
 	 * URL de /authorize con los mismos parámetros.
 	 *
 	 * @param array<string, string> $p Parámetros.
@@ -529,6 +547,7 @@ final class OAuthServer {
 	.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 	button{font:inherit;border-radius:8px;padding:9px 16px;cursor:pointer;border:1px solid #d6d3d1;background:#fff}
 	button.primary{background:#1c1917;color:#fff;border-color:#1c1917}
+	a.primary{display:inline-block;border-radius:8px;padding:9px 16px;background:#1c1917;color:#fff;text-decoration:none}
 	/* Contra el doble clic engañoso: Permitir no responde durante el primer segundo. */
 	button.primary{animation:itb-arm 1s linear forwards}
 	@keyframes itb-arm{0%,99%{pointer-events:none;opacity:.45}100%{pointer-events:auto;opacity:1}}

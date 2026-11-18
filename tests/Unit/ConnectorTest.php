@@ -419,6 +419,25 @@ final class ConnectorTest extends TestCase {
 		$this->assertSame( '203.0.113.9', Connector::ipKey( '203.0.113.9' ) );
 	}
 
+	public function test_old_session_logs_out_and_comes_back(): void {
+		// WPS Hide Login lleva al escritorio a quien ya tiene sesión y entra al login (sin action), aunque
+		// pida reauth y redirect_to. Se cierra la sesión (logout lleva action) y se vuelve por el login.
+		Functions\when( 'wp_login_url' )->alias( static fn( string $redirect = '', bool $reauth = false ): string => 'https://tienda.example/acceso/?redirect_to=' . rawurlencode( $redirect ) . ( $reauth ? '&reauth=1' : '' ) );
+		Functions\when( 'wp_logout_url' )->alias( static fn( string $redirect = '' ): string => 'https://tienda.example/acceso/?action=logout&redirect_to=' . rawurlencode( $redirect ) . '&_wpnonce=abc' );
+		$self = 'https://tienda.example/itb-oauth/authorize?response_type=code&state=s';
+		$url  = OAuthServer::reauthUrl( $self );
+		$this->assertStringStartsWith( 'https://tienda.example/acceso/?action=logout', $url );
+		$this->assertStringNotContainsString( 'reauth', $url, 'sin reauth: el plugin de login lo ignora' );
+		parse_str( (string) parse_url( $url, PHP_URL_QUERY ), $logout );
+		parse_str( (string) parse_url( (string) $logout['redirect_to'], PHP_URL_QUERY ), $login );
+		$this->assertSame( $self, $login['redirect_to'], 'después del login vuelve a /authorize' );
+
+		$body = OAuthServer::reauthBody( $url );
+		$this->assertStringContainsString( 'href="' . $url . '"', $body );
+		$this->assertStringContainsString( 'Volver a iniciar sesión', $body );
+		$this->assertStringContainsString( '2 horas', $body );
+	}
+
 	public function test_rest_special_params_and_budget(): void {
 		$this->assertSame(
 			[ 'spec_mode' => 'prefetch' ],

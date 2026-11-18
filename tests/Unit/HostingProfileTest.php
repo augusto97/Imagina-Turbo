@@ -133,6 +133,7 @@ final class HostingProfileTest extends TestCase {
 		$cmd = HostingProfile::cronCommands( 'https://tienda.com/', '/home/t/public_html/' );
 		$this->assertSame( '*/5 * * * * curl -fsS https://tienda.com/wp-cron.php?doing_wp_cron >/dev/null 2>&1', $cmd['http'] );
 		$this->assertSame( '*/5 * * * * cd /home/t/public_html && php -q wp-cron.php >/dev/null 2>&1', $cmd['php'] );
+		$this->assertSame( '*/5 * * * * cd /home/t/public_html && wp cron event run --due-now --quiet >/dev/null 2>&1', $cmd['wp_cli'] );
 		$this->assertStringContainsString( 'Trabajos de cron', HostingProfile::cronSteps( 'cpanel' ) );
 
 		$now = 100000;
@@ -145,6 +146,7 @@ final class HostingProfileTest extends TestCase {
 		$stalled = HostingProfile::cronAlerts( false, true, $now - 2400, $now - 9000, $now, '' );
 		$this->assertSame( [ 'error', 'cron_stalled' ], [ $stalled[0]['level'], $stalled[0]['code'] ] );
 		$this->assertStringContainsString( '40 minutos', $stalled[0]['message'] );
+		$this->assertStringContainsString( 'WP-CLI', $stalled[0]['message'], 'el aviso nombra también la variante con WP-CLI' );
 		$this->assertSame( 'cron_stalled', HostingProfile::cronAlerts( false, true, 0, $now - 7200, $now, '' )[0]['code'], 'nunca se vio correr desde que se vigila' );
 		$this->assertSame( [], HostingProfile::cronAlerts( false, true, 0, $now - 600, $now, '' ), 'se vigila desde hace poco' );
 	}
@@ -153,6 +155,8 @@ final class HostingProfileTest extends TestCase {
 		$s = static fn( string $id, int $code, array $headers = [], string $body = '', string $error = '' ): string => HostingProfile::classify( $id, $code, $headers, $body, $error )['status'];
 		$this->assertSame( 'ok', $s( 'home', 200 ) );
 		$this->assertSame( 'ok', $s( 'ajax', 400, [], '0' ), 'admin-ajax sin acción: WordPress respondió' );
+		$this->assertSame( 'ok', $s( 'ajax', 400, [], '' ), 'Requests descarta el cuerpo «0»: llega vacío' );
+		$this->assertSame( 'error', $s( 'ajax', 400, [], '<html>Bad Request</html>' ), 'un 400 con otra página no es admin-ajax' );
 		$this->assertSame( 'error', $s( 'home', 400 ) );
 		$this->assertSame( 'ok', $s( 'rest', 401, [], '{"code":"rest_cannot_access"}' ), 'la REST cerrada a anónimos también es WordPress' );
 		$this->assertSame( 'auth', $s( 'home', 401 ) );
@@ -178,11 +182,173 @@ final class HostingProfileTest extends TestCase {
 		);
 		$this->assertSame( 'error', $s( 'home', 500 ) );
 
-		foreach ( [ 'connection', 'forbidden', 'cloudflare', 'auth', 'limit', 'busy', 'redirect' ] as $status ) {
+		// admin-ajax con la acción de la prueba: 200 con la marca.
+		$t = static fn( int $code, string $body, string $token = 'a1b2c3d4e5f60718' ): string => HostingProfile::classify( 'ajax', $code, [], $body, '', $token )['status'];
+		$this->assertSame( 'ok', $t( 200, '{"success":true,"data":{"token":"a1b2c3d4e5f60718"}}' ) );
+		$this->assertSame( 'ok', $t( 200, "<b>Notice</b>: algo\n{\"success\":true,\"data\":{\"token\":\"a1b2c3d4e5f60718\"}}" ), 'avisos de PHP antes del JSON no lo invalidan' );
+		$this->assertSame( 'unexpected', $t( 200, '<html>Sitio en mantenimiento</html>' ), 'un 200 sin la marca no es WordPress' );
+		$this->assertSame( 'unexpected', $t( 200, '{"success":true,"data":{"token":"otra"}}' ) );
+		$this->assertSame( 'ok', $t( 400, '' ), 'versiones anteriores sin la acción: 400 vacío' );
+		$this->assertSame( 'ok', $t( 400, '0' ), 'versiones anteriores sin la acción: 400 «0»' );
+		$this->assertSame( 'forbidden', $t( 403, '' ) );
+		$this->assertSame( 'ok', HostingProfile::classify( 'home', 200, [], '<html>', '', 'a1b2c3d4e5f60718' )['status'], 'la marca solo se exige a admin-ajax' );
+
+		foreach ( [ 'connection', 'forbidden', 'cloudflare', 'auth', 'limit', 'busy', 'redirect', 'unexpected' ] as $status ) {
 			$this->assertNotSame( '', HostingProfile::advice( $status, '203.0.113.5' ), $status );
 		}
 		$this->assertStringContainsString( '203.0.113.5', HostingProfile::advice( 'forbidden', '203.0.113.5' ) );
 		$this->assertSame( [ 'home', 'rest', 'ajax', 'cron' ], array_keys( HostingProfile::affects() ) );
+	}
+
+	public function test_cron_heartbeat_via_wp_cli(): void {
+		require_once dirname( __DIR__ ) . '/fixtures/wp-cli-stub.php';
+		\WP_CLI::$hooks = [];
+		$now             = time();
+		$this->options[ HostingProfile::CRON_WATCH_OPTION ] = $now - 9000;
+
+		// Con DISABLE_WP_CRON y un cron del sistema por WP-CLI, wp-cron.php nunca se pide: antes, error rojo.
+		$this->assertSame( 'cron_stalled', HostingProfile::cronAlerts( false, true, 0, $now - 9000, $now, '' )[0]['code'] );
+
+		HostingProfile::watchCli();
+		$this->assertArrayHasKey( 'before_invoke:cron event run', \WP_CLI::$hooks );
+		$this->assertNotFalse( has_action( 'action_scheduler_before_process_queue', [ HostingProfile::class, 'noteCron' ] ), 'también la cola de Action Scheduler desde la consola' );
+
+		// «wp cron event run --due-now --quiet» desde la tarea del sistema.
+		\WP_CLI::do_hook( 'before_invoke:cron event run', 'cron event run' );
+		$seen = (int) ( $this->options[ HostingProfile::CRON_OPTION ] ?? 0 );
+		$this->assertEqualsWithDelta( $now, $seen, 2 );
+		$this->assertSame( [], HostingProfile::cronAlerts( false, true, $seen, $now - 9000, $now, '' ), 'la alerta desaparece' );
+		$this->assertSame( [], HostingProfile::cronAlerts( false, true, $seen, $now - 9000, $now + 25 * 60, '' ), 'sigue bien entre dos ejecuciones' );
+
+		// Como mucho una escritura cada 5 minutos.
+		$this->options[ HostingProfile::CRON_OPTION ] = $now - 100;
+		\WP_CLI::do_hook( 'before_invoke:cron event run', 'cron event run' );
+		$this->assertSame( $now - 100, $this->options[ HostingProfile::CRON_OPTION ] );
+
+		// Otros comandos de WP-CLI no cuentan.
+		$this->options[ HostingProfile::CRON_OPTION ] = $now - 3600;
+		\WP_CLI::do_hook( 'before_invoke:cache flush', 'cache flush' );
+		$this->assertSame( $now - 3600, $this->options[ HostingProfile::CRON_OPTION ] );
+	}
+
+	public function test_loopback_ajax_answers_with_the_token(): void {
+		Functions\when( 'wp_salt' )->justReturn( 'sal-de-prueba' );
+		$token = HostingProfile::loopbackToken();
+		$this->assertMatchesRegularExpression( '/^[0-9a-f]{16}$/', $token );
+		$this->assertSame( $token, HostingProfile::loopbackToken(), 'estable entre peticiones' );
+		Functions\when( 'wp_salt' )->justReturn( 'otra-sal' );
+		$this->assertNotSame( $token, HostingProfile::loopbackToken(), 'depende de las sales del sitio' );
+		Functions\when( 'wp_salt' )->justReturn( 'sal-de-prueba' );
+
+		// Lo que responde admin-ajax con la acción (wp_send_json_success).
+		$sent = '';
+		Functions\when( 'wp_send_json_success' )->alias(
+			static function ( $data ) use ( &$sent ): void {
+				$sent = (string) json_encode(
+					[
+						'success' => true,
+						'data'    => $data,
+					]
+				);
+			}
+		);
+		HostingProfile::ajaxLoopback();
+		$this->assertStringContainsString( $token, $sent );
+
+		// La prueba completa en un sitio sano: las cuatro peticiones bien y sin alerta.
+		$ajax = [
+			'code' => 200,
+			'body' => $sent,
+		];
+		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => 'https://t.com' . $path );
+		Functions\when( 'site_url' )->alias( static fn( string $path = '' ): string => 'https://t.com/' . ltrim( $path, '/' ) );
+		Functions\when( 'admin_url' )->alias( static fn( string $path = '' ): string => 'https://t.com/wp-admin/' . $path );
+		Functions\when( 'rest_url' )->justReturn( 'https://t.com/wp-json/' );
+		Functions\when( 'wp_rand' )->justReturn( 1234 );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_remote_retrieve_body' )->alias( static fn( array $r ): string => (string) ( $r['body'] ?? '' ) );
+		Functions\when( 'wp_remote_retrieve_header' )->justReturn( '' );
+		$posted = [];
+		Functions\when( 'wp_remote_request' )->alias(
+			static function ( string $url, array $args ) use ( &$ajax, &$posted ): array {
+				if ( str_contains( $url, 'admin-ajax.php' ) ) {
+					$posted = $args['body'];
+					return [
+						'response' => [ 'code' => $ajax['code'] ],
+						'body'     => $ajax['body'],
+					];
+				}
+				return [
+					'response' => [ 'code' => 200 ],
+					'body'     => str_contains( $url, 'wp-json' ) ? '{"name":"t"}' : '',
+				];
+			}
+		);
+		$report = HostingProfile::loopback();
+		$this->assertSame( [ 'action' => HostingProfile::LOOPBACK_ACTION ], $posted );
+		$this->assertTrue( $report['ok'] );
+		$this->assertSame( [ 'ok', 'ok', 'ok', 'ok' ], array_column( $report['checks'], 'status' ) );
+		$this->assertNotContains( 'loopback', array_column( HostingProfile::alerts( false, [] ), 'code' ) );
+
+		// Sin la acción (como antes): 400 y el «0» que Requests deja vacío. WordPress respondió igual.
+		$ajax   = [
+			'code' => 400,
+			'body' => '',
+		];
+		$report = HostingProfile::loopback();
+		$this->assertTrue( $report['ok'] );
+		$this->assertNotContains( 'loopback', array_column( HostingProfile::alerts( false, [] ), 'code' ) );
+
+		$this->assertSame( HostingProfile::LOOPBACK_VERSION, $report['version'] );
+
+		// Un informe guardado por 0.25.0 (admin-ajax 400 marcado como error) no sigue avisando; otro fallo sí.
+		$old = static fn( array $extra = [] ): array => [
+			'at'        => time() - 3600,
+			'ok'        => false,
+			'server_ip' => '',
+			'checks'    => array_merge(
+				[
+					[
+						'id'      => 'home',
+						'status'  => 'ok',
+						'code'    => 200,
+						'message' => 'Responde.',
+					],
+					[
+						'id'      => 'ajax',
+						'status'  => 'error',
+						'code'    => 400,
+						'message' => 'Error del servidor (400).',
+					],
+				],
+				$extra
+			),
+		];
+		$this->options[ HostingProfile::LOOPBACK_OPTION ] = $old();
+		$this->assertTrue( HostingProfile::lastLoopback()['ok'] ?? false );
+		$this->assertNotContains( 'loopback', array_column( HostingProfile::alerts( false, [] ), 'code' ) );
+		$this->options[ HostingProfile::LOOPBACK_OPTION ] = $old(
+			[
+				[
+					'id'      => 'rest',
+					'status'  => 'forbidden',
+					'code'    => 403,
+					'message' => 'Respuesta 403.',
+				],
+			]
+		);
+		$this->assertFalse( HostingProfile::lastLoopback()['ok'] ?? true );
+		$this->assertContains( 'loopback', array_column( HostingProfile::alerts( false, [] ), 'code' ) );
+
+		// Otra cosa contesta por WordPress: sí avisa.
+		$ajax   = [
+			'code' => 200,
+			'body' => '<html>Sitio en mantenimiento</html>',
+		];
+		$report = HostingProfile::loopback();
+		$this->assertFalse( $report['ok'] );
+		$this->assertSame( 'unexpected', $report['checks'][2]['status'] );
+		$this->assertContains( 'loopback', array_column( HostingProfile::alerts( false, [] ), 'code' ) );
 	}
 
 	/**

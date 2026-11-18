@@ -255,6 +255,16 @@ final class Plugin {
 			// Saber si wp-cron.php corre de verdad (0.25.0): con DISABLE_WP_CRON y sin tarea del sistema, nada avisa.
 			add_action( 'init', [ HostingProfile::class, 'noteCron' ], 30 );
 		}
+		// El cron del sistema también corre con WP-CLI («wp cron event run»), sin pasar por wp-cron.php.
+		if ( RequestType::Cli === $type ) {
+			HostingProfile::watchCli();
+		}
+		// Prueba de loopback: admin-ajax responde con una marca conocida en vez del 400 «0» de una acción sin
+		// manejador. Antes del kill switch, como la prueba, que se lanza desde el admin del plugin.
+		if ( RequestType::AdminAjax === $type ) {
+			add_action( 'wp_ajax_nopriv_' . HostingProfile::LOOPBACK_ACTION, [ HostingProfile::class, 'ajaxLoopback' ] );
+			add_action( 'wp_ajax_' . HostingProfile::LOOPBACK_ACTION, [ HostingProfile::class, 'ajaxLoopback' ] );
+		}
 
 		// Store API y wc-ajax responden por sesión (carrito, direcciones). LSCache, con sus valores por
 		// defecto, cachea la REST y servía el carrito de un visitante a otros: se le indica que no.

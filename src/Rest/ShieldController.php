@@ -68,6 +68,7 @@ final class ShieldController extends Controller {
 	 */
 	private function status(): array {
 		$panel    = HostingProfile::detect()['panel'];
+		$commands = HostingProfile::cronCommands( site_url(), ABSPATH );
 		$settings = $this->container->get( Settings::class );
 		$compiled = Runtime::$config?->get( 'shield', [] );
 		$compiled = is_array( $compiled ) ? $compiled : [];
@@ -101,11 +102,11 @@ final class ShieldController extends Controller {
 			],
 			'cron'     => [
 				'disabled' => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
-				'command'  => HostingProfile::cronCommands( site_url(), ABSPATH )['http'],
-				'wp_cli'   => '*/5 * * * * cd ' . untrailingslashit( ABSPATH ) . ' && wp cron event run --due-now >/dev/null 2>&1',
+				'command'  => $commands['http'],
+				'wp_cli'   => $commands['wp_cli'],
 				// 0.25.0: con PHP no pasa por la red (sirve aunque Cloudflare o el firewall bloqueen al servidor),
-				// cuándo corrió por última vez y los pasos del panel detectado.
-				'php'      => HostingProfile::cronCommands( site_url(), ABSPATH )['php'],
+				// cuándo corrió por última vez (con cualquiera de los tres) y los pasos del panel detectado.
+				'php'      => $commands['php'],
 				'last'     => (int) get_option( HostingProfile::CRON_OPTION, 0 ),
 				'panel'    => $panel,
 				'steps'    => HostingProfile::cronSteps( $panel ),

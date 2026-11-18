@@ -673,8 +673,8 @@ function HostingCard() {
 									{ minutes >= 0 && minutes <= 30
 										? `${ __( 'Lo ejecuta la tarea del sistema: corrió hace' ) } ${ minutes } min.`
 										: minutes < 0
-										? __( 'DISABLE_WP_CRON está activo y todavía no se vio correr wp-cron.php. Comprueba la tarea del sistema.' )
-										: `${ __( 'DISABLE_WP_CRON está activo y wp-cron.php no corre desde hace' ) } ${ minutes } min.` }
+										? __( 'DISABLE_WP_CRON está activo y todavía no se vio correr el cron (ni wp-cron.php ni WP-CLI). Comprueba la tarea del sistema.' )
+										: `${ __( 'DISABLE_WP_CRON está activo y el cron no corre desde hace' ) } ${ minutes } min ${ __( '(ni wp-cron.php ni WP-CLI).' ) }` }
 								</Notice>
 							) : (
 								<Notice level={ data.cron.edge ? 'warning' : 'info' }>

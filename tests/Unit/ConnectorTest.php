@@ -211,7 +211,8 @@ final class ConnectorTest extends TestCase {
 		$this->assertContains( 'diagnose_site', $r );
 		$this->assertNotContains( 'apply_change_set', $r, 'solo lectura no ve las de ajuste' );
 		$this->assertContains( 'apply_change_set', $a );
-		$this->assertSame( [ 'purge_cache', 'set_module', 'update_settings', 'apply_change_set', 'revert_change' ], array_values( array_diff( $a, $r ) ) );
+		$this->assertSame( [ 'purge_cache', 'set_module', 'update_settings', 'apply_change_set', 'revert_change', 'propose_asset_rule', 'withdraw_asset_rule' ], array_values( array_diff( $a, $r ) ) );
+		$this->assertContains( 'inspect_assets', $r, 'revisar los assets de una página es de lectura' );
 
 		$call = $server->dispatch(
 			[

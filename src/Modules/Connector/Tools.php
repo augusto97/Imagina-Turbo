@@ -20,6 +20,10 @@ namespace ImaginaTurbo\Modules\Connector;
 
 use ImaginaTurbo\Core\Events\EventLog;
 use ImaginaTurbo\Integrations\Abilities;
+use ImaginaTurbo\Modules\AssetManager\AssetManagerModule;
+use ImaginaTurbo\Modules\AssetManager\AssetRules;
+use ImaginaTurbo\Modules\AssetManager\AssetScanner;
+use ImaginaTurbo\Modules\AssetManager\AssetSuggestions;
 use ImaginaTurbo\Rest\RestRegistrar;
 
 /**
@@ -96,6 +100,18 @@ final class Tools {
 		],
 	];
 
+	/**
+	 * Assets que Claude nunca propone quitar (0.25.4): núcleo de WordPress y jQuery. El dueño puede
+	 * hacerlo en el admin con su previsualización.
+	 */
+	public const ASSET_LOCKED = [ 'jquery', 'jquery-core', 'jquery-migrate', 'underscore', 'backbone', 'lodash', 'moment', 'react', 'react-dom', 'react-jsx-runtime', 'regenerator-runtime', 'imagesloaded', 'masonry', 'hoverIntent', 'global-styles', 'classic-theme-styles', 'selectWoo', 'select2' ];
+
+	/** Prefijos del núcleo: paquetes y estilos de bloques de WordPress, jQuery UI. */
+	public const ASSET_LOCKED_PREFIXES = [ 'wp-', 'jquery-ui-' ];
+
+	/** Notas de las reglas que propone Claude: así se distinguen las que puede retirar. */
+	public const ASSET_NOTE = 'Claude: ';
+
 	/** Módulos que un lote puede encender o apagar: los seguros que no protegen y el coordinador de caché. */
 	public const CHANGE_SET_MODULES = [ 'profiler', 'tweaks', 'speculation', 'rum', 'frontend_hints', 'cache_coordinator' ];
 
@@ -113,6 +129,9 @@ final class Tools {
 		'update_settings'        => [ 20, 3600 ],
 		'set_module'             => [ 10, 3600 ],
 		'purge_cache'            => [ 10, 3600 ],
+		'inspect_assets'         => [ 20, 300 ],
+		'propose_asset_rule'     => [ 10, 3600 ],
+		'withdraw_asset_rule'    => [ 20, 3600 ],
 	];
 
 	public function __construct( private readonly EventLog $events, private readonly ChangeSet $changes ) {
@@ -217,6 +236,23 @@ final class Tools {
 				]
 			),
 			self::tool( 'list_changes', 'Cambios hechos por Claude', 'Lotes aplicados desde el conector con su resultado (aplicado o revertido) y el id para deshacerlos.', $none ),
+			self::tool(
+				'inspect_assets',
+				'Assets de una página',
+				'Pide una página del sitio y lista los scripts (js) y estilos (css) que carga: handle, de quién es, tamaño en bytes, si bloquea el render, si se encola directamente, qué otros assets lo necesitan (needed_by), reglas que ya le aplican y si está bloqueado para propuestas (locked). Úsalo antes de propose_asset_rule, en una página de cada plantilla afectada. Tarda unos segundos.',
+				[
+					'type'                 => 'object',
+					'properties'           => [
+						'path' => [
+							'type'        => 'string',
+							'description' => 'Ruta del sitio, por ejemplo / o /producto/camisa/.',
+							'maxLength'   => 300,
+						],
+					],
+					'required'             => [ 'path' ],
+					'additionalProperties' => false,
+				]
+			),
 		];
 		if ( ! $adjust ) {
 			return $tools;
@@ -334,6 +370,69 @@ final class Tools {
 			false,
 			Connector::SCOPE_ADJUST
 		);
+		$list    = static fn( array $items, int $max ): array => [
+			'type'     => 'array',
+			'items'    => $items,
+			'maxItems' => $max,
+		];
+		$tools[] = self::tool(
+			'propose_asset_rule',
+			'Proponer una regla de assets (en prueba)',
+			'Propone quitar un script o estilo donde no se usa. La regla queda EN PRUEBA: solo se aplica con la previsualización del admin y nunca a los visitantes hasta que el dueño la revise y la active en Imagina Turbo → Assets. Antes comprueba con inspect_assets que el handle se carga en path, se encola directamente y nadie lo necesita. mode never: se quita en las plantillas, páginas (ids) o tipos de contenido indicados; mode only: se deja solo ahí y se quita en el resto (para «en todo el sitio menos el pago», only con el id de la página de pago). Hace falta al menos una plantilla, página o tipo de contenido. No se aceptan assets del núcleo de WordPress, jQuery ni los de WooCommerce en el carrito o el pago. Dile al dueño qué propones, por qué y cómo revisarlo.',
+			[
+				'type'                 => 'object',
+				'properties'           => [
+					'path'       => [
+						'type'        => 'string',
+						'maxLength'   => 300,
+						'description' => 'Página donde comprobaste que se carga.',
+					],
+					'handle'     => [
+						'type'      => 'string',
+						'maxLength' => 100,
+					],
+					'type'       => [
+						'type' => 'string',
+						'enum' => [ 'css', 'js' ],
+					],
+					'mode'       => [
+						'type' => 'string',
+						'enum' => [ 'never', 'only' ],
+					],
+					'templates'  => $list( [ 'type' => 'string' ], 20 ),
+					'ids'        => $list( [ 'type' => 'integer' ], 50 ),
+					'post_types' => $list( [ 'type' => 'string' ], 10 ),
+					'reason'     => [
+						'type'        => 'string',
+						'maxLength'   => 180,
+						'description' => 'Por qué, en una frase (queda en la nota de la regla).',
+					],
+				],
+				'required'             => [ 'path', 'handle', 'type', 'mode', 'reason' ],
+				'additionalProperties' => false,
+			],
+			false,
+			Connector::SCOPE_ADJUST
+		);
+		$tools[] = self::tool(
+			'withdraw_asset_rule',
+			'Retirar una propuesta de assets',
+			'Borra una regla de assets que propusiste y que sigue en prueba (id de get_area assets). No toca las activas ni las del dueño.',
+			[
+				'type'                 => 'object',
+				'properties'           => [
+					'id' => [
+						'type'    => 'string',
+						'pattern' => '^[a-f0-9]{12}$',
+					],
+				],
+				'required'             => [ 'id' ],
+				'additionalProperties' => false,
+			],
+			false,
+			Connector::SCOPE_ADJUST,
+			true
+		);
 		return $tools;
 	}
 
@@ -441,6 +540,13 @@ final class Tools {
 			case 'revert_change':
 				$id = is_string( $args['id'] ?? null ) ? $args['id'] : '';
 				return $this->changes->revert( $id, $grant ) ? self::wrap( [ 'reverted' => $id ] ) : self::fail( 'No hay un lote aplicado con ese id (o ya se deshizo, o se alcanzó el límite de lotes por hora).' );
+			case 'inspect_assets':
+				$inspect = self::rest( 'POST', '/assets/inspect', [ 'path' => is_string( $args['path'] ?? null ) ? $args['path'] : '' ] );
+				return $inspect['ok'] && is_array( $inspect['data'] ) ? self::wrap( self::assetSummary( $inspect['data'], self::wooPages() ) ) : self::fail( self::message( $inspect['data'] ) );
+			case 'propose_asset_rule':
+				return $this->proposeAssetRule( $args, $grant );
+			case 'withdraw_asset_rule':
+				return $this->withdrawAssetRule( is_string( $args['id'] ?? null ) ? $args['id'] : '', $grant );
 		}
 		return self::fail( 'Herramienta desconocida.' );
 	}
@@ -525,6 +631,231 @@ final class Tools {
 		return [
 			'ok'   => $result['ok'],
 			'data' => $result['data'],
+		];
+	}
+
+	/**
+	 * Propone una regla de assets: siempre en prueba (la crea la ruta del admin, que no sabe crearlas
+	 * de otra forma), con el asset comprobado en la página y sin tocar el núcleo ni el pago.
+	 *
+	 * @param array<string, mixed>                                $args  Argumentos.
+	 * @param array{id: int, client_name: string, scope: string} $grant Acceso.
+	 * @return array{ok: bool, data: mixed}
+	 */
+	private function proposeAssetRule( array $args, array $grant ): array {
+		$reason = trim( is_string( $args['reason'] ?? null ) ? $args['reason'] : '' );
+		$params = [
+			'handle'     => is_string( $args['handle'] ?? null ) ? $args['handle'] : '',
+			'type'       => is_string( $args['type'] ?? null ) ? $args['type'] : '',
+			'mode'       => is_string( $args['mode'] ?? null ) ? $args['mode'] : '',
+			'templates'  => array_values( array_filter( (array) ( $args['templates'] ?? [] ), 'is_string' ) ),
+			'ids'        => array_values( array_filter( array_map( 'intval', (array) ( $args['ids'] ?? [] ) ) ) ),
+			'post_types' => array_values( array_filter( (array) ( $args['post_types'] ?? [] ), 'is_string' ) ),
+			'note'       => self::ASSET_NOTE . mb_substr( '' !== $reason ? $reason : 'propuesta del asistente', 0, 180 ),
+		];
+		$rule   = AssetRules::normalize( $params + [ 'status' => 'testing' ] );
+		if ( null === $rule ) {
+			return self::fail( 'Regla no válida: revisa handle, type y mode, y da al menos una plantilla, página (ids) o tipo de contenido.' );
+		}
+		$path    = is_string( $args['path'] ?? null ) ? $args['path'] : '';
+		$inspect = self::rest( 'POST', '/assets/inspect', [ 'path' => $path ] );
+		if ( ! $inspect['ok'] || ! is_array( $inspect['data'] ) ) {
+			return self::fail( 'No se pudo revisar la página: ' . self::message( $inspect['data'] ) );
+		}
+		$check = self::assetProposal( $rule, $inspect['data'], self::wooPages() );
+		if ( '' !== $check['error'] ) {
+			return self::fail( $check['error'] );
+		}
+		$created = self::rest( 'POST', '/assets/rules', $params );
+		if ( ! $created['ok'] ) {
+			return $this->logged( $grant, 'propose_asset_rule', $args, $created );
+		}
+		return $this->logged(
+			$grant,
+			'propose_asset_rule',
+			$args,
+			self::wrap(
+				[
+					'rule'            => $rule['id'],
+					'status'          => 'testing',
+					'removes_on_path' => $check['removes_here'],
+					'warnings'        => $check['warnings'],
+					'next'            => 'Queda en prueba: no cambia nada para los visitantes. Pide al dueño que abra Imagina Turbo → Assets, pulse «Previsualizar», revise las páginas afectadas (también el carrito y el pago si aplica) y, si todo se ve bien, la active.',
+				]
+			)
+		);
+	}
+
+	/**
+	 * Retira una propuesta propia que sigue en prueba.
+	 *
+	 * @param array{id: int, client_name: string, scope: string} $grant Acceso.
+	 * @return array{ok: bool, data: mixed}
+	 */
+	private function withdrawAssetRule( string $id, array $grant ): array {
+		$status = self::rest( 'GET', '/assets/status' );
+		$rules  = is_array( $status['data'] ) && is_array( $status['data']['rules'] ?? null ) ? $status['data']['rules'] : [];
+		$rule   = null;
+		foreach ( $rules as $candidate ) {
+			if ( is_array( $candidate ) && ( $candidate['id'] ?? null ) === $id ) {
+				$rule = $candidate;
+			}
+		}
+		if ( null === $rule ) {
+			return self::fail( 'No hay una regla de assets con ese id.' );
+		}
+		if ( 'testing' !== ( $rule['status'] ?? '' ) || ! str_starts_with( (string) ( $rule['note'] ?? '' ), self::ASSET_NOTE ) ) {
+			return self::fail( 'Solo puedes retirar tus propias propuestas mientras siguen en prueba. Las activas o las del dueño se cambian en el admin.' );
+		}
+		$deleted = self::rest( 'DELETE', '/assets/rules/' . $id );
+		return $this->logged( $grant, 'withdraw_asset_rule', [ 'id' => $id ], $deleted['ok'] ? self::wrap( [ 'withdrawn' => $id ] ) : $deleted );
+	}
+
+	/**
+	 * Del núcleo de WordPress o jQuery (o de Imagina Turbo y la barra de administración).
+	 */
+	public static function assetLocked( string $handle ): bool {
+		if ( AssetManagerModule::protectedHandle( $handle ) || in_array( $handle, self::ASSET_LOCKED, true ) || in_array( $handle, AssetSuggestions::WOO_KEEP, true ) ) {
+			return true;
+		}
+		foreach ( self::ASSET_LOCKED_PREFIXES as $prefix ) {
+			if ( str_starts_with( $handle, $prefix ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Asset de WooCommerce (o de una extensión con su prefijo wc-): no se quita en el carrito ni en el
+	 * pago. Solo «woocommerce» y «woocommerce-…»: otros plugins usan «woocommerce_…» (la hoja de Bold,
+	 * woocommerce_bold_gateway_form_css) y esos se avisan, no se bloquean.
+	 */
+	public static function wooAsset( string $handle ): bool {
+		return 'woocommerce' === $handle || str_starts_with( $handle, 'woocommerce-' ) || str_starts_with( $handle, 'wc-' );
+	}
+
+	/**
+	 * ¿Se puede proponer? Comprobación pura sobre el inventario de la página (/assets/inspect).
+	 *
+	 * @param array{id: string, handle: string, type: string, mode: string, templates: list<string>, ids: list<int>, post_types: list<string>} $rule      Regla normalizada.
+	 * @param array<string, mixed>                                                                                                             $inventory Inventario.
+	 * @param array<string, int>                                                                                                               $wooPages  Carrito y pago (ids).
+	 * @return array{error: string, warnings: list<string>, removes_here: bool}
+	 */
+	public static function assetProposal( array $rule, array $inventory, array $wooPages ): array {
+		$handle = $rule['handle'];
+		$out    = [
+			'error'        => '',
+			'warnings'     => [],
+			'removes_here' => false,
+		];
+		if ( self::assetLocked( $handle ) ) {
+			$out['error'] = sprintf( '«%s» es del núcleo de WordPress, de jQuery o lo necesita WooCommerce en todo el sitio: no se propone desde aquí. Si de verdad conviene, el dueño puede crear la regla en Imagina Turbo → Assets.', $handle );
+			return $out;
+		}
+		$path  = is_string( $inventory['path'] ?? null ) ? $inventory['path'] : '';
+		$found = null;
+		foreach ( is_array( $inventory[ $rule['type'] ] ?? null ) ? $inventory[ $rule['type'] ] : [] as $item ) {
+			if ( is_array( $item ) && ( $item['handle'] ?? null ) === $handle ) {
+				$found = $item;
+			}
+		}
+		if ( null === $found ) {
+			$out['error'] = sprintf( 'En %1$s no se carga el %2$s «%3$s». Revisa el handle y el tipo con inspect_assets en una página donde aparezca.', $path, $rule['type'], $handle );
+			return $out;
+		}
+		$neededBy = array_values( array_filter( is_array( $found['needed_by'] ?? null ) ? $found['needed_by'] : [], 'is_string' ) );
+		if ( [] !== $neededBy || true !== ( $found['enqueued'] ?? false ) ) {
+			$out['error'] = sprintf( '«%1$s» se carga como dependencia de otros assets (%2$s): quitarlo no tiene efecto mientras ellos se carguen.', $handle, [] !== $neededBy ? implode( ', ', array_slice( $neededBy, 0, 5 ) ) : 'no se encola directamente' );
+			return $out;
+		}
+		$short               = AssetScanner::short( $rule );
+		$context             = is_array( $inventory['context'] ?? null ) ? $inventory['context'] : [];
+		$out['removes_here'] = AssetRules::removes(
+			$short,
+			[
+				'template'  => is_string( $context['template'] ?? null ) ? $context['template'] : '',
+				'id'        => (int) ( $context['id'] ?? 0 ),
+				'post_type' => is_string( $context['post_type'] ?? null ) ? $context['post_type'] : '',
+			]
+		);
+		$names               = [
+			'cart'     => 'el carrito',
+			'checkout' => 'el pago',
+		];
+		foreach ( $wooPages as $page => $id ) {
+			if ( $id <= 0 || ! AssetRules::removes(
+				$short,
+				[
+					'template'  => 'single:page',
+					'id'        => $id,
+					'post_type' => 'page',
+				]
+			) ) {
+				continue;
+			}
+			$where = $names[ $page ] ?? $page;
+			if ( self::wooAsset( $handle ) ) {
+				$out['error'] = sprintf( 'La regla quitaría «%1$s» de WooCommerce en %2$s. Limítala a otras plantillas o páginas.', $handle, $where );
+				return $out;
+			}
+			$out['warnings'][] = sprintf( 'También lo quita en %1$s: si es de una pasarela de pago o del envío, el pago puede dejar de funcionar. Que el dueño lo pruebe ahí con la previsualización antes de activarla.', $where );
+		}
+		return $out;
+	}
+
+	/**
+	 * Resumen del inventario para Claude: lo que sirve para decidir, con los bloqueos ya marcados.
+	 *
+	 * @param array<string, mixed> $inventory Resultado de /assets/inspect.
+	 * @param array<string, int>   $wooPages  Carrito y pago (ids).
+	 * @return array<string, mixed>
+	 */
+	public static function assetSummary( array $inventory, array $wooPages ): array {
+		$out = [
+			'path'      => $inventory['path'] ?? '',
+			'status'    => $inventory['status'] ?? 0,
+			'context'   => $inventory['context'] ?? [],
+			'woo_pages' => $wooPages,
+			'note'      => 'locked: no se puede proponer. blocking: bloquea el render tal como está registrado. needed_by: assets que lo necesitan (quitarlo no tendría efecto).',
+		];
+		foreach ( [ 'js', 'css' ] as $type ) {
+			$out[ $type ] = [];
+			foreach ( is_array( $inventory[ $type ] ?? null ) ? $inventory[ $type ] : [] as $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$handle         = (string) ( $item['handle'] ?? '' );
+				$out[ $type ][] = [
+					'handle'    => $handle,
+					'owner'     => $item['owner'] ?? '',
+					'origin'    => $item['origin'] ?? '',
+					'src'       => mb_substr( (string) ( $item['src'] ?? '' ), 0, 200 ),
+					'size'      => (int) ( $item['size'] ?? 0 ),
+					'blocking'  => true === ( $item['blocking'] ?? false ),
+					'enqueued'  => true === ( $item['enqueued'] ?? false ),
+					'needed_by' => $item['needed_by'] ?? [],
+					'rules'     => $item['rules'] ?? [],
+					'locked'    => self::assetLocked( $handle ),
+				];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Ids del carrito y del pago de WooCommerce (vacío sin WooCommerce).
+	 *
+	 * @return array<string, int>
+	 */
+	private static function wooPages(): array {
+		if ( ! function_exists( 'wc_get_page_id' ) ) {
+			return [];
+		}
+		return [
+			'cart'     => max( 0, (int) wc_get_page_id( 'cart' ) ),
+			'checkout' => max( 0, (int) wc_get_page_id( 'checkout' ) ),
 		];
 	}
 

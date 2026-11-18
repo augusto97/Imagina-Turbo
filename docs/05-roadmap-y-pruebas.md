@@ -817,3 +817,18 @@ Al aplicar una regla del firewall Cloudflare respondía «0: request is not auth
 - [x] 379 pruebas unitarias (enlace solo con claves documentadas y lista de permisos a mano; errores de autorización frente a cupos y otros; mensaje accionable; sondeo que solo escribe con `dry_run=true`, con regla desactivada sobre un host `.invalid`, y que no decide ante errores ajenos al permiso), PHPStan nivel 8 y PHPCS.
 - [x] Interfaz con la REST simulada: 6 comprobaciones nuevas (aviso, fila «Firewall: editar», «Comprobar permisos», permisos a mano sin conectar) y las 51 anteriores.
 - [ ] En latienditadelamor.com.co: con el token sin *Zone WAF → Edit*, la pantalla avisa; tras agregarlo en Cloudflare y pulsar «Comprobar permisos», el aviso desaparece y la regla del firewall se aplica.
+
+## Versión 0.25.4 (Claude propone reglas de assets)
+
+Un asistente identificaba assets que sobraban (caso real: la hoja de Bold `woocommerce_bold_gateway_form_css`, del pago, cargada en toda la tienda e importando Montserrat, ~1 s de LCP) y el dueño tenía que pegar los handles a mano. Se descartó aplicarlas con `apply_change_set`: su prueba no abre un navegador y no vería un pago roto.
+
+- `inspect_assets` (lectura): los assets de una página con tamaño, si bloquean el render, quién los necesita y si están bloqueados para propuestas.
+- `propose_asset_rule`: crea la regla en prueba, con el asset comprobado en la página; nunca el núcleo de WordPress, jQuery ni WooCommerce en el carrito o el pago; avisa si otro plugin se quitaría ahí. El dueño la previsualiza y la activa en Assets.
+- `withdraw_asset_rule`: retira una propuesta propia en prueba.
+- Playbook y página de consentimiento actualizados. La carga de scripts sigue siendo del dueño.
+- El inventario de assets indica si cada uno bloquea el render.
+
+**Criterios de aceptación**:
+
+- [x] 385 pruebas unitarias (6 nuevas: bloqueos del núcleo y WooCommerce, hoja de Bold solo en el pago con aviso del carrito, WooCommerce en el carrito y el pago, handle que no está en la página o con otro tipo, dependencias, reglas sin lugar, resumen del inventario y «bloquea», herramientas y alcances: activar no existe), PHPStan nivel 8 y PHPCS.
+- [ ] En un sitio con el conector: `inspect_assets` en la portada lista la hoja de Bold; `propose_asset_rule` con `mode: only` y el id del pago la crea en prueba con la nota de Claude; la previsualización muestra la portada sin ella y el pago con ella; el dueño la activa.

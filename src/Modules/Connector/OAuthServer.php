@@ -430,7 +430,7 @@ final class OAuthServer {
 				<?php if ( $canAdjust ) : ?>
 				<label class="opt"><input type="radio" name="level" value="adjust">
 					<span><strong><?php esc_html_e( 'Diagnosticar y ajustar', 'imagina-turbo' ); ?></strong>
-					<?php esc_html_e( 'Además cambia ajustes de rendimiento de Imagina Turbo: lo seguro directamente y lo de riesgo moderado con una prueba de las páginas clave y vuelta atrás automática si algo falla. Todo queda en el registro y se puede deshacer.', 'imagina-turbo' ); ?></span>
+					<?php esc_html_e( 'Además cambia ajustes de rendimiento de Imagina Turbo: lo seguro directamente y lo de riesgo moderado con una prueba de las páginas clave y vuelta atrás automática si algo falla. Puede proponer reglas de assets, que quedan en prueba hasta que tú las revises y las actives. Todo queda en el registro y se puede deshacer.', 'imagina-turbo' ); ?></span>
 				</label>
 				<?php endif; ?>
 			</fieldset>

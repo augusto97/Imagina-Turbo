@@ -6,6 +6,7 @@ Esta rama es **huérfana**: no comparte historial con `main` y solo guarda los Z
 
 | Versión | ZIP | Generado desde `main` | Fecha |
 |---|---|---|---|
+| 0.25.3 | [`imagina-turbo-0.25.3.zip`](imagina-turbo-0.25.3.zip) | `e3ea3c2` | 2026-11-18 |
 | 0.25.2 | [`imagina-turbo-0.25.2.zip`](imagina-turbo-0.25.2.zip) | `b3c7725` | 2026-11-18 |
 | 0.25.1 | [`imagina-turbo-0.25.1.zip`](imagina-turbo-0.25.1.zip) | `79e6ffd` | 2026-11-18 |
 | 0.25.0 | [`imagina-turbo-0.25.0.zip`](imagina-turbo-0.25.0.zip) | `4031660` | 2026-11-17 |

@@ -16,7 +16,8 @@
  * - CloudLinux: el kernel lleva «lve» en la versión o existe /etc/cloudlinux-release.
  * - Restricciones de PHP: open_basedir, funciones deshabilitadas, memoria y tiempo máximo bajos.
  *
- * Nada de esto corre en el frontend salvo noteCron() en las peticiones a wp-cron.php.
+ * Nada de esto corre en el frontend salvo noteCron() en las peticiones a wp-cron.php y la respuesta a la
+ * prueba de admin-ajax (ajaxLoopback()), que solo existe en esa acción.
  *
  * @package ImaginaTurbo
  */
@@ -39,7 +40,10 @@ final class HostingProfile {
 
 	public const PROFILES = [ 'auto', 'shared', 'dedicated' ];
 
-	/** Última vez que se ejecutó wp-cron.php (por visita o por la tarea del sistema). */
+	/**
+	 * Última vez que corrió el cron: wp-cron.php (por visita o por la tarea del sistema), «wp cron event run»
+	 * de WP-CLI o la cola de Action Scheduler desde la consola.
+	 */
 	public const CRON_OPTION = 'itb_cron_seen';
 
 	/** Desde cuándo se vigila el cron (para avisar si nunca llega a correr). */
@@ -47,7 +51,13 @@ final class HostingProfile {
 
 	public const LOOPBACK_OPTION = 'itb_loopback_check';
 
-	/** Con DISABLE_WP_CRON y sin noticias de wp-cron.php en este tiempo, la tarea del sistema no corre. */
+	/** Versión del informe de la prueba: 2 = admin-ajax con la acción y su marca. */
+	public const LOOPBACK_VERSION = 2;
+
+	/** Acción de admin-ajax de la prueba de loopback: responde con una marca conocida. */
+	public const LOOPBACK_ACTION = 'itb_loopback_test';
+
+	/** Con DISABLE_WP_CRON y sin noticias del cron en este tiempo, la tarea del sistema no corre. */
 	public const CRON_STALE = 1800;
 
 	/** Funciones que el plugin usa y que algunos hostings deshabilitan. */
@@ -169,7 +179,8 @@ final class HostingProfile {
 	}
 
 	/**
-	 * En cada wp-cron.php se anota la hora (como mucho cada 5 minutos: una lectura y, a veces, una escritura).
+	 * Cada vez que corre el cron se anota la hora (como mucho cada 5 minutos: una lectura y, a veces, una
+	 * escritura). Se llama en wp-cron.php y desde la consola (watchCli()).
 	 */
 	public static function noteCron(): void {
 		$last = (int) get_option( self::CRON_OPTION, 0 );
@@ -179,15 +190,36 @@ final class HostingProfile {
 	}
 
 	/**
-	 * Comandos para la tarea del sistema: por HTTP y con PHP (sin pasar por la red ni por Cloudflare).
+	 * El cron del sistema también puede correr con WP-CLI (`wp cron event run --due-now`), que ejecuta los
+	 * eventos sin pasar por wp-cron.php: sin esto, la alerta decía que el cron estaba parado en sitios donde
+	 * corre cada 5 minutos. Se registra solo en las peticiones de la consola.
 	 *
-	 * @return array{http: string, php: string}
+	 * - WP-CLI dispara `before_invoke:cron event run` antes de ese comando (WP_CLI\Dispatcher\Subcommand).
+	 * - La cola de Action Scheduler (`action_scheduler_before_process_queue`) cubre `wp action-scheduler run`,
+	 *   que ejecuta las tareas del plugin aunque no pase por WP-Cron. Su ejecutor asíncrono por admin-ajax no
+	 *   cuenta: depende de que alguien navegue por el admin y escondería una tarea del sistema parada.
+	 */
+	public static function watchCli(): void {
+		$addHook = [ 'WP_CLI', 'add_hook' ];
+		if ( is_callable( $addHook ) ) {
+			call_user_func( $addHook, 'before_invoke:cron event run', [ self::class, 'noteCron' ] );
+		}
+		add_action( 'action_scheduler_before_process_queue', [ self::class, 'noteCron' ] );
+	}
+
+	/**
+	 * Comandos para la tarea del sistema: por HTTP, con PHP (sin pasar por la red ni por Cloudflare) y con
+	 * WP-CLI. Cualquiera de los tres cuenta como cron que corre.
+	 *
+	 * @return array{http: string, php: string, wp_cli: string}
 	 */
 	public static function cronCommands( string $siteUrl, string $abspath ): array {
 		$cron = rtrim( $siteUrl, '/' ) . '/wp-cron.php?doing_wp_cron';
+		$dir  = rtrim( $abspath, '/' );
 		return [
-			'http' => '*/5 * * * * curl -fsS ' . $cron . ' >/dev/null 2>&1',
-			'php'  => '*/5 * * * * cd ' . rtrim( $abspath, '/' ) . ' && php -q wp-cron.php >/dev/null 2>&1',
+			'http'   => '*/5 * * * * curl -fsS ' . $cron . ' >/dev/null 2>&1',
+			'php'    => '*/5 * * * * cd ' . $dir . ' && php -q wp-cron.php >/dev/null 2>&1',
+			'wp_cli' => '*/5 * * * * cd ' . $dir . ' && wp cron event run --due-now --quiet >/dev/null 2>&1',
 		];
 	}
 
@@ -227,7 +259,7 @@ final class HostingProfile {
 					'code'    => 'cron_stalled',
 					'message' => sprintf(
 						/* translators: %d: minutos. */
-						__( 'WP-Cron está desactivado (DISABLE_WP_CRON) y wp-cron.php no se ejecuta desde hace %d minutos: la tarea del sistema no está corriendo. Purgas, recalentado y tareas programadas están detenidos. Revisa la tarea en el panel del hosting (comandos en Ajustes rápidos → Cron del sistema).', 'imagina-turbo' ),
+						__( 'WP-Cron está desactivado (DISABLE_WP_CRON) y el cron no corre desde hace %d minutos: ni wp-cron.php ni «wp cron event run» de WP-CLI. La tarea del sistema no está corriendo: purgas, recalentado y tareas programadas están detenidos. Revisa la tarea en el panel del hosting (comandos con PHP, WP-CLI o curl en Ajustes rápidos → Cron del sistema).', 'imagina-turbo' ),
 						$minutes
 					) . ' ' . self::cronSteps( $panel ),
 				],
@@ -239,18 +271,30 @@ final class HostingProfile {
 	/**
 	 * Clasifica la respuesta de una petición del sitio a sí mismo (función pura).
 	 *
+	 * La prueba de admin-ajax pide la acción del plugin, que responde 200 con $token (ajaxLoopback()). Un
+	 * 200 sin la marca es otra cosa contestando por WordPress (página de bloqueo, de mantenimiento o una
+	 * caché). Un 400 con «0» o vacío es admin-ajax sin manejador para la acción (versiones anteriores, sin
+	 * la acción): WordPress respondió igual. Requests descarta un cuerpo «0» (`! empty( $body )`), así que
+	 * llega vacío.
+	 *
 	 * @param array<string, string> $headers Cabeceras en minúsculas.
+	 * @param string                $token   Marca que debe traer la respuesta de admin-ajax ('' = no se comprueba).
 	 * @return array{status: string, message: string}
 	 */
-	public static function classify( string $id, int $code, array $headers, string $body, string $error ): array {
+	public static function classify( string $id, int $code, array $headers, string $body, string $error, string $token = '' ): array {
 		$cloudflare = isset( $headers['cf-ray'] ) || str_contains( strtolower( $headers['server'] ?? '' ), 'cloudflare' );
-		// admin-ajax sin acción responde 400 con «0»; la REST puede negarse a anónimos con su propio JSON: WordPress respondió.
-		$wordpress = ( 'ajax' === $id && 400 === $code && '0' === trim( $body ) ) || ( 'rest' === $id && in_array( $code, [ 401, 403 ], true ) && str_contains( $body, '"code"' ) );
+		// admin-ajax sin manejador responde 400 con «0»; la REST puede negarse a anónimos con su propio JSON: WordPress respondió.
+		$wordpress = ( 'ajax' === $id && 400 === $code && in_array( trim( $body ), [ '', '0' ], true ) ) || ( 'rest' === $id && in_array( $code, [ 401, 403 ], true ) && str_contains( $body, '"code"' ) );
+		$foreign   = 'ajax' === $id && '' !== $token && $code >= 200 && $code < 300 && ! str_contains( $body, $token );
 		return match ( true ) {
 			0 === $code => [
 				'status'  => 'connection',
 				/* translators: %s: error de la conexión. */
 				'message' => sprintf( __( 'El servidor no consigue conectarse a su propio dominio (%s).', 'imagina-turbo' ), '' !== $error ? $error : __( 'sin respuesta', 'imagina-turbo' ) ),
+			],
+			$foreign => [
+				'status'  => 'unexpected',
+				'message' => __( 'Responde, pero no contesta WordPress (una página de bloqueo, de mantenimiento o una caché delante).', 'imagina-turbo' ),
 			],
 			( $code >= 200 && $code < 300 ) || $wordpress => [
 				'status'  => 'ok',
@@ -323,20 +367,37 @@ final class HostingProfile {
 			'auth'       => __( 'Quita la protección con contraseña del directorio o pide al hosting que la excluya para el propio servidor.', 'imagina-turbo' ),
 			'limit', 'busy' => __( 'El plan está al límite de recursos. Las tareas de Imagina Turbo se pausan solas cuando pasa; si se repite, el plan se queda corto para el tráfico del sitio.', 'imagina-turbo' ),
 			'redirect'   => __( 'Revisa que la dirección del sitio (Ajustes → Generales) coincida con la que usa el dominio (http/https, con o sin www).', 'imagina-turbo' ),
+			'unexpected' => __( 'Abre /wp-admin/admin-ajax.php?action=itb_loopback_test en una ventana privada: debe mostrar {"success":true,…}. Si aparece otra cosa, un plugin de seguridad o de mantenimiento, el hosting o una caché lo intercepta.', 'imagina-turbo' ),
 			default      => '',
 		};
 	}
 
 	/**
+	 * Marca que devuelve la acción de la prueba: no revela nada (HMAC de un texto fijo con las sales del
+	 * sitio) y solo la produce este WordPress.
+	 */
+	public static function loopbackToken(): string {
+		return substr( hash_hmac( 'sha256', 'itb-loopback', wp_salt( 'nonce' ) ), 0, 16 );
+	}
+
+	/**
+	 * Respuesta de admin-ajax a la prueba (con y sin sesión): 200 con la marca. Sin un manejador,
+	 * admin-ajax responde 400 con «0» y la prueba no podía distinguirlo de un bloqueo.
+	 */
+	public static function ajaxLoopback(): void {
+		wp_send_json_success( [ 'token' => self::loopbackToken() ] );
+	}
+
+	/**
 	 * Prueba las peticiones del sitio a sí mismo como visitante y guarda el resultado.
 	 *
-	 * @return array{at: int, ok: bool, server_ip: string, checks: list<Check>}
+	 * @return array{version: int, at: int, ok: bool, server_ip: string, checks: list<Check>}
 	 */
 	public static function loopback(): array {
 		$checks = [
 			'home' => [ 'GET', home_url( '/?itb_loopback=' . wp_rand( 1000, 999999 ) ), [] ],
 			'rest' => [ 'GET', rest_url(), [] ],
-			'ajax' => [ 'POST', admin_url( 'admin-ajax.php' ), [ 'action' => 'itb_loopback_test' ] ],
+			'ajax' => [ 'POST', admin_url( 'admin-ajax.php' ), [ 'action' => self::LOOPBACK_ACTION ] ],
 			'cron' => [ 'GET', site_url( 'wp-cron.php?doing_wp_cron=' . sprintf( '%.22F', microtime( true ) ) ), [] ],
 		];
 		$out    = [];
@@ -371,7 +432,7 @@ final class HostingProfile {
 					}
 				}
 			}
-			$result = self::classify( $id, $code, $headers, $text, substr( sanitize_text_field( $error ), 0, 200 ) );
+			$result = self::classify( $id, $code, $headers, $text, substr( sanitize_text_field( $error ), 0, 200 ), 'ajax' === $id ? self::loopbackToken() : '' );
 			$out[]  = [
 				'id'      => $id,
 				'url'     => strtok( $url, '?' ) ?: $url,
@@ -383,6 +444,7 @@ final class HostingProfile {
 		}
 		$serverIp = isset( $_SERVER['SERVER_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_ADDR'] ) ) : '';
 		$report   = [
+			'version'   => self::LOOPBACK_VERSION,
 			'at'        => time(),
 			'ok'        => [] === array_filter( $out, static fn( array $c ): bool => 'ok' !== $c['status'] ),
 			'server_ip' => false !== filter_var( $serverIp, FILTER_VALIDATE_IP ) ? $serverIp : '',
@@ -399,7 +461,22 @@ final class HostingProfile {
 	 */
 	public static function lastLoopback(): ?array {
 		$value = get_option( self::LOOPBACK_OPTION, null );
-		return is_array( $value ) ? $value : null;
+		if ( ! is_array( $value ) ) {
+			return null;
+		}
+		// Informes sin versión (0.25.0): la acción de admin-ajax no tenía manejador, respondía 400 «0» (vacío
+		// tras Requests) y se tomaba por error. Se corrige al leer para no esperar a la prueba diaria; los
+		// demás fallos se conservan.
+		if ( ! isset( $value['version'] ) && is_array( $value['checks'] ?? null ) ) {
+			foreach ( $value['checks'] as $i => $check ) {
+				if ( is_array( $check ) && 'ajax' === ( $check['id'] ?? '' ) && 400 === ( $check['code'] ?? 0 ) ) {
+					$value['checks'][ $i ]['status']  = 'ok';
+					$value['checks'][ $i ]['message'] = __( 'Responde.', 'imagina-turbo' );
+				}
+			}
+			$value['ok'] = [] === array_filter( $value['checks'], static fn( $c ): bool => ! is_array( $c ) || 'ok' !== ( $c['status'] ?? 'ok' ) );
+		}
+		return $value;
 	}
 
 	/**

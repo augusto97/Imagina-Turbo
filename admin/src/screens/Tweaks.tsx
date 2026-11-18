@@ -233,9 +233,9 @@ function CronCard( { status }: { status: ShieldStatus } ) {
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
 				{ cron.disabled ? (
 					minutes >= 0 && minutes <= 30 ? (
-						<Notice level="success">{ `${ __( 'DISABLE_WP_CRON está activo y wp-cron.php corrió hace' ) } ${ minutes } ${ __( 'min: la tarea del sistema funciona.' ) }` }</Notice>
+						<Notice level="success">{ `${ __( 'DISABLE_WP_CRON está activo y el cron corrió hace' ) } ${ minutes } ${ __( 'min: la tarea del sistema funciona.' ) }` }</Notice>
 					) : (
-						<Notice level="warning">{ minutes < 0 ? __( 'DISABLE_WP_CRON está activo pero todavía no se vio correr wp-cron.php. Comprueba que exista la tarea del sistema.' ) : `${ __( 'DISABLE_WP_CRON está activo pero wp-cron.php no corre desde hace' ) } ${ minutes } ${ __( 'min. Revisa la tarea del sistema.' ) }` }</Notice>
+						<Notice level="warning">{ minutes < 0 ? __( 'DISABLE_WP_CRON está activo pero todavía no se vio correr el cron (ni wp-cron.php ni WP-CLI). Comprueba que exista la tarea del sistema.' ) : `${ __( 'DISABLE_WP_CRON está activo pero el cron no corre desde hace' ) } ${ minutes } ${ __( 'min (ni wp-cron.php ni WP-CLI). Revisa la tarea del sistema.' ) }` }</Notice>
 					)
 				) : (
 					<Notice level="info">{ __( 'WP-Cron corre con las visitas. Agrega la tarea y después define DISABLE_WP_CRON en wp-config.php (Imagina Turbo no edita ese archivo).' ) }</Notice>
@@ -246,7 +246,7 @@ function CronCard( { status }: { status: ShieldStatus } ) {
 					<CopyLine text={ cron.php } />
 				</div>
 				<div className="itb:flex itb:flex-col itb:gap-1">
-					<span className="itb:text-xs itb:font-medium">{ __( 'Con WP-CLI' ) }</span>
+					<span className="itb:text-xs itb:font-medium">{ __( 'Con WP-CLI (si el hosting lo tiene instalado)' ) }</span>
 					<CopyLine text={ cron.wp_cli } />
 				</div>
 				<div className="itb:flex itb:flex-col itb:gap-1">
@@ -255,6 +255,7 @@ function CronCard( { status }: { status: ShieldStatus } ) {
 				</div>
 				<CopyLine text="define( 'DISABLE_WP_CRON', true );" />
 				<ul className="itb:m-0 itb:list-disc itb:pl-5 itb:text-xs itb:text-zinc-600">
+					<li>{ __( 'Basta con una de las tres: Imagina Turbo reconoce wp-cron.php (con PHP o curl) y «wp cron event run» de WP-CLI.' ) }</li>
 					<li>{ __( 'cPanel: Avanzado → Trabajos de cron (Cron Jobs) → «Una vez cada cinco minutos». En el campo Comando, pega solo lo que va después de «*/5 * * * *».' ) }</li>
 					<li>{ __( 'Si el hosting usa otra versión de PHP para la línea de comandos, cambia «php» por la ruta que indique el panel (por ejemplo /usr/local/bin/php).' ) }</li>
 					<li>{ __( 'ServerAvatar: Aplicación → Cron Jobs → agregar, con el usuario del sistema de la aplicación.' ) }</li>

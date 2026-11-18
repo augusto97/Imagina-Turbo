@@ -779,3 +779,16 @@ Para los sitios de clientes en hosting compartido con cPanel (docs/02, sección 
 - [x] Interfaz con la REST simulada: 8 comprobaciones de la tarjeta Hosting y las 30 anteriores sin cambios.
 - [ ] En un cPanel compartido real: que la detección acierte, crear la tarea con el comando PHP y ver «corrió hace N min», y la prueba de loopback con y sin ModSecurity bloqueando.
 
+## Sin publicar (correcciones de 0.25.0)
+
+Dos alertas falsas en sitios sanos (vistas en OpenLiteSpeed + WooCommerce + LiteSpeed Cache + Cloudflare):
+
+- `cron_stalled` (error) con el cron del sistema por WP-CLI (`wp cron event run --due-now`): solo se anotaba el cron en `wp-cron.php`. Ahora también al invocar `wp cron event run` y cuando la cola de Action Scheduler corre desde la consola. Textos de la alerta y de Ajustes rápidos → Cron del sistema con la variante WP-CLI (comando con `--quiet`).
+- `loopback` por admin-ajax en todos los sitios: la acción `itb_loopback_test` no tenía manejador, admin-ajax respondía 400 «0» y Requests descarta un cuerpo «0». Ahora el plugin la atiende y responde 200 con una marca que la prueba comprueba; un 400 con «0» o vacío sigue contando como WordPress. El resultado ya guardado por 0.25.0 se corrige al leerlo, así que la alerta se va al actualizar sin esperar a la prueba diaria.
+
+**Criterios de aceptación**:
+
+- [x] 375 pruebas unitarias (2 nuevas y 2 ampliadas: latido del cron por WP-CLI y su límite de una escritura cada 5 minutos, otros comandos que no cuentan, la alerta que desaparece; marca de admin-ajax estable y ligada a las sales; prueba completa de loopback sana, como antes y con otra página contestando; informe guardado por 0.25.0 que deja de avisar salvo por otro fallo; `classify()` con 200 y marca, 200 sin marca, 400 vacío y 400 «0»), PHPStan nivel 8 y PHPCS.
+- [x] Interfaz con la REST simulada: 7 comprobaciones nuevas (textos del cron con WP-CLI, comando con `--quiet`, admin-ajax interceptado y su consejo) y las 38 anteriores sin cambios.
+- [ ] En latienditadelamor.com.co (cron por WP-CLI y loopback sano): tras actualizar, «Probar ahora» en Diagnóstico → Hosting da las cuatro pruebas bien y desaparecen las alertas `cron_stalled` y `loopback`.
+

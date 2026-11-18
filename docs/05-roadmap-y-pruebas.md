@@ -779,7 +779,7 @@ Para los sitios de clientes en hosting compartido con cPanel (docs/02, sección 
 - [x] Interfaz con la REST simulada: 8 comprobaciones de la tarjeta Hosting y las 30 anteriores sin cambios.
 - [ ] En un cPanel compartido real: que la detección acierte, crear la tarea con el comando PHP y ver «corrió hace N min», y la prueba de loopback con y sin ModSecurity bloqueando.
 
-## Sin publicar (correcciones de 0.25.0)
+## Versión 0.25.1 (alertas falsas de cron y loopback)
 
 Dos alertas falsas en sitios sanos (vistas en OpenLiteSpeed + WooCommerce + LiteSpeed Cache + Cloudflare):
 

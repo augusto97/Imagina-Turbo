@@ -100,6 +100,21 @@ final class Response {
 		return false;
 	}
 
+	/**
+	 * Cloudflare rechazó la petición por falta de permiso del token (no por el contenido, el plan o un
+	 * cupo). Llega como 403 con «request is not authorized», 10000 «Authentication error» o 9109.
+	 */
+	public function unauthorized(): bool {
+		if ( $this->ok() ) {
+			return false;
+		}
+		if ( 401 === $this->status || $this->hasCode( 10000 ) || $this->hasCode( 9109 ) ) {
+			return true;
+		}
+		$message = strtolower( $this->message() );
+		return str_contains( $message, 'not authorized' ) || str_contains( $message, 'unauthorized' ) || ( 403 === $this->status && [] === $this->errors );
+	}
+
 	public function message(): string {
 		if ( [] === $this->errors ) {
 			return $this->ok() ? '' : 'HTTP ' . $this->status;

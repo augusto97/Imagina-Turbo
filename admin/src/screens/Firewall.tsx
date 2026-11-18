@@ -380,7 +380,7 @@ function EdgeChangesCard( { status }: { status: FirewallStatus } ) {
 			</CardHeader>
 			<CardContent className="itb:flex itb:flex-col itb:gap-3 itb:text-[13px]">
 				{ ! cf.connected && <Notice level="info">{ __( 'Conecta Cloudflare (pantalla Cloudflare) para proponer reglas en el edge.' ) }</Notice> }
-				{ cf.connected && cf.waf_permission === false && <Notice level="warning">{ __( 'El token no puede leer las reglas del firewall. Agrégale el permiso «Zone WAF: Edit».' ) }</Notice> }
+				{ cf.connected && cf.waf_permission === false && <Notice level="warning">{ __( 'El token no tiene «Zone → Zone WAF → Edit». Edítalo en Cloudflare → Mi perfil → API Tokens y agrega el permiso; el token no cambia. Después pulsa «Comprobar permisos» en la pantalla Cloudflare.' ) }</Notice> }
 				{ status.error && <Notice level="error">{ status.error }</Notice> }
 				{ status.notes.map( ( n, i ) => (
 					<Notice key={ i } level="info">

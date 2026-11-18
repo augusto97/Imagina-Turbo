@@ -13,6 +13,7 @@ use Brain\Monkey\Functions;
 use ImaginaTurbo\Cloudflare\Analytics;
 use ImaginaTurbo\Cloudflare\Client;
 use ImaginaTurbo\Cloudflare\CloudflarePurger;
+use ImaginaTurbo\Cloudflare\CloudflareService;
 use ImaginaTurbo\Cloudflare\Connector;
 use ImaginaTurbo\Cloudflare\Phases;
 use ImaginaTurbo\Cloudflare\Planner;
@@ -237,6 +238,99 @@ final class CloudflareTest extends TestCase {
 		// Sin token no hay petición.
 		$none = new Client( static fn(): ?string => null );
 		$this->assertTrue( $none->get( '/zones' )->hasCode( 'itb_no_token' ) );
+	}
+
+	public function test_token_link_uses_only_documented_keys(): void {
+		parse_str( (string) parse_url( CloudflareService::tokenUrl(), PHP_URL_QUERY ), $query );
+		$keys = json_decode( (string) $query['permissionGroupKeys'], true );
+		// Claves cortas de zona documentadas para enlaces de tokens de usuario; Cloudflare descarta el resto.
+		$documented = [ 'dns', 'zone', 'zone_settings', 'analytics', 'firewall_services', 'page_rules', 'cache', 'ssl_and_certificates', 'logs' ];
+		foreach ( $keys as $entry ) {
+			$this->assertContains( $entry['key'], $documented );
+			$this->assertContains( $entry['type'], [ 'read', 'edit', 'purge' ] );
+		}
+		// Lo que el enlace no puede rellenar se pide a mano y está en la lista completa.
+		$this->assertCount( 3, CloudflareService::TOKEN_MANUAL );
+		foreach ( CloudflareService::TOKEN_MANUAL as $manual ) {
+			$this->assertNotEmpty( array_filter( CloudflareService::TOKEN_PERMISSIONS, static fn( string $p ): bool => str_starts_with( $p, $manual ) ), $manual );
+		}
+	}
+
+	public function test_unauthorized_writes_name_the_missing_permission(): void {
+		// Lo que vio el usuario al aplicar una regla del firewall sin «Zone WAF → Edit».
+		$denied = Response::fromHttp( 403, (string) json_encode( [ 'success' => false, 'errors' => [ [ 'message' => 'request is not authorized' ] ] ] ) );
+		$this->assertSame( '0: request is not authorized', $denied->message() );
+		$this->assertTrue( $denied->unauthorized() );
+		$this->assertTrue( Response::fromHttp( 403, (string) json_encode( [ 'success' => false, 'errors' => [ [ 'code' => 10000, 'message' => 'Authentication error' ] ] ] ) )->unauthorized() );
+		$quota = Response::fromHttp( 400, (string) json_encode( [ 'success' => false, 'errors' => [ [ 'code' => 20217, 'message' => 'exceeded maximum number of rules' ] ] ] ) );
+		$this->assertFalse( $quota->unauthorized(), 'un cupo lleno no es falta de permiso' );
+		$this->assertFalse( Response::fromHttp( 200, (string) json_encode( [ 'success' => true, 'errors' => [], 'result' => [] ] ) )->unauthorized() );
+
+		$this->assertSame(
+			'El token no tiene «Zone → Zone WAF → Edit». Edítalo en Cloudflare → Mi perfil → API Tokens y agrega el permiso; el token no cambia.',
+			Connector::writeError( $denied, Connector::PHASE_PERMISSIONS[ Phases::WAF ] )
+		);
+		$this->assertSame( '20217: exceeded maximum number of rules', Connector::writeError( $quota, Connector::PHASE_PERMISSIONS[ Phases::WAF ] ), 'otros errores, tal cual' );
+		$this->assertSame( 'Zone → Zone WAF → Edit', Connector::PHASE_PERMISSIONS[ Phases::RATELIMIT ] );
+		$this->assertSame( 'Zone → Cache Rules → Edit', Connector::PHASE_PERMISSIONS[ Phases::CACHE ] );
+
+		$this->assertSame(
+			[ 'Zone → Zone WAF → Edit' ],
+			Connector::missingEdit(
+				[
+					'waf_read'         => true,
+					'waf_edit'         => false,
+					'ratelimit_edit'   => false,
+					'cache_rules_edit' => true,
+				]
+			),
+			'WAF y rate limiting piden el mismo permiso: una vez'
+		);
+		$this->assertSame( [], Connector::missingEdit( [ 'waf_read' => true ] ), 'sin comprobar no se da por faltante' );
+	}
+
+	public function test_edit_permissions_are_probed_with_dry_run_only(): void {
+		$ok             = [
+			'success' => true,
+			'errors'  => [],
+			'result'  => [],
+		];
+		$this->responses = [
+			// Reglas de caché: el ruleset existe y la regla de prueba es válida.
+			[ 200, [ 'success' => true, 'errors' => [], 'result' => [ 'id' => 'rc', 'rules' => [] ] ] ],
+			[ 200, $ok ],
+			// Transform: sin ruleset; cupo lleno (no es falta de permiso).
+			[ 404, [ 'success' => false, 'errors' => [ [ 'code' => 10006, 'message' => 'not found' ] ] ] ],
+			[ 400, [ 'success' => false, 'errors' => [ [ 'code' => 20217, 'message' => 'exceeded maximum number of rules' ] ] ] ],
+			// WAF: lee el ruleset, pero no puede editarlo.
+			[ 200, [ 'success' => true, 'errors' => [], 'result' => [ 'id' => 'rw', 'rules' => [] ] ] ],
+			[ 403, [ 'success' => false, 'errors' => [ [ 'message' => 'request is not authorized' ] ] ] ],
+			// Rate limiting: otro error al leer: no se decide nada.
+			[ 400, [ 'success' => false, 'errors' => [ [ 'code' => 7003, 'message' => 'Could not route' ] ] ] ],
+		];
+		$result          = ( new Connector( $this->client() ) )->probeEdit( 'z1' );
+		$this->assertSame(
+			[
+				'cache_rules_edit' => true,
+				'transform_edit'   => true,
+				'waf_edit'         => false,
+			],
+			$result
+		);
+		$this->assertSame( [ 'GET', 'POST', 'GET', 'PUT', 'GET', 'POST', 'GET' ], array_column( $this->requests, 'method' ) );
+		foreach ( $this->requests as $request ) {
+			if ( 'GET' !== $request['method'] ) {
+				$this->assertStringContainsString( 'dry_run=true', $request['url'], 'nunca escribe de verdad' );
+			}
+		}
+		$this->assertStringContainsString( '/zones/z1/rulesets/rc/rules?dry_run=true', $this->requests[1]['url'] );
+		$this->assertStringContainsString( '/rulesets/phases/http_request_transform/entrypoint?dry_run=true', $this->requests[3]['url'] );
+		$probe = $this->requests[3]['body']['rules'][0];
+		$this->assertFalse( $probe['enabled'], 'la regla de prueba va desactivada' );
+		$this->assertStringContainsString( '.invalid', $probe['expression'], 'y no coincide con nada' );
+		$this->assertSame( 'set_cache_settings', $this->requests[1]['body']['action'] );
+		$this->assertSame( 'block', $this->requests[5]['body']['action'] );
+		$this->assertArrayHasKey( 'ratelimit', Connector::probeRule( Phases::RATELIMIT ) );
 	}
 
 	public function test_zone_candidates(): void {

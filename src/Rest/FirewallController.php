@@ -123,7 +123,8 @@ final class FirewallController extends Controller {
 				'connected'      => null !== $cf['zone'],
 				'module_enabled' => $cf['enabled'],
 				'plan'           => $cf['zone']['plan'] ?? '',
-				'waf_permission' => $cf['permissions']->waf_read ?? null,
+				// Edición si se pudo comprobar (dry_run); si no, lectura. Rate limiting usa el mismo permiso.
+				'waf_permission' => $cf['permissions']->waf_edit ?? $cf['permissions']->waf_read ?? null,
 			],
 			'changes'    => $changes,
 			'notes'      => $notes,

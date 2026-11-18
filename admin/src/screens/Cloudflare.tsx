@@ -34,6 +34,10 @@ const PERMISSIONS: Record<string, string> = {
 	rulesets_read: __( 'Reglas: leer' ),
 	analytics_read: __( 'Analíticas: leer' ),
 	waf_read: __( 'Firewall: leer' ),
+	cache_rules_edit: __( 'Reglas de caché: editar' ),
+	transform_edit: __( 'Transform Rules: editar' ),
+	waf_edit: __( 'Firewall: editar' ),
+	ratelimit_edit: __( 'Límite de peticiones: editar' ),
 };
 
 function show( value: unknown ): string {
@@ -95,6 +99,7 @@ function ConnectionCard( { status }: { status: CfStatus } ) {
 	const [ confirmForget, setConfirmForget ] = useState( false );
 	const connect = useAction( ( value: string ) => api<CfStatus>( 'cloudflare/connect', 'POST', { token: value } ) );
 	const forget = useAction( () => api<CfStatus>( 'cloudflare/connect', 'DELETE', { confirm: true } ) );
+	const recheck = useAction( () => api<CfStatus>( 'cloudflare/permissions', 'POST' ) );
 	const leftovers = status.footprint.rules + status.footprint.settings;
 	const done = ( s: CfStatus ) => {
 		client.setQueryData( [ 'cf' ], s );
@@ -131,6 +136,26 @@ function ConnectionCard( { status }: { status: CfStatus } ) {
 						<KeyValue label={ __( 'Última revisión' ) }>{ formatDate( status.checked_at, config.locale ) }</KeyValue>
 					</dl>
 				) }
+				{ state === 'ok' && status.zone && status.missing.length > 0 && (
+					<Notice level="warning">
+						<div className="itb:flex itb:flex-col itb:gap-1">
+							{ status.missing.map( ( m ) => (
+								<span key={ m }>{ m }</span>
+							) ) }
+							<span>{ __( 'Hasta entonces Cloudflare rechazará esos cambios (no se toca nada de la zona). Después pulsa «Comprobar permisos».' ) }</span>
+						</div>
+					</Notice>
+				) }
+				{ state === 'ok' && status.zone && (
+					<div className="itb:flex itb:flex-wrap itb:items-center itb:gap-2">
+						<Button type="button" size="sm" variant="outline" disabled={ recheck.isPending } onClick={ () => recheck.mutate( undefined, { onSuccess: done } ) }>
+							<RefreshCw className={ recheck.isPending ? 'itb:animate-spin' : '' } aria-hidden />
+							{ recheck.isPending ? __( 'Comprobando…' ) : __( 'Comprobar permisos' ) }
+						</Button>
+						<span className="itb:text-xs itb:text-zinc-500">{ __( 'Prueba cada permiso de edición con una validación de Cloudflare que no guarda nada.' ) }</span>
+					</div>
+				) }
+				{ recheck.error && <Notice level="error">{ recheck.error.message }</Notice> }
 				<form
 					className="itb:flex itb:flex-col itb:gap-2"
 					onSubmit={ ( e ) => {
@@ -164,6 +189,11 @@ function ConnectionCard( { status }: { status: CfStatus } ) {
 						</a>
 					</div>
 					{ connect.error && <Notice level="error">{ connect.error.message }</Notice> }
+					{ state !== 'ok' && (
+						<span className="itb:text-xs itb:text-zinc-600">
+							{ `${ __( 'El enlace rellena Zona, Ajustes de zona, Analíticas y Purga de caché. Cloudflare no deja rellenar el resto desde un enlace: agrégalos a mano en el formulario antes de crear el token:' ) } ${ status.token_manual.join( ', ' ) }.` }
+						</span>
+					) }
 				</form>
 				<details className="itb:text-xs itb:text-zinc-600">
 					<summary className="itb:cursor-pointer">{ __( 'Permisos que necesita el token' ) }</summary>

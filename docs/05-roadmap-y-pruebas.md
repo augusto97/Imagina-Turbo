@@ -793,7 +793,7 @@ Dos alertas falsas en sitios sanos (vistas en OpenLiteSpeed + WooCommerce + Lite
 - [ ] En latienditadelamor.com.co (cron por WP-CLI y loopback sano): tras actualizar, «Probar ahora» en Diagnóstico → Hosting da las cuatro pruebas bien y desaparecen las alertas `cron_stalled` y `loopback`.
 
 
-## Sin publicar
+## Versión 0.25.2 (estado real de Cloudflare y alerta de OPcache)
 
 - **Textos de «llega en la fase N»** que quedaban de la construcción por fases, aunque todo eso ya existe. Panel → Cloudflare muestra el estado real de la conexión por API (conectado con zona y plan, módulo apagado, token ilegible, sin conectar aunque las visitas pasen por Cloudflare, no detectado), con la misma consulta que la pantalla Cloudflare. También en Panel → Métricas, Caché, Avanzado, la importación de Perfmatters, la auditoría de cacheabilidad y los permisos del token.
 - **Alerta falsa de OPcache «lleno»** tras un reinicio de PHP o de OPcache (por ejemplo «Purgar todo» de LiteSpeed Cache, que llama a `opcache_reset()`): la tasa de aciertos se cuenta desde el último arranque o reinicio (verificado en php-src 8.3: `hits` y `misses` vuelven a cero, `start_time` y `last_restart_time`), así que durante 6 horas no se juzga. Cada causa tiene su texto: memoria (también si OPcache se vació solo por falta de memoria, `oom_restarts`), cadenas internas, tabla de archivos (`num_cached_keys`/`max_cached_keys` o `hash_restarts`) y aciertos bajos con espacio (aviso informativo `opcache_hits`, sin «lleno»). Si el ajuste del servidor ya está en lo recomendado (512 MB, 64 MB, 100000), no se repite «sube a…»: se propone el siguiente paso.

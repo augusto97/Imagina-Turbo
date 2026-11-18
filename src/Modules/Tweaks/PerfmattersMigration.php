@@ -106,16 +106,16 @@ final class PerfmattersMigration {
 		$unmapped = [];
 		$where    = [
 			'disable_woocommerce_cart_fragmentation' => __( 'Módulo «Carrito por Store API» (reemplaza cart-fragments sin perder el contador).', 'imagina-turbo' ),
-			'disable_woocommerce_scripts'            => __( 'Gestor de assets por ruta (fase 7).', 'imagina-turbo' ),
+			'disable_woocommerce_scripts'            => __( 'Gestor de assets por ruta (pantalla Assets).', 'imagina-turbo' ),
 			'disable_woocommerce_status'             => __( 'Sin equivalente (widget del escritorio).', 'imagina-turbo' ),
 			'disable_woocommerce_widgets'            => __( 'Sin equivalente.', 'imagina-turbo' ),
-			'disable_google_maps'                    => __( 'Gestor de assets por ruta (fase 7).', 'imagina-turbo' ),
+			'disable_google_maps'                    => __( 'Gestor de assets por ruta (pantalla Assets).', 'imagina-turbo' ),
 			'remove_comment_urls'                    => __( 'Sin equivalente.', 'imagina-turbo' ),
 			'remove_feed_links'                      => __( 'Incluido en «Desactivar feeds RSS».', 'imagina-turbo' ),
 			'disable_rest_api'                       => __( 'Escudo: bloquea /wp/v2/users a anónimos. Cerrar toda la REST rompe WooCommerce y el editor.', 'imagina-turbo' ),
 			'login_url'                              => __( 'Sin equivalente: usa un plugin dedicado (la ruta se detecta sola).', 'imagina-turbo' ),
 			'blank_favicon'                          => __( 'Sin equivalente.', 'imagina-turbo' ),
-			'remove_global_styles'                   => __( 'Gestor de assets por ruta (fase 7).', 'imagina-turbo' ),
+			'remove_global_styles'                   => __( 'Gestor de assets por ruta (pantalla Assets).', 'imagina-turbo' ),
 		];
 		foreach ( $where as $key => $message ) {
 			if ( ! empty( $options[ $key ] ) ) {
@@ -127,8 +127,8 @@ final class PerfmattersMigration {
 		}
 		foreach ( [
 			'assets'   => __( 'Delay/defer de JS, CSS no usado y minificación: el plugin de caché (LSCache o WP Rocket).', 'imagina-turbo' ),
-			'lazyload' => __( 'Lazy load: el plugin de caché. Las pistas de LCP llegan con la fase 6.', 'imagina-turbo' ),
-			'preload'  => __( 'Precarga y especulación: módulo «Navegación instantánea» (fase 6).', 'imagina-turbo' ),
+			'lazyload' => __( 'Lazy load: el plugin de caché. La prioridad de la imagen LCP está en Navegación.', 'imagina-turbo' ),
+			'preload'  => __( 'Precarga y especulación: pantalla Navegación (Speculation Rules).', 'imagina-turbo' ),
 			'cdn'      => __( 'CDN: Cloudflare ya sirve los estáticos.', 'imagina-turbo' ),
 		] as $section => $message ) {
 			$values = is_array( $options[ $section ] ?? null ) ? array_filter( $options[ $section ] ) : [];

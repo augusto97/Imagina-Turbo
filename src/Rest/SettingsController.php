@@ -79,8 +79,7 @@ final class SettingsController extends Controller {
 			return $this->error( 'itb_unknown_module', __( 'Módulo desconocido.', 'imagina-turbo' ), 404 );
 		}
 		if ( $enabled && ! $definition->isAvailable() ) {
-			/* translators: %d: número de fase */
-			return $this->error( 'itb_unavailable', sprintf( __( 'Este módulo llega en la fase %d; todavía no está disponible.', 'imagina-turbo' ), $definition->phase ), 409 );
+			return $this->error( 'itb_unavailable', __( 'Este módulo no está disponible en esta versión.', 'imagina-turbo' ), 409 );
 		}
 		$forced = $this->container->get( Diagnostics::class )->overlap()['forced_off'][ $id ] ?? [];
 		if ( $enabled && [] !== $forced ) {

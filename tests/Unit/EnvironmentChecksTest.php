@@ -68,6 +68,104 @@ final class EnvironmentChecksTest extends TestCase {
 		$this->assertStringContainsString( '128 de 128 MB', $alerts[0]['message'] );
 	}
 
+	/**
+	 * El sitio del reporte: 512 MB al 57 %, cadenas de 64 MB al 81 % y 100000 archivos.
+	 *
+	 * @param array<string, mixed> $stats Estadísticas que cambian.
+	 * @return array<string, mixed>
+	 */
+	private static function server( int $usedMb, float $hitRate, int $stringsFreePct, array $stats = [] ): array {
+		$status                         = self::opcache( $usedMb, 512 - $usedMb, $hitRate );
+		$status['interned_strings_usage'] = [
+			'buffer_size' => 100 * 1048576,
+			'free_memory' => $stringsFreePct * 1048576,
+		];
+		$status['opcache_statistics']   = array_merge(
+			$status['opcache_statistics'],
+			[
+				'num_cached_keys' => 9000,
+				'max_cached_keys' => 130987,
+				'start_time'      => 1000,
+				'oom_restarts'    => 0,
+				'hash_restarts'   => 0,
+			],
+			$stats
+		);
+		return $status;
+	}
+
+	public function test_opcache_causes_and_warm_up(): void {
+		$now         = 1000 + 30 * 86400;
+		$recommended = [
+			'memory'  => 512,
+			'strings' => 64,
+			'files'   => 100000,
+		];
+		$small       = [
+			'memory'  => 128,
+			'strings' => 8,
+			'files'   => 10000,
+		];
+
+		// Reinicio reciente (Purgar todo de LiteSpeed, opcache_reset): aciertos bajos, memoria y cadenas bien. Sin alerta.
+		$purged  = self::server( 292, 62.0, 19, [ 'last_restart_time' => $now - 1800 ] );
+		$reading = EnvironmentChecks::opcache( $purged, $recommended, $now );
+		$this->assertFalse( $reading['problem'] );
+		$this->assertTrue( $reading['warming'] );
+		$this->assertSame( [], EnvironmentChecks::evaluate( $purged, null, null, false, $recommended, $now ) );
+		$started = self::server( 292, 62.0, 19, [ 'start_time' => $now - 3600 ] );
+		$this->assertSame( [], EnvironmentChecks::evaluate( $started, null, null, false, $recommended, $now ), 'PHP recién arrancado' );
+
+		// Pasadas 6 horas con aciertos bajos y espacio: aviso informativo, sin «lleno» ni «sube a».
+		$late   = self::server( 292, 62.0, 19, [ 'last_restart_time' => $now - 7 * 3600 ] );
+		$alerts = EnvironmentChecks::evaluate( $late, null, null, false, $recommended, $now );
+		$this->assertSame( [ [ 'info', 'opcache_hits' ] ], array_map( static fn( array $a ): array => [ $a['level'], $a['code'] ], $alerts ) );
+		$this->assertStringNotContainsString( 'lleno', $alerts[0]['message'] );
+		$this->assertStringNotContainsString( 'sube', $alerts[0]['message'] );
+		$this->assertStringContainsString( '62.0 %', $alerts[0]['message'] );
+
+		// Memoria llena: alerta aunque se acabe de reiniciar, con el valor recomendado si está por debajo.
+		$full   = self::server( 512, 99.0, 19, [ 'last_restart_time' => $now - 600 ] );
+		$alerts = EnvironmentChecks::evaluate( $full, null, null, false, $small, $now );
+		$this->assertSame( [ 'opcache_full' ], array_column( $alerts, 'code' ) );
+		$this->assertSame( [ 'memory' ], EnvironmentChecks::opcache( $full, $small, $now )['causes'] );
+		$this->assertStringContainsString( 'la memoria está llena (512 de 512 MB)', $alerts[0]['message'] );
+		$this->assertStringContainsString( 'sube opcache.memory_consumption a 512', $alerts[0]['message'] );
+		$this->assertStringNotContainsString( 'interned_strings_buffer', $alerts[0]['message'], 'solo la causa real' );
+
+		// Ya en lo recomendado: no repite «sube a 512», propone el siguiente paso.
+		$message = EnvironmentChecks::evaluate( $full, null, null, false, $recommended, $now )[0]['message'];
+		$this->assertStringContainsString( 'opcache.memory_consumption ya está en 512 MB: súbelo a 768', $message );
+		$this->assertStringNotContainsString( 'sube opcache.memory_consumption a 512', $message );
+
+		// Cadenas internas al 99 %.
+		$strings = self::server( 292, 99.0, 1 );
+		$alerts  = EnvironmentChecks::evaluate( $strings, null, null, false, $small, $now );
+		$this->assertSame( [ 'opcache_full' ], array_column( $alerts, 'code' ) );
+		$this->assertStringContainsString( 'las cadenas internas están al 99 %', $alerts[0]['message'] );
+		$this->assertStringContainsString( 'sube opcache.interned_strings_buffer a 64', $alerts[0]['message'] );
+		$this->assertStringNotContainsString( 'memory_consumption', $alerts[0]['message'] );
+		$this->assertStringContainsString( 'interned_strings_buffer ya está en 64 MB: súbelo a 128', EnvironmentChecks::evaluate( $strings, null, null, false, $recommended, $now )[0]['message'] );
+
+		// Se vació solo por falta de memoria: aunque ahora haya sitio (justo después del vaciado), es la causa.
+		$oom    = self::server( 120, 70.0, 60, [
+			'last_restart_time' => $now - 300,
+			'oom_restarts'      => 3,
+		] );
+		$alerts = EnvironmentChecks::evaluate( $oom, null, null, false, $small, $now );
+		$this->assertStringContainsString( 'se vació solo 3 veces', $alerts[0]['message'] );
+
+		// Tabla de archivos llena.
+		$keys   = self::server( 292, 99.0, 19, [
+			'num_cached_keys' => 16000,
+			'max_cached_keys' => 16229,
+		] );
+		$alerts = EnvironmentChecks::evaluate( $keys, null, null, false, $small, $now );
+		$this->assertStringContainsString( 'no caben más archivos (16,000 de 16,229)', $alerts[0]['message'] );
+		$this->assertStringContainsString( 'sube opcache.max_accelerated_files a 100,000', $alerts[0]['message'] );
+		$this->assertSame( [ 'keys' ], EnvironmentChecks::opcache( $keys, $small, $now )['causes'], 'OPcache lleno por archivos no culpa a la memoria' );
+	}
+
 	public function test_webp_generated_but_not_served(): void {
 		$none = [
 			'webp'         => true,

@@ -33,7 +33,7 @@ final class CacheabilityAudit {
 
 	/** Cookies conocidas → origen probable. Se compara por prefijo. */
 	private const KNOWN_COOKIES = [
-		'woocommerce_recently_viewed' => 'WooCommerce: widget de productos vistos (wc_track_product_view). Se puede reemplazar por localStorage (fase 3).',
+		'woocommerce_recently_viewed' => 'WooCommerce: widget de productos vistos (wc_track_product_view). Se reemplaza por localStorage en WooCommerce → «Productos vistos sin Set-Cookie».',
 		'wp_woocommerce_session_'     => 'WooCommerce inicia sesión para visitantes sin carrito.',
 		'woocommerce_items_in_cart'   => 'Carrito de WooCommerce.',
 		'woocommerce_cart_hash'       => 'Carrito de WooCommerce.',

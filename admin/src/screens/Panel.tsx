@@ -13,7 +13,7 @@ import { config } from '@/lib/config';
 import { __ } from '@/lib/i18n';
 import { useAction, useCompat, useStatus } from '@/lib/queries';
 import { useRouter } from '@/lib/router';
-import type { Module, ProfilerSummary, Status } from '@/lib/types';
+import type { CfStatus, Module, ProfilerSummary, Status } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
 const cacheNames: Record<string, string> = {
@@ -57,6 +57,9 @@ function PanelContent( { status }: { status: Status } ) {
 	const env = status.environment;
 	const safe = status.safety;
 	const conflicts = status.overlap.conflicts.filter( ( c ) => c.modules.length > 0 );
+	// Misma consulta que la pantalla Cloudflare: comparten caché.
+	const cf = useQuery( { queryKey: [ 'cf' ], queryFn: () => api<CfStatus>( 'cloudflare/status' ) } );
+	const cloudflare = cloudflareSummary( env.cloudflare.proxied_request, cf.data );
 
 	return (
 		<div className="itb:flex itb:flex-col itb:gap-6">
@@ -68,13 +71,7 @@ function PanelContent( { status }: { status: Status } ) {
 					warn
 					hint={ env.cache_plugin ? __( 'Se coordina con él: no se duplica la caché de página.' ) : __( 'Solo el edge de Cloudflare.' ) }
 				/>
-				<SummaryCard
-					title={ __( 'Cloudflare' ) }
-					value={ env.cloudflare.proxied_request ? __( 'Detectado' ) : __( 'No detectado' ) }
-					ok={ env.cloudflare.proxied_request }
-					warn
-					hint={ __( 'La conexión por API llega en la fase 2.' ) }
-				/>
+				<SummaryCard title={ __( 'Cloudflare' ) } value={ cloudflare.value } ok={ cloudflare.ok } warn hint={ cloudflare.hint } />
 				<SummaryCard
 					title={ __( 'Seguridad operativa' ) }
 					value={ safe.safe_mode.active ? __( 'Modo seguro' ) : safe.kill_switch.active ? __( 'Kill switch' ) : __( 'Normal' ) }
@@ -167,6 +164,27 @@ function PanelContent( { status }: { status: Status } ) {
 	);
 }
 
+/**
+ * Estado de Cloudflare: la conexión por API manda; sin ella, si las visitas pasan por Cloudflare.
+ */
+function cloudflareSummary( proxied: boolean, cf: CfStatus | undefined ): { value: string; ok: boolean; hint: string } {
+	if ( cf && cf.token.state === 'ok' && cf.zone ) {
+		const zone = [ cf.zone.name, cf.zone.plan_name ].filter( Boolean ).join( ' · ' );
+		return cf.enabled
+			? { value: __( 'Conectado' ), ok: true, hint: zone }
+			: { value: __( 'Conectado' ), ok: false, hint: `${ zone } · ${ __( 'módulo apagado: actívalo para purgar el edge y aplicar reglas.' ) }` };
+	}
+	if ( cf && ( cf.token.state === 'rotated' || cf.token.state === 'broken' ) ) {
+		return { value: __( 'Token ilegible' ), ok: false, hint: __( 'Vuelve a pegar el token en la pantalla Cloudflare.' ) };
+	}
+	if ( ! cf ) {
+		return { value: proxied ? __( 'Detectado' ) : __( 'No detectado' ), ok: proxied, hint: __( 'Comprobando la conexión por API…' ) };
+	}
+	return proxied
+		? { value: __( 'Sin conectar' ), ok: false, hint: __( 'Las visitas pasan por Cloudflare. Conecta un token en la pantalla Cloudflare para purgar el edge y gestionar reglas.' ) }
+		: { value: __( 'No detectado' ), ok: false, hint: __( 'Las visitas no pasan por Cloudflare. Si el sitio lo usa, conéctalo en la pantalla Cloudflare.' ) };
+}
+
 function SummaryCard( { title, value, ok, warn = false, hint }: { title: string; value: string; ok: boolean; warn?: boolean; hint: string } ) {
 	return (
 		<Card>
@@ -224,7 +242,7 @@ function MetricsCard() {
 		<Card>
 			<CardHeader>
 				<CardTitle>{ __( 'Métricas' ) }</CardTitle>
-				<CardDescription>{ __( 'Fuente: perfilador (PHP del origen), últimas 24 h. Cloudflare (fase 2) y el RUM (fase 6) añadirán TTFB, LCP, aciertos del edge y bloqueos.' ) }</CardDescription>
+				<CardDescription>{ __( 'Fuente: perfilador (PHP del origen), últimas 24 h. Las métricas de visitantes reales (LCP, INP, TTFB) están en Navegación y las del edge (aciertos y bloqueos) en Cloudflare.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent>
 				{ ! s || s.samples === 0 ? (

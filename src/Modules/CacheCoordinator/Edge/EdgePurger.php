@@ -1,6 +1,6 @@
 <?php
 /**
- * Purga en el edge (Cloudflare llega en la fase 2b; hasta entonces, NullEdgePurger).
+ * Purga en el edge: Cloudflare con el módulo activo y conectado; si no, NullEdgePurger.
  *
  * @package ImaginaTurbo
  */

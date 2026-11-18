@@ -30,7 +30,7 @@ final class CloudflareService {
 		'Zone → Transform Rules → Edit',
 		'Zone → Cache Purge → Purge',
 		'Zone → Analytics → Read',
-		'Zone → Zone WAF → Edit (firewall, fase 4)',
+		'Zone → Zone WAF → Edit (firewall)',
 		'Zone → Zaraz → Edit (opcional: Google Analytics y Meta desde Cloudflare)',
 		'Zone → Bot Management → Edit (opcional: políticas de bots de IA)',
 	];

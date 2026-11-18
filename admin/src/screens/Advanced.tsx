@@ -269,7 +269,7 @@ function SettingsCard() {
 		<Card>
 			<CardHeader>
 				<CardTitle>{ __( 'Ajustes generales' ) }</CardTitle>
-				<CardDescription>{ __( 'En dominios de staging no se aplicarán reglas de Cloudflare ni purgas (fase 2). Se suman a los 61 de la matriz.' ) }</CardDescription>
+				<CardDescription>{ __( 'En dominios de staging no se aplican reglas de Cloudflare ni purgas. Se suman a los 61 de la matriz.' ) }</CardDescription>
 			</CardHeader>
 			<CardContent>
 				{ isLoading ? (

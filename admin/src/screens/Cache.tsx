@@ -123,7 +123,7 @@ function AdapterCard( { status }: { status: CacheStatus } ) {
 						{ ! adapter.verified && <Badge className="itb:ml-1">{ __( 'Sin verificar en este servidor' ) }</Badge> }
 					</KeyValue>
 					<KeyValue label={ __( 'HTML en el edge' ) }>{ adapter.edge_html ? __( 'Posible' ) : __( 'No (sus aciertos no llevan cabeceras)' ) }</KeyValue>
-					<KeyValue label={ __( 'Edge conectado' ) }>{ status.edge.available ? __( 'Sí' ) : __( 'No (Cloudflare llega en la fase 2b)' ) }</KeyValue>
+					<KeyValue label={ __( 'Edge conectado' ) }>{ status.edge.available ? __( 'Sí' ) : __( 'No: conecta Cloudflare y activa su módulo (pantalla Cloudflare)' ) }</KeyValue>
 					<KeyValue label={ __( 'Prefijo de tags' ) }>
 						<code className="itb:text-xs">{ status.tags.prefix }-</code>
 					</KeyValue>

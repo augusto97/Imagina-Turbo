@@ -110,6 +110,7 @@ final class AssetScanner {
 					'size'      => self::size( $src ),
 					'deps'      => array_values( array_map( 'strval', is_array( $item['deps'] ?? null ) ? $item['deps'] : [] ) ),
 					'footer'    => true === ( $item['footer'] ?? false ),
+					'blocking'  => self::blocking( $type, $item ),
 					'enqueued'  => true === ( $item['enqueued'] ?? false ),
 					'needed_by' => $needs[ $handle ] ?? [],
 					'protected' => AssetManagerModule::protectedHandle( $handle ),
@@ -129,6 +130,19 @@ final class AssetScanner {
 			'late_css'   => LateStyles::fromInventory( is_array( $data['late_css'] ?? null ) ? $data['late_css'] : [], home_url( '/' ) ),
 			'el_docs'    => array_values( array_filter( is_array( $data['el_docs'] ?? null ) ? $data['el_docs'] : [], 'is_array' ) ),
 		];
+	}
+
+	/**
+	 * Bloquea el render según cómo está registrado: un estilo salvo media «print», un script en el
+	 * head sin defer ni async. Lo que la Carga de scripts difiera después no se ve aquí.
+	 *
+	 * @param array<mixed> $item Asset del inventario.
+	 */
+	public static function blocking( string $type, array $item ): bool {
+		if ( 'css' === $type ) {
+			return 'print' !== strtolower( trim( is_string( $item['media'] ?? null ) ? $item['media'] : '' ) );
+		}
+		return true !== ( $item['footer'] ?? false ) && ! in_array( $item['strategy'] ?? '', [ 'defer', 'async' ], true );
 	}
 
 	/**

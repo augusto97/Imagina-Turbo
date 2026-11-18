@@ -24,7 +24,7 @@ use ImaginaTurbo\Core\Safety\AdminBypassCookie;
 /**
  * Recolección.
  *
- * @phpstan-type Asset array{handle: string, src: string, deps: list<string>, footer: bool, enqueued: bool}
+ * @phpstan-type Asset array{handle: string, src: string, deps: list<string>, footer: bool, enqueued: bool, strategy: string, media: string}
  * @phpstan-type Page array{template: string, id: int, post_type: string, js: list<Asset>, css: list<Asset>, shortcodes: list<string>, blocks: list<string>}
  */
 final class AssetInventory {
@@ -230,6 +230,9 @@ final class AssetInventory {
 				'deps'     => array_values( array_map( 'strval', $item->deps ) ),
 				'footer'   => ( $deps instanceof \WP_Scripts && in_array( $handle, $deps->in_footer, true ) ) || 1 === (int) ( $item->extra['group'] ?? 0 ),
 				'enqueued' => in_array( $handle, $deps->queue, true ),
+				// Para saber si bloquea el render: estrategia del script (WordPress 6.3+) y media del estilo.
+				'strategy' => is_string( $item->extra['strategy'] ?? null ) ? $item->extra['strategy'] : '',
+				'media'    => $deps instanceof \WP_Styles && is_string( $item->args ) ? $item->args : '',
 			];
 			if ( count( $out ) >= 300 ) {
 				break;

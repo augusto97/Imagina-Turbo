@@ -832,3 +832,14 @@ Un asistente identificaba assets que sobraban (caso real: la hoja de Bold `wooco
 
 - [x] 385 pruebas unitarias (6 nuevas: bloqueos del núcleo y WooCommerce, hoja de Bold solo en el pago con aviso del carrito, WooCommerce en el carrito y el pago, handle que no está en la página o con otro tipo, dependencias, reglas sin lugar, resumen del inventario y «bloquea», herramientas y alcances: activar no existe), PHPStan nivel 8 y PHPCS.
 - [ ] En un sitio con el conector: `inspect_assets` en la portada lista la hoja de Bold; `propose_asset_rule` con `mode: only` y el id del pago la crea en prueba con la nota de Claude; la previsualización muestra la portada sin ella y el pago con ella; el dueño la activa.
+
+## Versión 0.25.5 (reconectar Claude con un plugin que oculta el login)
+
+Al reconectar Claude en un sitio, la autorización terminaba en el wp-admin sin pedir acceso. Conectar exige haber iniciado sesión hace menos de 2 horas; con una sesión más vieja el conector mandaba al login con `reauth`, y WPS Hide Login lleva al escritorio a quien ya tiene sesión, sin respetar a dónde volver. La primera conexión funcionaba porque la sesión era reciente.
+
+- Con una sesión vieja, el conector muestra su propia página: «Volver a iniciar sesión» cierra la sesión y abre el login con la vuelta a la autorización. Sin sesión, cualquier plugin de login muestra el formulario.
+
+**Criterios de aceptación**:
+
+- [x] 386 pruebas unitarias (la vuelta pasa por cerrar sesión, sin `reauth`, y termina en `/authorize` con los mismos parámetros), PHPStan nivel 8 y PHPCS.
+- [ ] En latienditadelamor.com.co, con la sesión de WordPress abierta hace más de 2 horas: conectar desde Claude muestra «Vuelve a iniciar sesión»; tras entrar, la pantalla de acceso y la conexión.

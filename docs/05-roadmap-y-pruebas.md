@@ -803,3 +803,17 @@ Dos alertas falsas en sitios sanos (vistas en OpenLiteSpeed + WooCommerce + Lite
 - [x] 376 pruebas unitarias (OPcache: reinicio reciente con aciertos bajos sin alerta, PHP recién arrancado, aciertos bajos pasadas 6 h, memoria llena, cadenas al 99 %, valores ya recomendados, vaciados por falta de memoria y tabla de archivos llena), PHPStan nivel 8 y PHPCS.
 - [x] Interfaz con la REST simulada: 6 comprobaciones nuevas de la tarjeta de Cloudflare del Panel y las 45 anteriores sin cambios.
 - [ ] En latienditadelamor.com.co: tras «Purgar todo» de LiteSpeed Cache, sin alerta de OPcache; el Panel muestra Cloudflare «Conectado» con la zona.
+
+## Versión 0.25.3 (permisos de edición del token de Cloudflare)
+
+Al aplicar una regla del firewall Cloudflare respondía «0: request is not authorized» aunque la pantalla mostraba el permiso del firewall: solo se comprobaba la lectura.
+
+- Los permisos de edición de reglas (caché, transform, WAF, rate limiting) se comprueban con una regla inerte y `?dry_run=true`, que no guarda nada. Al conectar y con «Comprobar permisos», sin volver a pegar el token.
+- Aviso antes de aplicar, en Cloudflare → Conexión y en Firewall, con el permiso exacto: «El token no tiene «Zone → Zone WAF → Edit». Edítalo en Cloudflare → Mi perfil → API Tokens y agrega el permiso; el token no cambia.» El mismo texto si Cloudflare rechaza por permiso al aplicar.
+- El enlace de creación del token sigue rellenando solo lo que Cloudflare permite (claves cortas documentadas); WAF, Cache Rules y Transform Rules se listan para agregarlos a mano.
+
+**Criterios de aceptación**:
+
+- [x] 379 pruebas unitarias (enlace solo con claves documentadas y lista de permisos a mano; errores de autorización frente a cupos y otros; mensaje accionable; sondeo que solo escribe con `dry_run=true`, con regla desactivada sobre un host `.invalid`, y que no decide ante errores ajenos al permiso), PHPStan nivel 8 y PHPCS.
+- [x] Interfaz con la REST simulada: 6 comprobaciones nuevas (aviso, fila «Firewall: editar», «Comprobar permisos», permisos a mano sin conectar) y las 51 anteriores.
+- [ ] En latienditadelamor.com.co: con el token sin *Zone WAF → Edit*, la pantalla avisa; tras agregarlo en Cloudflare y pulsar «Comprobar permisos», el aviso desaparece y la regla del firewall se aplica.

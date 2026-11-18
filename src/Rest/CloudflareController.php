@@ -30,6 +30,7 @@ final class CloudflareController extends Controller {
 
 	public function registerRoutes(): void {
 		$this->route( '/cloudflare/status', \WP_REST_Server::READABLE, fn(): \WP_REST_Response => $this->ok( $this->service()->status() ) );
+		$this->route( '/cloudflare/permissions', \WP_REST_Server::CREATABLE, [ $this, 'permissions' ] );
 		$this->route(
 			'/cloudflare/connect',
 			\WP_REST_Server::CREATABLE,
@@ -250,6 +251,21 @@ final class CloudflareController extends Controller {
 		$result = $this->service()->connect( (string) $request->get_param( 'token' ) );
 		if ( ! $result['ok'] ) {
 			return $this->error( 'itb_cf_connect', $result['error'], 400 );
+		}
+		return $this->ok( $this->service()->status() );
+	}
+
+	/**
+	 * Vuelve a comprobar los permisos del token guardado (una vez por minuto como mucho).
+	 */
+	public function permissions(): \WP_REST_Response|\WP_Error {
+		if ( false !== get_transient( 'itb_cf_permissions_lock' ) ) {
+			return $this->error( 'itb_cf_busy', __( 'Espera un minuto antes de volver a comprobar.', 'imagina-turbo' ), 429 );
+		}
+		set_transient( 'itb_cf_permissions_lock', 1, MINUTE_IN_SECONDS );
+		$result = $this->service()->recheckPermissions();
+		if ( ! $result['ok'] ) {
+			return $this->error( 'itb_cf_permissions', $result['error'], 400 );
 		}
 		return $this->ok( $this->service()->status() );
 	}

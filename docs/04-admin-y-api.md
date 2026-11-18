@@ -63,7 +63,8 @@ Namespace `imagina-turbo/v1`. Todos requieren `manage_options` (o la capacidad p
 | POST | `/cache/purge` | Purga manual (`url` / `tag` / `all`; `all` exige `confirm: true`) |
 | POST | `/cache/warm` | `seed` (recalentar el sitemap) / `stop` (vaciar la cola de recalentado) |
 | POST | `/cache/inspect` | Pide una URL del sitio como anónimo y devuelve sus cabeceras de caché |
-| GET | `/cloudflare/status` | Token (estado y últimos 4 caracteres), zona, plan, permisos de lectura detectados, bloqueo por staging o zona ajena, enlace de creación del token |
+| GET | `/cloudflare/status` | Token (estado y últimos 4 caracteres), zona, plan, permisos detectados (lectura y, desde 0.25.3, edición de reglas con `dry_run`), `missing` (qué permiso falta y dónde agregarlo), bloqueo por staging o zona ajena, enlace de creación del token y `token_manual` (permisos que el enlace no puede rellenar) |
+| POST | `/cloudflare/permissions` | (0.25.3) Vuelve a comprobar los permisos del token guardado sin cambiar nada en la zona; una vez por minuto (429). Devuelve el estado |
 | POST / DELETE | `/cloudflare/connect` | Verificar y guardar el token (busca la zona del host) · desconectar (borra token, estado y analíticas; las reglas aplicadas se quedan) |
 | GET | `/cloudflare/zone` | Ajustes actuales vs. lo que se aplicará (con su valor recomendado, opciones y si se gestiona), alertas (SSL Flexible, TTL mínimo del plan), reglas propias y del cliente por fase con el máximo del plan; desde 0.21.0 también Smart Shield (solo lectura) y los enlaces al panel (Crawler Hints, AI Crawl Control) |
 | PUT | `/cloudflare/zone-prefs` | `{prefs: {ajuste: valor \| "keep"}}` (0.21.0): valor elegido para cada ajuste de la zona; solo se guarda lo que difiere de lo recomendado. 400 con un ajuste de solo lectura o un valor que no es una opción. No toca Cloudflare: el cambio aparece en el plan |

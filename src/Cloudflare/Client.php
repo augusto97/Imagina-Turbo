@@ -59,6 +59,13 @@ final class Client {
 		return new self( static fn(): string => $token, $this->events, $this->sleep );
 	}
 
+	/**
+	 * El mismo cliente sin registrar errores: para sondeos donde un rechazo es la respuesta esperada.
+	 */
+	public function quiet(): self {
+		return new self( $this->token, null, $this->sleep );
+	}
+
 	public static function base(): string {
 		if ( defined( 'ITB_CF_API_BASE' ) && is_string( ITB_CF_API_BASE ) && 1 === preg_match( '#^https?://[^\s/]+(/[^\s]*)?$#', ITB_CF_API_BASE ) ) {
 			return rtrim( ITB_CF_API_BASE, '/' );

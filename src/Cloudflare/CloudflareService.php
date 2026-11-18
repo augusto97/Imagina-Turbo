@@ -36,6 +36,17 @@ final class CloudflareService {
 	];
 
 	/**
+	 * Permisos que el enlace de creación no puede rellenar: para tokens de usuario solo admite las claves
+	 * cortas documentadas y descarta en silencio el resto (verificado en la documentación de Cloudflare,
+	 * «Create tokens via API token templates», 2026-11). Hay que agregarlos a mano en el formulario.
+	 */
+	public const TOKEN_MANUAL = [
+		'Zone → Cache Rules → Edit',
+		'Zone → Transform Rules → Edit',
+		'Zone → Zone WAF → Edit',
+	];
+
+	/**
 	 * @param array{enabled?: bool, rules?: array<string, bool>, ratelimit?: bool, views?: bool, all?: bool, custom?: array<mixed>} $firewall Ajustes del firewall.
 	 */
 	public function __construct(
@@ -99,6 +110,9 @@ final class CloudflareService {
 			'error'             => $s['error'],
 			'token_url'         => self::tokenUrl(),
 			'token_permissions' => self::TOKEN_PERMISSIONS,
+			'token_manual'      => self::TOKEN_MANUAL,
+			// Permisos de edición que faltan, con qué hacer (sondeo con dry_run al conectar o al comprobar).
+			'missing'           => array_map( [ Connector::class, 'missingPermission' ], Connector::missingEdit( $s['permissions'] ) ),
 			'footprint'         => $this->state->footprint(),
 		];
 	}
@@ -149,7 +163,7 @@ final class CloudflareService {
 				'status'       => $zone['status'],
 				'connected_at' => time(),
 				'checked_at'   => time(),
-				'permissions'  => ( new Connector( $this->client ) )->probe( $zone['id'] ),
+				'permissions'  => $this->probePermissions( $zone['id'] ),
 				// Otra zona: los hashes de lo aplicado no valen.
 				'applied'      => $previous['zone_id'] === $zone['id'] ? $previous['applied'] : [],
 				'error'        => '',
@@ -163,6 +177,54 @@ final class CloudflareService {
 				'user' => get_current_user_id(),
 				'zone' => $zone['name'],
 				'plan' => $zone['plan'],
+			]
+		);
+		return [
+			'ok'    => true,
+			'error' => '',
+		];
+	}
+
+	/**
+	 * Lectura y edición. La edición se prueba con dry_run: no cambia nada en la zona.
+	 *
+	 * @return array<string, bool>
+	 */
+	private function probePermissions( string $zoneId ): array {
+		$connector = new Connector( $this->client );
+		return $connector->probe( $zoneId ) + $connector->probeEdit( $zoneId );
+	}
+
+	/**
+	 * Vuelve a comprobar los permisos del token guardado: al editar el token en Cloudflare, el token
+	 * no cambia y no hace falta volver a pegarlo.
+	 *
+	 * @return array{ok: bool, error: string}
+	 */
+	public function recheckPermissions(): array {
+		$zoneId = $this->state->zoneId();
+		if ( '' === $zoneId || 'ok' !== $this->vault->status()['state'] ) {
+			return [
+				'ok'    => false,
+				'error' => __( 'Cloudflare no está conectado.', 'imagina-turbo' ),
+			];
+		}
+		$permissions = $this->probePermissions( $zoneId );
+		$this->state->update(
+			[
+				'permissions' => $permissions,
+				'checked_at'  => time(),
+			]
+		);
+		$missing = Connector::missingEdit( $permissions );
+		$this->events->log(
+			'cloudflare',
+			'permissions',
+			[] === $missing ? EventLog::INFO : EventLog::WARNING,
+			[] === $missing ? __( 'El token tiene los permisos de edición.', 'imagina-turbo' ) : __( 'Al token le faltan permisos de edición.', 'imagina-turbo' ),
+			[
+				'user'    => get_current_user_id(),
+				'missing' => $missing,
 			]
 		);
 		return [

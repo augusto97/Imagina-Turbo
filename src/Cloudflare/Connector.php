@@ -6,7 +6,11 @@
  *   2026): GET /accounts/{account_id}/tokens/verify, con la cuenta que trae la zona.
  * - Zona: GET /zones?name=… probando el host y sus dominios padre (www.tienda.com → tienda.com).
  * - Plan: plan.legacy_id (obsoleto en la API; desconocido = Free). Lo definitivo lo dice dry_run.
- * - Permisos de escritura no se pueden sondear sin escribir: los valida dry_run al aplicar.
+ * - Permisos de edición de reglas: una regla inerte validada con ?dry_run=true (Cloudflare la valida y
+ *   no la guarda, igual que antes de aplicar). Solo un rechazo de autorización cuenta como «falta».
+ * - El enlace para crear el token solo puede rellenar las claves cortas documentadas para tokens de
+ *   usuario (zone, zone_settings, analytics, cache…); las de WAF, Cache Rules y Transform Rules no
+ *   existen ahí y Cloudflare descarta en silencio las que no conoce: se agregan a mano.
  *
  * @package ImaginaTurbo
  */
@@ -19,6 +23,26 @@ namespace ImaginaTurbo\Cloudflare;
  * Verificación y descubrimiento.
  */
 final class Connector {
+
+	/** Permiso de edición que necesita cada fase de reglas (nombres del panel de Cloudflare). */
+	public const PHASE_PERMISSIONS = [
+		Phases::CACHE     => 'Zone → Cache Rules → Edit',
+		Phases::TRANSFORM => 'Zone → Transform Rules → Edit',
+		Phases::HEADERS   => 'Zone → Transform Rules → Edit',
+		Phases::WAF       => 'Zone → Zone WAF → Edit',
+		Phases::RATELIMIT => 'Zone → Zone WAF → Edit',
+	];
+
+	/** Clave del estado de cada permiso de edición sondeado y la fase con la que se prueba. */
+	public const EDIT_PROBES = [
+		'cache_rules_edit' => Phases::CACHE,
+		'transform_edit'   => Phases::TRANSFORM,
+		'waf_edit'         => Phases::WAF,
+		'ratelimit_edit'   => Phases::RATELIMIT,
+	];
+
+	/** Expresión que nunca coincide (dominio .invalid): la regla de prueba sería inerte aunque se guardara. */
+	private const PROBE_EXPRESSION = '(http.host eq "itb-permission-check.invalid")';
 
 	public function __construct( private readonly Client $client ) {
 	}
@@ -113,6 +137,107 @@ final class Connector {
 			'waf_read'       => $waf->ok() || 404 === $waf->status,
 			'analytics_read' => $graphql->ok(),
 		];
+	}
+
+	/**
+	 * Permisos de edición de reglas, sin cambiar nada: por cada fase, una regla inerte (desactivada y con
+	 * una expresión que no coincide) validada con ?dry_run=true sobre el ruleset de entrada, o creando
+	 * ese ruleset si todavía no existe. Un rechazo de autorización es «falta»; cualquier otro resultado
+	 * (válida, cupo lleno, plan) quiere decir que el permiso existe. Un error de red no decide nada.
+	 *
+	 * @return array<string, bool> Solo lo que se pudo determinar.
+	 */
+	public function probeEdit( string $zoneId ): array {
+		$api = $this->client->quiet();
+		$out = [];
+		foreach ( self::EDIT_PROBES as $key => $phase ) {
+			$entry = $api->get( Phases::entrypoint( $zoneId, $phase ) );
+			$rule  = self::probeRule( $phase );
+			$id    = is_string( $entry->resultArray()['id'] ?? null ) ? $entry->resultArray()['id'] : '';
+			if ( $entry->unauthorized() ) {
+				$out[ $key ] = false;
+				continue;
+			}
+			if ( $entry->ok() && '' !== $id ) {
+				$check = $api->request( 'POST', '/zones/' . rawurlencode( $zoneId ) . '/rulesets/' . rawurlencode( $id ) . '/rules', $rule, [ 'dry_run' => 'true' ] );
+			} elseif ( 404 === $entry->status ) {
+				$check = $api->request( 'PUT', Phases::entrypoint( $zoneId, $phase ), [ 'rules' => [ $rule ] ], [ 'dry_run' => 'true' ] );
+			} else {
+				continue;
+			}
+			if ( $check->unauthorized() ) {
+				$out[ $key ] = false;
+			} elseif ( 0 !== $check->status && $check->status < 500 ) {
+				$out[ $key ] = true;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Regla de prueba para cada fase: desactivada y con una expresión que nunca coincide.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public static function probeRule( string $phase ): array {
+		$rule = [
+			'description' => 'Imagina Turbo: prueba de permisos (dry_run, no se guarda)',
+			'expression'  => self::PROBE_EXPRESSION,
+			'enabled'     => false,
+		];
+		return $rule + match ( $phase ) {
+			Phases::CACHE     => [
+				'action'            => 'set_cache_settings',
+				'action_parameters' => [ 'cache' => false ],
+			],
+			Phases::TRANSFORM => [
+				'action'            => 'rewrite',
+				'action_parameters' => [ 'uri' => [ 'path' => [ 'value' => '/' ] ] ],
+			],
+			Phases::RATELIMIT => [
+				'action'    => 'block',
+				'ratelimit' => [
+					'characteristics'     => [ 'cf.colo.id', 'ip.src' ],
+					'period'              => 10,
+					'requests_per_period' => 50,
+					'mitigation_timeout'  => 10,
+				],
+			],
+			default           => [ 'action' => 'block' ],
+		};
+	}
+
+	/**
+	 * Mensaje para cuando falta un permiso: cuál y dónde agregarlo.
+	 */
+	public static function missingPermission( string $permission ): string {
+		/* translators: %s: permiso de Cloudflare (por ejemplo «Zone → Zone WAF → Edit»). */
+		return sprintf( __( 'El token no tiene «%s». Edítalo en Cloudflare → Mi perfil → API Tokens y agrega el permiso; el token no cambia.', 'imagina-turbo' ), $permission );
+	}
+
+	/**
+	 * Error de una escritura: si fue por permiso, el mensaje accionable; si no, el de Cloudflare.
+	 *
+	 * @param string $permission Permiso que necesitaba la operación.
+	 */
+	public static function writeError( Response $response, string $permission ): string {
+		return $response->unauthorized() ? self::missingPermission( $permission ) : $response->message();
+	}
+
+	/**
+	 * Permisos de edición que el último sondeo encontró ausentes, sin repetir.
+	 *
+	 * @param array<string, bool> $permissions Estado guardado.
+	 * @return list<string>
+	 */
+	public static function missingEdit( array $permissions ): array {
+		$missing = [];
+		foreach ( self::EDIT_PROBES as $key => $phase ) {
+			if ( false === ( $permissions[ $key ] ?? null ) ) {
+				$missing[] = self::PHASE_PERMISSIONS[ $phase ];
+			}
+		}
+		return array_values( array_unique( $missing ) );
 	}
 
 	/**

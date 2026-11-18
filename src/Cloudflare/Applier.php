@@ -72,7 +72,8 @@ final class Applier {
 			if ( ! $check->ok() ) {
 				$result['failed'][] = [
 					'id'    => $change['id'],
-					'error' => $check->message(),
+					// Sin permiso, Cloudflare solo dice «request is not authorized»: se nombra el permiso.
+					'error' => Connector::writeError( $check, Connector::PHASE_PERMISSIONS[ $change['phase'] ] ?? 'Zone → Zone Settings → Edit' ),
 				];
 			}
 		}
@@ -451,7 +452,7 @@ final class Applier {
 		];
 		$response = $this->ruleOperation( $change, $zone, false );
 		if ( ! $response->ok() ) {
-			return $response->message();
+			return Connector::writeError( $response, Connector::PHASE_PERMISSIONS[ $change['phase'] ] ?? 'Zone → Zone Settings → Edit' );
 		}
 		$rules = Inspector::ruleset( $response->resultArray() )['rules'];
 		if ( 'delete' === $change['action'] ) {
@@ -470,7 +471,7 @@ final class Applier {
 		$response = in_array( $id, Templates::BOT_FIELDS, true )
 			? $this->client->put( Inspector::settingPath( $this->zoneId, $id ), [ $id => $value ] )
 			: $this->client->patch( Inspector::settingPath( $this->zoneId, $id ), [ 'value' => $value ] );
-		return $response->ok() ? true : $response->message();
+		return $response->ok() ? true : Connector::writeError( $response, in_array( $id, Templates::BOT_FIELDS, true ) ? 'Zone → Bot Management → Edit' : 'Zone → Zone Settings → Edit' );
 	}
 
 	/**

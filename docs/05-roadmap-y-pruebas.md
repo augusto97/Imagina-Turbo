@@ -843,3 +843,13 @@ Al reconectar Claude en un sitio, la autorización terminaba en el wp-admin sin 
 
 - [x] 386 pruebas unitarias (la vuelta pasa por cerrar sesión, sin `reauth`, y termina en `/authorize` con los mismos parámetros), PHPStan nivel 8 y PHPCS.
 - [ ] En latienditadelamor.com.co, con la sesión de WordPress abierta hace más de 2 horas: conectar desde Claude muestra «Vuelve a iniciar sesión»; tras entrar, la pantalla de acceso y la conexión.
+
+## Versión 0.25.6 (aviso de «Purgar toda la caché» en la barra)
+
+El aviso del navegador al pulsar «Purgar toda la caché» en la barra de WordPress se veía como «u00bfPurgar toda la cachu00e9?». `WP_Admin_Bar` imprime el `onclick` de cada nodo con `esc_js()` (verificado en `class-wp-admin-bar.php` y `formatting.php`), que quita las barras invertidas, y `wp_json_encode()` escribía los acentos como `\u00bf`.
+
+- El texto se codifica sin escapes de Unicode ni de barras (`JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES`), y una comilla de una traducción se cambia por la tipográfica (el atributo va entre comillas simples y `esc_js()` también rompería `\"`).
+
+**Criterios de aceptación**:
+
+- [x] 387 pruebas unitarias (reproduce el aviso roto con el mismo algoritmo de `esc_js()` y comprueba el texto bien, también con comillas y barras en una traducción) y en Chromium con el marcado de la barra: antes «u00bfPurgar…», ahora «¿Purgar toda la caché?…». PHPStan nivel 8 y PHPCS.

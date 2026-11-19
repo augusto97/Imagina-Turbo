@@ -74,7 +74,7 @@ final class AdminBarPurge {
 				'title'  => esc_html__( 'Purgar toda la caché', 'imagina-turbo' ),
 				'href'   => self::link( 'all', $back ),
 				'meta'   => [
-					'onclick' => 'return confirm(' . wp_json_encode( __( '¿Purgar toda la caché? Las páginas se vuelven a generar hasta que el recalentado las llene de nuevo.', 'imagina-turbo' ) ) . ');',
+					'onclick' => self::confirmScript( __( '¿Purgar toda la caché? Las páginas se vuelven a generar hasta que el recalentado las llene de nuevo.', 'imagina-turbo' ) ),
 				],
 			]
 		);
@@ -171,5 +171,15 @@ final class AdminBarPurge {
 		$home = home_url();
 		return strtolower( (string) wp_parse_url( $url, PHP_URL_HOST ) ) === strtolower( (string) wp_parse_url( $home, PHP_URL_HOST ) )
 			&& wp_parse_url( $url, PHP_URL_PORT ) === wp_parse_url( $home, PHP_URL_PORT );
+	}
+
+	/**
+	 * JavaScript para el onclick de un nodo de la barra. WP_Admin_Bar lo imprime con esc_js(), que quita
+	 * las barras invertidas: un \u00bf de wp_json_encode() se veía como «u00bf». Sin escapes de
+	 * Unicode ni de barras, y sin comillas rectas (el atributo va entre comillas simples y esc_js()
+	 * también rompería un \\" escapado).
+	 */
+	public static function confirmScript( string $message ): string {
+		return 'return confirm(' . wp_json_encode( str_replace( [ "'", '"', '\\' ], [ '’', '”', '' ], $message ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES ) . ');';
 	}
 }
